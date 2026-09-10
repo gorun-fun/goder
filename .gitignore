@@ -1,0 +1,14 @@
+node_modules/
+frontend/dist/
+frontend/dist-embed/
+dist/
+build/bin/
+*.app
+*.dmg
+.DS_Store
+/grf-harness-ui
+/package-lock.json
+.gui-test-screenshots.tmp/
+.run/
+.playwright-cli/
+.zcode/

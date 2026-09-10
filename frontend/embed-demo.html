@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>grf-harness-ui 嵌入演示</title>
+    <style>
+      /* 模拟三方宿主页面:自己的导航与品牌,仅嵌入 grf 的部分面板 */
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+        background: #0f1014;
+        color: #d7dae0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .host-nav {
+        height: 46px;
+        background: #1b1c22;
+        border-bottom: 1px solid #2a2d36;
+        display: flex;
+        align-items: center;
+        padding: 0 18px;
+        gap: 14px;
+        font-size: 14px;
+      }
+      .host-nav .brand {
+        font-weight: 700;
+      }
+      .host-nav .brand em {
+        color: #4c8dff;
+        font-style: normal;
+      }
+      .host-nav .note {
+        color: #6b7080;
+        font-size: 12px;
+      }
+      .embed-row {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+      /* 只嵌入会话列表 + 聊天:像"裸 grf-harness 配置开启部分 UI" */
+      grf-session-list {
+        width: 250px;
+        flex: none;
+      }
+      grf-chat {
+        flex: 1;
+        min-width: 0;
+      }
+      grf-console {
+        height: 170px;
+        flex: none;
+      }
+      .with-console {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="host-nav">
+      <span class="brand">三方应用 <em>Console</em></span>
+      <span class="note">本页演示:宿主自己的顶栏 + 嵌入 grf 的会话列表/聊天/事件台(scope=demo)</span>
+    </div>
+    <div class="embed-row">
+      <grf-session-list scope="demo" no-connection></grf-session-list>
+      <div class="with-console">
+        <grf-chat scope="demo"></grf-chat>
+        <grf-console scope="demo"></grf-console>
+      </div>
+    </div>
+    <script type="module">
+      // JS 方式配置连接(优先于属性)
+      import { configure } from '/src/embed/index.ts';
+      const qs = new URLSearchParams(location.search);
+      configure('demo', {
+        baseUrl: qs.get('server') ?? 'http://127.0.0.1:7400',
+        token: qs.get('token') ?? '',
+      });
+    </script>
+  </body>
+</html>
