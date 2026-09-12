@@ -13,7 +13,7 @@ import { renderMarkdown } from '../../util/markdown';
 import { truncate, fmtTokens } from '../../util/fmt';
 import { icon } from '../../util/icons';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
-import { inWails } from '../../host/bridge';
+import { inWails, gitStatus, type GitStatusDTO } from '../../host/bridge';
 import type { AskItem, ChatItem } from '../../state/chat-model';
 import './tool-card';
 import './ask-form';
@@ -22,17 +22,30 @@ import './composer';
 import '../sidebar';
 import '../review';
 import '../browser';
+import '../file-view';
 
-/** 右栏 tab 类型 */
-export type SidePanelTab = 'detail' | 'review' | 'terminal' | 'browser';
+/** 右栏 tab 类型:面板类型 tab + 逐文件 tab(file:<绝对路径>) */
+export type SidePanelTab = 'detail' | 'review' | 'terminal' | 'browser' | `file:${string}`;
+
+/** 面板类型 tab(文件 tab 之外的固定类型) */
+export type SidePanelKind = 'detail' | 'review' | 'terminal' | 'browser' | 'file';
 
 /** 右栏 tab 元数据:展示名/图标/默认宽度(用户拖拽后覆盖) */
-const SIDE_TAB_META: Record<SidePanelTab, { label: string; icon: string; width: number }> = {
+const SIDE_TAB_META: Record<SidePanelKind, { label: string; icon: string; width: number }> = {
   detail: { label: '详情', icon: icon.info, width: 300 },
   review: { label: '审查', icon: icon.gitBranch, width: 380 },
   terminal: { label: '终端', icon: icon.terminal, width: 460 },
   browser: { label: '浏览器', icon: icon.globe, width: 560 },
+  file: { label: '文件', icon: icon.file, width: 520 },
 };
+
+/** 右栏文件 tab 对应的已打开文件(app-shell 受控下发) */
+export interface FileTab {
+  path: string;
+  name: string;
+  /** 项目内相对路径(tab/标题展示) */
+  rel: string;
+}
 
 @customElement('grf-chat')
 export class GrfChat extends GrfPanel {
@@ -57,9 +70,17 @@ export class GrfChat extends GrfPanel {
   /** 左栏当前展开态 */
   @property({ type: Boolean }) leftOn = true;
   /** macOS 桌面态:左栏收起时头部为红绿灯保留悬浮位 */
-  @property({ type: Boolean }) leftLights = false;
+  @property({ type: Boolean, attribute: 'left-lights' }) leftLights = false;
+  /** 右栏已打开的文件(每个文件一个 tab;app-shell 受控下发) */
+  @property({ type: Array }) fileTabs: FileTab[] = [];
 
   @state() private stickBottom = true;
+  /** 状态浮窗收缩态(单行只显示 git 行级变更);浮窗本身自动显示:
+   * 有 git/todo 内容才渲染,无内容不出现(无手动开关) */
+  @state() private statusCollapsed = false;
+  /** 当前项目 git 状态(状态浮窗用;null = 未取到/不适用) */
+  @state() private git: GitStatusDTO | null = null;
+  @state() private gitErr = '';
   /** 内嵌底栏终端高度(可拖) */
   @state() private bottomHeight = 220;
   /** 右栏宽度(用户拖拽后固定;null = 按 tab 默认宽) */
@@ -83,6 +104,10 @@ export class GrfChat extends GrfPanel {
   /** 右栏内嵌终端元素缓存(跨渲染复用,保持 PTY 会话存活) */
   private sideTermEl: HTMLElement | null = null;
   private bottomSeq = 0;
+  /** git 状态轮询计时器;仅浮窗展开时真正请求 */
+  private gitTimer?: number;
+  /** 上次取 git 状态的项目目录(cwd 变化即重取) */
+  private gitCwd = '';
 
   static styles = [
     theme,
@@ -93,9 +118,12 @@ export class GrfChat extends GrfPanel {
         flex-direction: column;
         min-height: 0;
         min-width: 0;
-        /* 黑色圆角主面板(浅色主题经 --grf-card 覆写) */
+        /* 状态浮窗(position:absolute)的定位基准 */
+        position: relative;
+        /* 黑色圆角主面板(浅色主题经 --grf-card 覆写);底部拉通到窗口
+         * 底,只保留上侧圆角 */
         background: var(--grf-card);
-        border-radius: 12px;
+        border-radius: 12px 12px 0 0;
         overflow: hidden;
         font-family: var(--grf-font);
         font-size: var(--grf-font-size);
@@ -134,7 +162,8 @@ export class GrfChat extends GrfPanel {
         display: flex;
         flex-direction: column;
       }
-      /* 右栏:tab 系统(宽度由 inline style 控制,可拖) */
+      /* 右栏拖拽条:默认隐形,悬停亮出强调色;分界线由相邻元素承担,
+       * 避免双线 */
       .gutter-side {
         flex: none;
         width: 4px;
@@ -145,7 +174,7 @@ export class GrfChat extends GrfPanel {
         content: '';
         position: absolute;
         inset: 0 1.5px;
-        background: var(--grf-border-soft);
+        background: transparent;
       }
       .gutter-side:hover::after {
         background: var(--grf-accent);
@@ -160,7 +189,6 @@ export class GrfChat extends GrfPanel {
         min-height: 0;
         display: flex;
         flex-direction: column;
-        border-left: 1px solid var(--grf-border);
       }
       .side.off {
         display: none;
@@ -175,6 +203,15 @@ export class GrfChat extends GrfPanel {
         position: relative;
         user-select: none;
         min-height: 32px;
+        /* 文件 tab(相对路径标题)可能很多/很长:tab 行横向滚动 */
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .stab .stab-t {
+        max-width: 170px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .stab {
         display: inline-flex;
@@ -326,13 +363,14 @@ export class GrfChat extends GrfPanel {
         min-height: 0;
         min-width: 0;
       }
-      /* 内嵌面板融入黑底,分隔线由 .side 提供 */
+      /* 内嵌面板融入黑底 */
       .side grf-sidebar,
       .side grf-review,
       .side grf-browser {
         background: transparent;
         border-left: none;
       }
+      /* 底栏拖拽条:常显一条横线作为与聊天区的分界,悬停亮出强调色 */
       .gutter-h {
         flex: none;
         height: 4px;
@@ -360,15 +398,14 @@ export class GrfChat extends GrfPanel {
       .bottom.off {
         display: none;
       }
-      /* 底栏标题行:终端 tab 居左,添加/关闭操作居右 */
+      /* 底栏标题行:终端 tab 居左,添加/关闭操作居右;与内容的分隔线
+       * 不画(tab 行与终端输出直接衔接,分界由上方拖拽条横线承担) */
       .bt-bar {
         flex: none;
         display: flex;
         align-items: center;
         gap: 2px;
         padding: 3px 6px 0;
-        border-top: 1px solid var(--grf-border);
-        border-bottom: 1px solid var(--grf-border-soft);
         user-select: none;
         min-height: 30px;
         overflow-x: auto;
@@ -882,7 +919,8 @@ export class GrfChat extends GrfPanel {
         max-height: 60%;
         overflow-y: auto;
         padding: 10px 18px 14px;
-        background: linear-gradient(to top, var(--grf-bg) 65%, transparent);
+        /* 底部渐隐遮罩与卡片同黑,保证输入区背景整块拉通 */
+        background: linear-gradient(to top, var(--grf-card) 65%, transparent);
       }
       .composer-area .inner {
         max-width: 860px;
@@ -898,6 +936,152 @@ export class GrfChat extends GrfPanel {
         font-size: var(--grf-font-size-xs);
         padding: 3px 2px 0;
       }
+
+      /* ---------- 右上角状态浮窗 ---------- */
+      .status-pop {
+        position: absolute;
+        top: 46px;
+        right: 10px;
+        z-index: 60;
+        width: 320px;
+        max-width: calc(100% - 20px);
+        max-height: min(440px, 72%);
+        overflow-y: auto;
+        background: var(--grf-bg-raise);
+        border: 1px solid var(--grf-border);
+        border-radius: var(--grf-radius);
+        box-shadow: var(--grf-shadow);
+        display: flex;
+        flex-direction: column;
+      }
+      /* 收缩态:单行,宽度自适应内容 */
+      .status-pop.collapsed {
+        width: auto;
+      }
+      .sp-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 6px 5px 12px;
+        font-size: var(--grf-font-size-sm);
+        color: var(--grf-text-dim);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      /* 收缩/展开按钮:展开态位于首个区块标题行右侧,收缩态随单行排布 */
+      .status-pop .sp-fold {
+        padding: 3px 6px;
+        border: none;
+        background: transparent;
+        color: var(--grf-text-dim);
+        cursor: pointer;
+        border-radius: 5px;
+        display: inline-flex;
+      }
+      .status-pop .sp-fold:hover {
+        color: var(--grf-text);
+        background: var(--grf-bg-hover);
+      }
+      .status-pop .sp-fold svg {
+        width: 13px;
+        height: 13px;
+      }
+      /* 收起箭头朝上,展开(收缩态里)箭头朝下 */
+      .status-pop:not(.collapsed) .sp-fold svg {
+        transform: rotate(-90deg);
+      }
+      .status-pop.collapsed .sp-fold svg {
+        transform: rotate(90deg);
+      }
+      .sp-diff {
+        font-variant-numeric: tabular-nums;
+      }
+      .sp-diff .add {
+        color: var(--grf-success);
+      }
+      .sp-diff .del {
+        color: var(--grf-error);
+      }
+      .sp-sec {
+        flex: none;
+        padding: 9px 12px 7px;
+      }
+      .sp-sec + .sp-sec {
+        border-top: 1px solid var(--grf-border-soft);
+      }
+      .sp-sec h4 {
+        margin: 0 0 6px;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+        font-weight: 650;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .sp-sec h4 svg {
+        width: 12px;
+        height: 12px;
+        flex: none;
+      }
+      .sp-sec .sp-cnt {
+        color: var(--grf-text-dim);
+        font-variant-numeric: tabular-nums;
+      }
+      /* 缩放按钮顶到区块标题行最右 */
+      .sp-sec h4 .sp-fold {
+        margin-left: auto;
+      }
+      .sp-kv {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 3px 12px;
+        font-size: var(--grf-font-size-sm);
+      }
+      .sp-kv .k {
+        color: var(--grf-text-faint);
+        white-space: nowrap;
+      }
+      .sp-kv .v {
+        color: var(--grf-text);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+      /* todo 行:圆点着色区分状态(completed=绿 / in_progress=蓝 / 其余空心) */
+      .sp-todo {
+        display: flex;
+        gap: 7px;
+        align-items: baseline;
+        padding: 2px 0;
+        font-size: var(--grf-font-size-sm);
+        color: var(--grf-text-dim);
+      }
+      .sp-todo .sp-dot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        margin-top: 4px;
+        border-radius: 50%;
+        border: 1.5px solid var(--grf-text-faint);
+        box-sizing: border-box;
+      }
+      .sp-todo.completed .sp-dot {
+        background: var(--grf-success);
+        border-color: var(--grf-success);
+      }
+      .sp-todo.completed .tx {
+        color: var(--grf-text-faint);
+        text-decoration: line-through;
+      }
+      .sp-todo.in_progress .sp-dot {
+        background: var(--grf-accent);
+        border-color: var(--grf-accent);
+      }
+      .sp-todo.in_progress .tx {
+        color: var(--grf-text);
+      }
     `,
   ];
 
@@ -911,6 +1095,7 @@ export class GrfChat extends GrfPanel {
     window.addEventListener('pointermove', this.onResizeDrag);
     window.addEventListener('pointerup', this.stopResizeDrag);
     window.addEventListener('pointerdown', this.onWinPointerDown);
+    this.gitTimer = window.setInterval(() => void this.pollGit(), 8000);
   }
 
   disconnectedCallback(): void {
@@ -919,6 +1104,8 @@ export class GrfChat extends GrfPanel {
     window.removeEventListener('pointermove', this.onResizeDrag);
     window.removeEventListener('pointerup', this.stopResizeDrag);
     window.removeEventListener('pointerdown', this.onWinPointerDown);
+    if (this.gitTimer) window.clearInterval(this.gitTimer);
+    this.gitTimer = undefined;
     this.bottomTerms = [];
     this.bottomActiveId = '';
     this.sideTermEl = null;
@@ -948,6 +1135,25 @@ export class GrfChat extends GrfPanel {
     if (menu && !path.includes(menu) && add && !path.includes(add)) this.sideMenuOpen = false;
   };
 
+  // pollGit 状态浮窗的 git 区块:桌面态轮询当前项目仓库状态(浮窗自动
+  // 显示,不依赖任何开关;无项目目录时清空)。
+  private async pollGit(): Promise<void> {
+    if (!inWails()) return;
+    const cwd = this.store?.activeProjectPath();
+    if (!cwd) {
+      this.git = null;
+      this.gitErr = '';
+      return;
+    }
+    try {
+      this.git = await gitStatus(cwd);
+      this.gitErr = '';
+    } catch (e) {
+      this.git = null;
+      this.gitErr = (e as Error)?.message ?? String(e);
+    }
+  }
+
   protected updated(props: Map<string, unknown>): void {
     // 底栏展开且没有任何终端 tab:自动开一个
     if (props.has('bottomOn') && this.bottomOn && this.bottomTerms.length === 0) {
@@ -958,6 +1164,11 @@ export class GrfChat extends GrfPanel {
     const cwd = this.store?.activeProjectPath() ?? '';
     for (const t of this.bottomTerms) (t.el as unknown as { cwd: string }).cwd = cwd;
     if (this.sideTermEl) (this.sideTermEl as unknown as { cwd: string }).cwd = cwd;
+    // 状态浮窗:项目目录就绪/切换即取 git 状态(浮窗自动显示)
+    if (cwd && cwd !== this.gitCwd) {
+      this.gitCwd = cwd;
+      void this.pollGit();
+    }
     this.maybeScroll();
   }
 
@@ -1001,7 +1212,7 @@ export class GrfChat extends GrfPanel {
                 ? html`<span class="chip running"><span class="dot"></span>运行中</span>`
                 : waiting
                   ? html`<span class="chip waiting"><span class="dot"></span>等待输入</span>`
-                  : html`<span class="chip"><span class="dot"></span>空闲</span>`}
+                  : nothing}
               <span class="actions">
                 ${this.bottomToggle
                   ? html`<button class="ghost tg ${this.bottomOn ? 'on' : ''}" title="终端(当前项目目录)" @click=${() => this.fire('grf-toggle-terminal')}>${unsafeHTML(icon.terminal)}</button>`
@@ -1012,6 +1223,7 @@ export class GrfChat extends GrfPanel {
               </span>
             </header>
           `}
+      ${this.renderStatusPop()}
       <div class="cols">
         <div class="col-main">
           <div class="msgs" @scroll=${this.onScroll}>
@@ -1103,8 +1315,10 @@ export class GrfChat extends GrfPanel {
   // ---------- 右栏 tab 系统 ----------
 
   /** 当前环境可用的右栏 tab 类型。 */
-  private availableSideTabs(): SidePanelTab[] {
-    const tabs: SidePanelTab[] = ['detail'];
+  /** 当前环境可用的右栏面板类型 tab。文件 tab(file:<path>)不在其列,
+   * 由左栏文件树点击打开。 */
+  private availableSideTabs(): Exclude<SidePanelKind, 'file'>[] {
+    const tabs: Exclude<SidePanelKind, 'file'>[] = ['detail'];
     if (inWails()) tabs.push('review'); // git 能力仅桌面
     if (inWails() && panelRegistered('grf-terminal')) tabs.push('terminal'); // 终端面板仅桌面态可用
     tabs.push('browser');
@@ -1154,8 +1368,12 @@ export class GrfChat extends GrfPanel {
 
   private renderSide() {
     const avail = this.availableSideTabs();
-    const tabs = this.sideTabs.filter((t) => avail.includes(t));
-    const width = this.sideWidth ?? SIDE_TAB_META[this.activeSideTab]?.width ?? 300;
+    // 类型 tab 按可用性过滤;文件 tab(file:<path>)仅桌面态存在
+    const tabs = this.sideTabs.filter((t) =>
+      t.startsWith('file:') ? inWails() : avail.includes(t as Exclude<SidePanelKind, 'file'>),
+    );
+    const activeKind = this.tabKind(this.activeSideTab);
+    const width = this.sideWidth ?? SIDE_TAB_META[activeKind]?.width ?? 300;
     const on = this.activeSideTab;
     const cwd = this.store?.activeProjectPath() ?? '';
 
@@ -1182,13 +1400,35 @@ export class GrfChat extends GrfPanel {
                 <grf-browser scope=${this.scope}></grf-browser>
               </div>`
             : nothing}
+          ${tabs
+            .filter((t): t is `file:${string}` => t.startsWith('file:'))
+            .map((t) => {
+              const f = this.fileTabs.find((x) => `file:${x.path}` === t);
+              if (!f) return nothing;
+              return html`<div class="pane ${on === t ? 'on' : ''}">
+                <grf-file-view .path=${f.path} .name=${f.name} .rel=${f.rel}></grf-file-view>
+              </div>`;
+            })}
         </div>
       </aside>
     `;
   }
 
+  private tabKind(t: SidePanelTab): SidePanelKind {
+    return t.startsWith('file:') ? 'file' : (t as SidePanelKind);
+  }
+
+  // tabLabel 类型 tab 用固定名;文件 tab 显示项目内相对路径。
+  private tabLabel(t: SidePanelTab): string {
+    if (t.startsWith('file:')) {
+      const f = this.fileTabs.find((x) => `file:${x.path}` === t);
+      return f?.rel || f?.name || t.slice(5).split('/').pop() || '文件';
+    }
+    return SIDE_TAB_META[this.tabKind(t)].label;
+  }
+
   // renderSideBar 右栏顶部 tab 栏;无已开 tab 时显示居中类型入口。
-  private renderSideBar(tabs: SidePanelTab[], avail: SidePanelTab[]) {
+  private renderSideBar(tabs: SidePanelTab[], avail: Exclude<SidePanelKind, 'file'>[]) {
     if (tabs.length === 0) {
       return html`
         <div class="side-empty">
@@ -1210,12 +1450,12 @@ export class GrfChat extends GrfPanel {
       <div class="side-tabs">
         ${tabs.map(
           (t) => html`
-            <span class="stab ${this.activeSideTab === t ? 'on' : ''}" @click=${() => this.fire('grf-side-tab-activate', t)}>
-              ${unsafeHTML(SIDE_TAB_META[t].icon)}
-              <span>${SIDE_TAB_META[t].label}</span>
+            <span class="stab ${this.activeSideTab === t ? 'on' : ''}" title=${this.tabLabel(t)} @click=${() => this.fire('grf-side-tab-activate', t)}>
+              ${unsafeHTML(SIDE_TAB_META[this.tabKind(t)].icon)}
+              <span class="stab-t">${this.tabLabel(t)}</span>
               <button
                 class="x"
-                title=${`关闭${SIDE_TAB_META[t].label}`}
+                title=${`关闭${this.tabLabel(t)}`}
                 @click=${(e: Event) => {
                   e.stopPropagation();
                   this.fire('grf-side-tab-close', t);
@@ -1241,9 +1481,97 @@ export class GrfChat extends GrfPanel {
                         this.fire('grf-side-tab-open', t);
                       }}
                     >
-                      ${unsafeHTML(SIDE_TAB_META[t].icon)}
-                      <span>${SIDE_TAB_META[t].label}</span>
+                      ${unsafeHTML(SIDE_TAB_META[this.tabKind(t)].icon)}
+                      <span>${this.tabLabel(t)}</span>
                       ${tabs.includes(t) ? html`<span class="mitag">已打开</span>` : nothing}
+                    </div>
+                  `,
+                )}
+              </div>
+            `
+          : nothing}
+      </div>
+    `;
+  }
+
+  // renderStatusPop 右上角状态浮窗(自动显示):当前项目 git 概览(置顶)
+  // 与模型 todo 任务 —— 有内容才显示对应区块,都没有则整框不渲染。首个
+  // 区块标题行右侧的收缩按钮可把浮窗收成单行(git 变更或任务完成度),
+  // 再次点击展开。git 每 8 秒轮询(pollGit);todo 随 store 订阅实时刷新。
+  private renderStatusPop() {
+    const s = this.store;
+    if (!s) return nothing;
+    const todos = s.runtimes.get(this.sid ?? '')?.todos ?? null;
+    const hasGit = !!this.git;
+    const hasTodos = !!todos?.length;
+    // 没有任何可显示的内容:整框隐藏
+    if (!hasGit && !hasTodos) return nothing;
+
+    // 收缩态:单行显示 git 行级变更或任务完成度(哪个有显示哪个),
+    // 始终保留展开按钮 —— 不能整框消失,否则无法再展开
+    if (this.statusCollapsed) {
+      const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
+      return html`
+        <div class="status-pop collapsed">
+          <div class="sp-line">
+            ${hasGit
+              ? html`<span class="sp-diff">
+                  更改 <span class="add">+${this.git!.additions}</span> <span class="del">-${this.git!.deletions}</span>
+                </span>`
+              : html`<span>任务 ${doneCnt}/${todos!.length} 完成</span>`}
+            <button class="sp-fold" title="展开" @click=${() => (this.statusCollapsed = false)}>
+              ${unsafeHTML(icon.chevron)}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
+    // 缩放按钮不单独占行:跟随首个区块(Git 优先,否则任务)的标题行,靠右
+    const foldBtn = html`<button class="sp-fold" title="收起为一行" @click=${() => (this.statusCollapsed = true)}>
+      ${unsafeHTML(icon.chevron)}
+    </button>`;
+    return html`
+      <div class="status-pop">
+        ${hasGit
+          ? html`
+              <div class="sp-sec">
+                <h4>
+                  ${unsafeHTML(icon.gitBranch)} Git
+                  ${foldBtn}
+                </h4>
+                <div class="sp-kv">
+                  <span class="k">分支</span>
+                  <span class="v">${this.git!.branch || '—'}</span>
+                  ${this.git!.upstream
+                    ? html`<span class="k">远端</span>
+                        <span class="v">${this.git!.ahead}↑ ${this.git!.behind}↓</span>`
+                    : nothing}
+                  <span class="k">变更</span>
+                  <span class="v">
+                    ${this.git!.entries.length} 个文件
+                    <span class="sp-diff">
+                      (<span class="add">+${this.git!.additions}</span> <span class="del">-${this.git!.deletions}</span>)
+                    </span>
+                  </span>
+                </div>
+              </div>
+            `
+          : nothing}
+        ${hasTodos
+          ? html`
+              <div class="sp-sec">
+                <h4>
+                  ${unsafeHTML(icon.check)} 任务
+                  <span class="sp-cnt">${doneCnt}/${todos!.length} 完成</span>
+                  ${hasGit ? nothing : foldBtn}
+                </h4>
+                ${todos!.map(
+                  (t) => html`
+                    <div class="sp-todo ${t.status}">
+                      <span class="sp-dot"></span>
+                      <span class="tx">${t.content}</span>
                     </div>
                   `,
                 )}
