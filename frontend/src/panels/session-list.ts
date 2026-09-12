@@ -1,9 +1,10 @@
 // session-list.ts — <grf-session-list>:左栏项目级会话列表。
 // 项目分组(可折叠)→ 会话;项目行以文件夹图标开头(折叠/展开切换
-// 开/合样式),仅"查看文件/新建会话"两个悬停操作;会话行不缩进,状态
-// 点与项目文件夹图标同列居中、标题与项目名左对齐;会话显示距今相对
-// 时间,悬停时时间隐去、露出删除;新建项目走原生目录选择(桌面)或内联
-// 输入(web)。底部为用户名 + 设置入口(进入设置页)。
+// 开/合样式),悬停操作:查看文件(左栏切换为该项目文件列表)/新建会话;
+// 会话行不缩进,状态点与项目文件夹图标同列居中、标题与项目名左对齐;
+// 会话显示距今相对时间,悬停时时间隐去、露出删除(两段式行内确认,见
+// onDeleteClick);新建项目走原生目录选择(桌面)或内联输入(web)。底部
+// 为用户名 + 设置入口(进入设置页)。
 // 会话行状态指示:运行中 = 旋转小圆环;等待用户查看(回合完成未读/
 // 等待输入)= 蓝点;默认空闲不显示。
 import { css, html, nothing } from 'lit';
@@ -13,7 +14,7 @@ import { GrfPanel, theme, controls } from '../ui/base';
 import { icon } from '../util/icons';
 import { fmtRelative } from '../util/fmt';
 import { UNGROUPED } from '../state/scope';
-import { inWails, pickFolder, revealPath, desktopUserName } from '../host/bridge';
+import { inWails, pickFolder, desktopUserName } from '../host/bridge';
 
 @customElement('grf-session-list')
 export class GrfSessionList extends GrfPanel {
@@ -25,6 +26,10 @@ export class GrfSessionList extends GrfPanel {
   @state() private draftName = '';
   /** 当前系统用户名(桌面态经 Desktop 服务读取) */
   @state() private userName = '';
+  /** 两段式删除确认:已进入待确认态的会话 id */
+  @state() private armedDelete?: string;
+  /** 待确认态自动退出计时器 */
+  private disarmTimer?: number;
 
   /** 相对时间(刚刚/n分钟…)每分钟自刷新 */
   private minuteTick?: number;
@@ -39,7 +44,6 @@ export class GrfSessionList extends GrfPanel {
         height: 100%;
         min-height: 0;
         background: var(--grf-bg-raise);
-        border-right: 1px solid var(--grf-border-soft);
         font-family: var(--grf-font);
         font-size: var(--grf-font-size);
         color: var(--grf-text);
@@ -71,7 +75,7 @@ export class GrfSessionList extends GrfPanel {
         display: flex;
         align-items: center;
         gap: 5px;
-        padding: 5px 7px;
+        padding: 7px 7px;
         border-radius: var(--grf-radius-sm);
         cursor: pointer;
         user-select: none;
@@ -125,13 +129,13 @@ export class GrfSessionList extends GrfPanel {
       /* 会话与项目同行对齐:状态点位于项目文件夹图标的 14px 图标槽内,
        * 标题起点与项目名一致(左 7px 内边距 + 14px 槽 + 5px 间距) */
       .sessions {
-        margin: 1px 0 4px;
+        margin: 2px 0 6px;
       }
       .sess {
         display: flex;
         align-items: center;
         gap: 5px;
-        padding: 4px 7px;
+        padding: 7px 7px;
         border-radius: var(--grf-radius-sm);
         cursor: pointer;
         color: var(--grf-text-dim);
@@ -145,17 +149,6 @@ export class GrfSessionList extends GrfPanel {
       .sess.active {
         background: var(--grf-accent-soft);
         color: var(--grf-text);
-      }
-      /* 固定的「新建会话」行:比普通会话更淡,+ 图标占状态点槽位 */
-      .sess.new {
-        color: var(--grf-text-faint);
-      }
-      .sess.new:hover {
-        color: var(--grf-accent-text);
-      }
-      .sess.new .ic svg {
-        width: 12px;
-        height: 12px;
       }
       .sess .t {
         flex: 1;
@@ -225,6 +218,16 @@ export class GrfSessionList extends GrfPanel {
       }
       .sess .del:hover {
         color: var(--grf-error);
+        background: var(--grf-bg-active);
+      }
+      /* 待确认态:垃圾桶换为红色「确认」文字,再次点击才真正删除 */
+      .sess .del.armed {
+        color: var(--grf-error);
+        font-size: var(--grf-font-size-xs);
+        font-weight: 650;
+        line-height: 1;
+      }
+      .sess .del.armed:hover {
         background: var(--grf-bg-active);
       }
       .sess:hover .at {
@@ -302,6 +305,8 @@ export class GrfSessionList extends GrfPanel {
   disconnectedCallback(): void {
     if (this.minuteTick) window.clearInterval(this.minuteTick);
     this.minuteTick = undefined;
+    if (this.disarmTimer) window.clearTimeout(this.disarmTimer);
+    this.disarmTimer = undefined;
     super.disconnectedCallback();
   }
 
@@ -373,7 +378,7 @@ export class GrfSessionList extends GrfPanel {
             ${path && inWails()
               ? html`<button
                   title="查看文件:${path}"
-                  @click=${() => void revealPath(path)}
+                  @click=${() => this.fire('grf-open-files', { projectId: pid, name, path })}
                 >
                   ${unsafeHTML(icon.folder)}
                 </button>`
@@ -387,7 +392,6 @@ export class GrfSessionList extends GrfPanel {
           ? nothing
           : html`
               <div class="sessions">
-                ${this.renderNewSession(pid)}
                 ${pid === s.activeProjectId && s.activeSessionId?.startsWith('draft:')
                   ? this.renderSession(s.activeSessionId, '新会话(未发送)', '')
                   : nothing}
@@ -398,24 +402,12 @@ export class GrfSessionList extends GrfPanel {
     `;
   }
 
-  // renderNewSession 每个项目会话列表的第一行:固定「新建会话」入口。
-  // 点击即建草稿;已有活动草稿属于本项目时也直接重开一个(旧草稿留在
-  // drafts 里,仅活动草稿展示)。
-  private renderNewSession(pid: string) {
-    if (pid === UNGROUPED) return nothing;
-    return html`
-      <div class="sess new" title="新建会话" @click=${() => void this.store.newDraft(pid)}>
-        <span class="ic">${unsafeHTML(icon.plus)}</span>
-        <span class="t">新建会话</span>
-      </div>
-    `;
-  }
-
   private renderSession(sid: string, title: string, at: string) {
     const s = this.store;
     const active = s.activeSessionId === sid;
     const running = s.isRunning(sid);
     const unread = !running && s.needsAttention(sid);
+    const armed = this.armedDelete === sid;
 
     return html`
       <div
@@ -431,17 +423,37 @@ export class GrfSessionList extends GrfPanel {
           ? nothing
           : html`<span class="at">${fmtRelative(at)}</span>
               <button
-                class="del"
-                title="删除会话(从列表移除,历史保留)"
+                class="del ${armed ? 'armed' : ''}"
+                title=${armed ? '再次点击确认删除' : '删除会话(从列表移除,历史保留)'}
                 @click=${(e: Event) => {
                   e.stopPropagation();
-                  this.confirmDeleteSession(sid);
+                  this.onDeleteClick(sid);
                 }}
               >
-                ${unsafeHTML(icon.trash)}
+                ${armed ? '确认' : unsafeHTML(icon.trash)}
               </button>`}
       </div>
     `;
+  }
+
+  // onDeleteClick 两段式行内确认:首击进入待确认态(按钮变红色「确认」,
+  // 3 秒未跟击自动退出),再击才真正归档。不用 window.confirm——wails 桌面
+  // 的 WKWebView 未实现 JS 弹窗宿主委托,confirm() 恒为 false,删除会静默失效。
+  private onDeleteClick(sid: string): void {
+    if (this.armedDelete === sid) {
+      this.disarmDelete();
+      void this.store.archiveSession(sid);
+      return;
+    }
+    this.armedDelete = sid;
+    if (this.disarmTimer) window.clearTimeout(this.disarmTimer);
+    this.disarmTimer = window.setTimeout(() => this.disarmDelete(), 3000);
+  }
+
+  private disarmDelete(): void {
+    if (this.disarmTimer) window.clearTimeout(this.disarmTimer);
+    this.disarmTimer = undefined;
+    this.armedDelete = undefined;
   }
 
   private startNewProject(): void {
@@ -469,12 +481,6 @@ export class GrfSessionList extends GrfPanel {
     this.newProject = false;
     this.draftName = '';
     this.requestUpdate();
-  }
-
-  private confirmDeleteSession(sid: string): void {
-    if (confirm('删除该会话?将从列表移除,历史与 workspace 文件保留在服务器。')) {
-      void this.store.archiveSession(sid);
-    }
   }
 }
 

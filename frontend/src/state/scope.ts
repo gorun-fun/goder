@@ -20,6 +20,7 @@ import {
   markRequestAnswered,
   materializeRequest,
   newRuntime,
+  todosFromItems,
   type SessionRuntime,
 } from './chat-model';
 import { emptyIndex, persistence, type ProjectsIndex, type ProjectRecord } from './persist';
@@ -401,6 +402,8 @@ export class GrfScope extends Emitter {
       // 已有 live 物品的会话(本进程刚聊过)不重放历史。
       if (rt.items.length === 0) {
         rt.items = historyToItems(hist);
+        // 回填任务列表(从最后一个 todo_write 调用还原;详情栏/状态浮窗用)
+        rt.todos = todosFromItems(rt.items);
         // 恢复暂停卡片:从最新终态 response 拿 grf_requests。
         // 打开会话时 rt.lastResponseId 可能尚未同步(与 syncRunningState
         // 竞态),用索引里记录的 lastResponseId 兜底,保证暂停态可恢复。

@@ -18,6 +18,7 @@ import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
 import '../panels/session-list';
+import '../panels/file-list';
 import '../panels/settings-nav';
 import '../panels/settings-page';
 import '../panels/chat/chat-panel';
@@ -39,10 +40,15 @@ export class GrfAppShell extends GrfPanel {
   @property({ type: String }) layout = '';
 
   @state() private leftWidth = 248;
-  @state() private showSidebar = true;
+  /** 右栏(详情/审查等)默认收起:打开应用仅展开左边栏 */
+  @state() private showSidebar = false;
   /** 底栏(内嵌终端)展开态 */
   @state() private showBottom = false;
   @state() private showSessions = true;
+  /** 左栏文件列表视图(session-list「查看文件」进入;null = 会话列表) */
+  @state() private filesView: { projectId: string; name: string; path: string } | null = null;
+  /** 右栏已打开的文件(每个文件一个 file:<path> tab) */
+  @state() private fileTabs: { path: string; name: string; rel: string }[] = [];
   /** 右栏已打开的 tab(空 = 右栏显示类型入口页) */
   @state() private sideTabs: SidePanelTab[] = [];
   /** 右栏当前激活的 tab */
@@ -83,6 +89,8 @@ export class GrfAppShell extends GrfPanel {
         display: flex;
         min-height: 0;
         min-width: 0;
+        /* 左栏拖拽条的定位基准 */
+        position: relative;
       }
       .left {
         flex: none;
@@ -137,32 +145,37 @@ export class GrfAppShell extends GrfPanel {
         width: 13px;
         height: 13px;
       }
+      /* 左栏拖拽条:绝对定位悬浮在左栏右边界上(左右各压 4px),不占布局
+       * 空间 —— 左栏与工作卡完全贴合无边距;默认隐形,悬停亮出强调色 */
       .gutter-v {
-        flex: none;
-        width: 4px;
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 8px;
+        margin-left: -4px;
+        z-index: 20;
         cursor: col-resize;
-        background: transparent;
-        position: relative;
       }
       .gutter-v::after {
         content: '';
         position: absolute;
-        inset: 0 1.5px;
-        background: var(--grf-border-soft);
+        inset: 0 3.5px;
+        background: transparent;
       }
       .gutter-v:hover::after {
         background: var(--grf-accent);
       }
-      /* 主体工作面板:左右下各 5px 边距衬托黑色圆角卡片;顶部贴住窗口
-       * 上沿 —— 卡片头部与左栏顶行同为 40px 高,两行底部分隔线对齐,
-       * 左栏收起/展开时标题行位置与高度均不跳动 */
+      /* 主体工作面板:左侧贴住左栏(无边距),右侧 5px 边距衬托黑色圆角
+       * 卡片;顶部贴住窗口上沿、底部拉通到窗口底 —— 卡片头部与左栏顶行
+       * 同为 40px 高,两行底部分隔线对齐,左栏收起/展开时标题行位置与
+       * 高度均不跳动 */
       .center {
         flex: 1;
         display: flex;
         flex-direction: column;
         min-width: 0;
         min-height: 0;
-        padding: 0 5px 5px;
+        padding: 0 5px 0 0;
         box-sizing: border-box;
       }
       .center grf-chat,
@@ -184,6 +197,24 @@ export class GrfAppShell extends GrfPanel {
     // 设置视图切换(session-list 齿轮进入 / 设置导航返回 / 切换分区)
     this.addEventListener('grf-open-settings', this.onOpenSettings);
     this.addEventListener('grf-close-settings', () => (this.view = 'work'));
+    // 左栏文件列表视图(session-list「查看文件」进入 / file-list 返回退出)
+    this.addEventListener('grf-open-files', (e: Event) => {
+      this.filesView = (e as CustomEvent).detail;
+      this.view = 'work';
+    });
+    this.addEventListener('grf-close-files', () => (this.filesView = null));
+    // 左栏文件树点文件:右栏为该文件开一个独立 tab 预览(已开则激活);
+    // 右栏未开时自动展开
+    this.addEventListener('grf-open-file', (e: Event) => {
+      const f = (e as CustomEvent).detail as { path: string; name: string; rel?: string };
+      const tab: SidePanelTab = `file:${f.path}`;
+      if (!this.sideTabs.includes(tab)) this.sideTabs = [...this.sideTabs, tab];
+      if (!this.fileTabs.some((x) => x.path === f.path)) {
+        this.fileTabs = [...this.fileTabs, { path: f.path, name: f.name, rel: f.rel ?? f.name }];
+      }
+      this.activeSideTab = tab;
+      this.showSidebar = true;
+    });
     this.addEventListener('grf-settings-section', (e: Event) => {
       this.settingsSection = (e as CustomEvent<SettingsSection>).detail;
     });
@@ -243,6 +274,11 @@ export class GrfAppShell extends GrfPanel {
   private closeSideTab(tab: SidePanelTab): void {
     const next = this.sideTabs.filter((t) => t !== tab);
     this.sideTabs = next;
+    // 文件 tab 关闭:同步移除已打开文件记录
+    if (tab.startsWith('file:')) {
+      const p = tab.slice(5);
+      this.fileTabs = this.fileTabs.filter((f) => f.path !== p);
+    }
     if (this.activeSideTab === tab) {
       this.activeSideTab = next[next.length - 1] ?? 'detail';
     }
@@ -270,9 +306,15 @@ export class GrfAppShell extends GrfPanel {
                 </div>
                 ${this.view === 'settings'
                   ? html`<grf-settings-nav scope=${this.scope} section=${this.settingsSection}></grf-settings-nav>`
-                  : html`<grf-session-list scope=${this.scope} server=${this.serverAttr ?? nothing} token=${this.tokenAttr ?? nothing}></grf-session-list>`}
+                  : this.filesView
+                    ? html`<grf-file-list
+                        scope=${this.scope}
+                        root=${this.filesView.path}
+                        projName=${this.filesView.name}
+                      ></grf-file-list>`
+                    : html`<grf-session-list scope=${this.scope} server=${this.serverAttr ?? nothing} token=${this.tokenAttr ?? nothing}></grf-session-list>`}
               </div>
-              <div class="gutter-v" @pointerdown=${this.onGutterStart}></div>
+              <div class="gutter-v" style="left:${this.leftWidth}px" @pointerdown=${this.onGutterStart}></div>
             `
           : nothing}
         <div class="center">
@@ -296,6 +338,7 @@ export class GrfAppShell extends GrfPanel {
                   .sidebarOn=${this.showSidebar}
                   .sideTabs=${this.sideTabs}
                   .activeSideTab=${this.activeSideTab}
+                  .fileTabs=${this.fileTabs}
                   .leftToggle=${hasSessions}
                   .leftOn=${this.showSessions}
                   .leftLights=${this.nativeLights}

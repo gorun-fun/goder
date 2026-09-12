@@ -14,12 +14,14 @@ import type { Unsubscribe } from '../state/store';
 // 元素上覆盖 --grf-* 的换肤方式不变(文档规则优先于 :host,仍会生效)。
 export const theme = css`
   :host {
-    // 布局
+    /* 布局 */
     --grf-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
     --grf-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
-    // 色板(外观类令牌走 skin 挂钩,其余为固定语义色)
+    /* 色板(外观类令牌走 skin 挂钩,其余为固定语义色)
+     * 注意:lit 的 css 模板内只能用块注释——CSS 不认 // 注释,解析器会把 //
+     * 连同其后直到分号的整条声明一并丢弃(曾导致 --grf-font/--grf-bg 静默失效)。 */
     --grf-bg: var(--grf-skin-bg, #17181d);
     --grf-bg-raise: var(--grf-skin-bg-raise, #1d1f26);
     --grf-bg-hover: var(--grf-skin-bg-hover, #262a33);
@@ -47,7 +49,7 @@ export const theme = css`
     --grf-scroll-thumb: var(--grf-skin-scroll-thumb, #333845);
     --grf-border-hover: var(--grf-skin-border-hover, #363b47);
 
-    // 尺寸(字号随外观设置缩放)
+    /* 尺寸(字号随外观设置缩放) */
     --grf-radius: 8px;
     --grf-radius-sm: 6px;
     --grf-font-size: var(--grf-skin-font-size, 13.5px);

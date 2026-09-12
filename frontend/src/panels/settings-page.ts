@@ -43,9 +43,9 @@ export class GrfSettingsPage extends GrfPanel {
         min-height: 0;
         min-width: 0;
         height: 100%;
-        /* 黑色圆角主面板,与聊天卡一致 */
+        /* 黑色圆角主面板,与聊天卡一致;底部拉通到窗口底 */
         background: var(--grf-card);
-        border-radius: 12px;
+        border-radius: 12px 12px 0 0;
         overflow: hidden;
         font-family: var(--grf-font);
         font-size: var(--grf-font-size);

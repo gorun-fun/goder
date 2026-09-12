@@ -31,7 +31,8 @@ export class GrfComposer extends LitElement {
       .wrap {
         border: 1px solid var(--grf-border);
         border-radius: 12px;
-        background: var(--grf-bg-raise);
+        /* 背景与卡片同黑拉通,仅以描边勾勒输入框 */
+        background: transparent;
         padding: 8px 10px;
         display: grid;
         gap: 6px;

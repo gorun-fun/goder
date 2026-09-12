@@ -5,10 +5,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
+	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -47,6 +51,111 @@ func (d *Desktop) Reveal(path string) error {
 	}
 }
 
+// ---------- 目录浏览(左栏文件列表) ----------
+
+// FileEntryDTO 与前端 host/bridge.ts 的 FileEntryDTO 对齐。
+type FileEntryDTO struct {
+	Name    string `json:"name"`
+	IsDir   bool   `json:"isDir"`
+	Size    int64  `json:"size"`
+	ModTime int64  `json:"modTime"` // Unix 毫秒
+}
+
+// ListDir 列出目录一级条目(目录在前、同类型名称升序);"." 开头的隐藏
+// 条目(.git/.DS_Store 等)不返回。
+func (d *Desktop) ListDir(path string) ([]FileEntryDTO, error) {
+	ents, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FileEntryDTO, 0, len(ents))
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue // 条目在枚举与取信息之间被删除:跳过
+		}
+		out = append(out, FileEntryDTO{
+			Name:    e.Name(),
+			IsDir:   e.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().UnixMilli(),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IsDir != out[j].IsDir {
+			return out[i].IsDir
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+// ReadFile 读取文本文件内容(右栏预览);上限 2MB,疑似二进制(前 8KB
+// 含 NUL 字节)或目录返回错误。
+func (d *Desktop) ReadFile(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s 是目录", path)
+	}
+	if info.Size() > 2<<20 {
+		return "", fmt.Errorf("文件超过 2MB,不支持预览")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	head := b
+	if len(head) > 8192 {
+		head = head[:8192]
+	}
+	if bytes.IndexByte(head, 0) >= 0 {
+		return "", fmt.Errorf("二进制文件,不支持预览")
+	}
+	return string(b), nil
+}
+
+// imageMimes 图片扩展名 → MIME(ReadImage 用)。
+var imageMimes = map[string]string{
+	"png":  "image/png",
+	"jpg":  "image/jpeg",
+	"jpeg": "image/jpeg",
+	"gif":  "image/gif",
+	"webp": "image/webp",
+	"svg":  "image/svg+xml",
+	"bmp":  "image/bmp",
+	"ico":  "image/x-icon",
+}
+
+// ReadImage 读取图片文件为 data URL(右栏预览;上限 10MB);按扩展名给
+// MIME,未知扩展名返回错误。
+func (d *Desktop) ReadImage(path string) (string, error) {
+	mime, ok := imageMimes[strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))]
+	if !ok {
+		return "", fmt.Errorf("不支持的图片格式:%s", filepath.Ext(path))
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s 是目录", path)
+	}
+	if info.Size() > 10<<20 {
+		return "", fmt.Errorf("图片超过 10MB,不支持预览")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(b), nil
+}
+
 // ---------- git(审查面板) ----------
 
 // GitEntryDTO 与前端 host/bridge.ts 的 GitEntryDTO 对齐。
@@ -59,11 +168,13 @@ type GitEntryDTO struct {
 
 // GitStatusDTO 与前端 host/bridge.ts 的 GitStatusDTO 对齐。
 type GitStatusDTO struct {
-	Branch   string        `json:"branch"`
-	Upstream string        `json:"upstream"`
-	Ahead    int           `json:"ahead"`
-	Behind   int           `json:"behind"`
-	Entries  []GitEntryDTO `json:"entries"`
+	Branch    string        `json:"branch"`
+	Upstream  string        `json:"upstream"`
+	Ahead     int           `json:"ahead"`
+	Behind    int           `json:"behind"`
+	Entries   []GitEntryDTO `json:"entries"`
+	Additions int           `json:"additions"` // 行级变更(+)：工作区+暂存 vs HEAD
+	Deletions int           `json:"deletions"` // 行级变更(-)
 }
 
 // GitStatus 读取仓库状态(porcelain v1 + 分支行);非 git 仓库返回带
@@ -90,6 +201,22 @@ func (d *Desktop) GitStatus(cwd string) (GitStatusDTO, error) {
 		}
 		entry.Path = path
 		dto.Entries = append(dto.Entries, entry)
+	}
+	// 行级变更统计(状态浮窗「更改 +x -y」用)：numstat vs HEAD,含暂存与
+	// 工作区;二进制文件列为 "-" 会被 Atoi 跳过;无提交/出错时保持 0。
+	if out, err := gitOutput(cwd, "diff", "--numstat", "HEAD"); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			f := strings.Fields(line)
+			if len(f) < 2 {
+				continue
+			}
+			if n, err := strconv.Atoi(f[0]); err == nil {
+				dto.Additions += n
+			}
+			if n, err := strconv.Atoi(f[1]); err == nil {
+				dto.Deletions += n
+			}
+		}
 	}
 	return dto, nil
 }

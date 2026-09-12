@@ -558,7 +558,37 @@ function upsertToolItem(rt: SessionRuntime, item: OutputItem, status?: ToolStatu
     target.endedAt = Date.now();
   }
   if (idx >= 0) items[idx] = target;
+  // todo_write 的参数即任务列表(gh server 不发 grf:notice todos,任务
+  // 状态只随工具调用更新):每次调用都同步,保证右栏详情/状态浮窗实时。
+  if (target.name === 'todo_write') applyTodoArgs(rt, target.args);
   return true;
+}
+
+// applyTodoArgs 解析 todo_write 参数({"todos":[...]})写入 rt.todos。
+function applyTodoArgs(rt: SessionRuntime, args: string | undefined): void {
+  if (!args) return;
+  try {
+    const parsed = JSON.parse(args) as { todos?: unknown };
+    if (Array.isArray(parsed.todos)) rt.todos = parsed.todos as TodoItem[];
+  } catch {
+    /* 参数残缺(流式中截断):保持原状 */
+  }
+}
+
+// todosFromItems 从消息条目里找最后一次 todo_write 调用,回填任务列表
+// (历史恢复用;grf:notice todos 不存在,只能从工具参数还原)。
+export function todosFromItems(items: ChatItem[]): TodoItem[] | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind !== 'tool' || it.name !== 'todo_write') continue;
+    try {
+      const parsed = JSON.parse(it.args || '{}') as { todos?: unknown };
+      if (Array.isArray(parsed.todos)) return parsed.todos as TodoItem[];
+    } catch {
+      /* 跳过残缺参数 */
+    }
+  }
+  return null;
 }
 
 // patchToolItem 以不可变替换方式改指定 callId 的工具项及其相邻状态。

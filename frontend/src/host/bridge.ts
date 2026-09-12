@@ -145,6 +145,37 @@ export async function desktopUserName(): Promise<string> {
   }
 }
 
+// ---------- 目录浏览(左栏文件列表;仅桌面) ----------
+
+export interface FileEntryDTO {
+  name: string;
+  isDir: boolean;
+  size: number;
+  modTime: number; // Unix 毫秒
+}
+
+/** 列出目录一级条目(目录在前、名称升序,隐藏条目已滤除);非桌面态/失败返回 null。 */
+export async function listDir(path: string): Promise<FileEntryDTO[] | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<FileEntryDTO[]>('main.Desktop.ListDir', path);
+  } catch {
+    return null;
+  }
+}
+
+/** 读取文本文件内容(右栏预览,上限 2MB);失败抛带信息的 Error,非桌面态抛不支持。 */
+export async function readFileText(path: string): Promise<string> {
+  if (!inWails()) throw new Error('仅桌面态支持文件预览');
+  return call<string>('main.Desktop.ReadFile', path);
+}
+
+/** 读取图片文件为 data URL(右栏预览,上限 10MB);失败抛带信息的 Error。 */
+export async function readImageDataUrl(path: string): Promise<string> {
+  if (!inWails()) throw new Error('仅桌面态支持图片预览');
+  return call<string>('main.Desktop.ReadImage', path);
+}
+
 // ---------- 终端(TerminalManager service,仅桌面) ----------
 
 export interface TermSessionDTO {
@@ -231,6 +262,9 @@ export interface GitStatusDTO {
   ahead: number;
   behind: number;
   entries: GitEntryDTO[];
+  /** 行级变更(+/-)：工作区+暂存 vs HEAD */
+  additions: number;
+  deletions: number;
 }
 
 /** 读取仓库状态;非桌面态返回 null,git 失败抛错(如"不是 git 仓库")。 */

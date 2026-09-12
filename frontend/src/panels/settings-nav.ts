@@ -30,43 +30,47 @@ export class GrfSettingsNav extends GrfPanel {
         height: 100%;
         min-height: 0;
         background: var(--grf-bg-raise);
-        border-right: 1px solid var(--grf-border-soft);
         font-family: var(--grf-font);
         font-size: var(--grf-font-size);
         color: var(--grf-text);
       }
-      .head {
+      /* 整行可点的返回条目(与 file-list 一致) */
+      .back {
         flex: none;
-        padding: 8px 12px;
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
+        padding: 9px 12px;
         border-bottom: 1px solid var(--grf-border-soft);
-        user-select: none;
         font-weight: 650;
-        font-size: var(--grf-font-size);
+        font-size: var(--grf-font-size-sm);
+        color: var(--grf-text-dim);
+        cursor: pointer;
+        user-select: none;
       }
-      .head .back {
-        background: transparent;
-        border: none;
-        color: var(--grf-text-faint);
-        padding: 3px 5px;
-        margin-left: -5px;
-        border-radius: 5px;
-      }
-      .head .back:hover {
-        color: var(--grf-text);
+      .back:hover {
         background: var(--grf-bg-hover);
+        color: var(--grf-text);
       }
-      .head .back svg {
-        width: 14px;
-        height: 14px;
+      .back svg {
+        width: 13px;
+        height: 13px;
+        flex: none;
       }
       .list {
         flex: 1;
         overflow-y: auto;
         min-height: 0;
         padding: 6px 6px 12px;
+      }
+      .title {
+        flex: none;
+        padding: 8px 12px 2px;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+        font-weight: 650;
+        letter-spacing: 0.4px;
+        user-select: none;
       }
       .item {
         display: flex;
@@ -136,10 +140,11 @@ export class GrfSettingsNav extends GrfPanel {
       ['models', '模型设置', icon.brain],
     ];
     return html`
-      <div class="head">
-        <button class="back" title="返回工作区" @click=${() => this.fire('grf-close-settings')}>${unsafeHTML(icon.arrowLeft)}</button>
-        <span>设置</span>
+      <div class="back" title="返回工作区" @click=${() => this.fire('grf-close-settings')}>
+        ${unsafeHTML(icon.arrowLeft)}
+        <span>返回工作区</span>
       </div>
+      <div class="title">设置</div>
       <div class="list">
         ${items.map(
           ([key, label, ic]) => html`

@@ -34,6 +34,9 @@ export const icon = {
   zap: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9 1.8L3.5 9H7l-.8 5.2L12 7H8.4L9 1.8z" stroke-linejoin="round"/></svg>',
   gitBranch: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4.5" cy="3.8" r="1.6"/><circle cx="4.5" cy="12.2" r="1.6"/><circle cx="11.5" cy="6" r="1.6"/><path d="M4.5 5.4v5.2M11.5 7.6c0 1.9-2 1.9-4 2.5M6.1 3.8h3.8" stroke-linecap="round"/></svg>',
   globe: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2.1 2.4-2.1 9.6 0 12M8 2c2.1 2.4 2.1 9.6 0 12"/></svg>',
+  file: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 1.8h5l3.2 3.2v9.2H4z" stroke-linejoin="round"/><path d="M9 1.8V5h3.2" stroke-linejoin="round"/></svg>',
+  activity: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 8.5h2.6l1.9-4.6 3 9.2 1.9-4.6h3.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  eye: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8z" stroke-linejoin="round"/><circle cx="8" cy="8" r="2"/></svg>',
 };
 
 export type IconName = keyof typeof icon;
