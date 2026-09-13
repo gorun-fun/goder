@@ -671,21 +671,20 @@ export class GrfChat extends GrfPanel {
         -webkit-box-orient: vertical;
         overflow: hidden;
       }
-      /* 会话运行中:消息区左下角加载圆环 */
+      /* 会话运行中:加载圆环跟在最后一条消息之后(消息列内随内容滚动,
+       * 不悬浮遮挡;吸附底部时始终可见) */
       .run-ring {
-        position: absolute;
-        left: 10px;
-        bottom: 8px;
+        display: inline-block;
         width: 14px;
         height: 14px;
         border-radius: 50%;
         border: 2px solid var(--grf-border-hover);
         border-top-color: var(--grf-text-dim);
         box-sizing: border-box;
-        animation: cnav-spin 0.8s linear infinite;
-        z-index: 20;
+        animation: run-spin 0.8s linear infinite;
+        margin: 8px 0 4px;
       }
-      @keyframes cnav-spin {
+      @keyframes run-spin {
         to {
           transform: rotate(360deg);
         }
@@ -806,12 +805,6 @@ export class GrfChat extends GrfPanel {
         margin-right: auto;
         font-size: var(--grf-font-size-xs);
         color: var(--grf-text-faint);
-      }
-      /* 助手流式生成中的轻提示 */
-      .msg-assistant .gen {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
-        margin-top: 2px;
       }
       .msg-user .imgs {
         display: flex;
@@ -995,20 +988,14 @@ export class GrfChat extends GrfPanel {
       .reasoning.live .rscroll {
         flex: 1;
         min-width: 0;
+        height: 1.5em;
+        line-height: 1.5em;
+        /* overflow:hidden 仍可程序滚动:跟随内容末尾,滚动速度即输出速度 */
         overflow: hidden;
-        position: relative;
       }
       .reasoning.live .rtext {
-        position: absolute;
-        left: -100%;
-        top: 0;
+        display: inline-block;
         white-space: nowrap;
-        animation: rscroll 16s linear infinite;
-      }
-      @keyframes rscroll {
-        to {
-          left: 100%;
-        }
       }
 
       /* 通知/状态 */
@@ -1373,6 +1360,7 @@ export class GrfChat extends GrfPanel {
     this.termSid = sid;
     this.bottomTerms = this.bottomTermsBySid.get(sid) ?? [];
     this.bottomActiveId = this.bottomActiveBySid.get(sid) ?? '';
+    this.stickBottom = true; // 切换会话:重新吸附底部
     if (this.bottomOn && this.bottomTerms.length === 0) this.addBottomTerm();
   }
 
@@ -1393,6 +1381,11 @@ export class GrfChat extends GrfPanel {
     for (const t of this.bottomTerms) (t.el as unknown as { cwd: string }).cwd = cwd;
     const st = this.sideTerms.get(this.termSid);
     if (st) (st as unknown as { cwd: string }).cwd = cwd;
+    // 流式思考行:内容增长时把滚动位置推到末尾 —— 不满一行时
+    // scrollWidth == clientWidth,自然停在左侧;超出后滚动速度即输出速度
+    for (const el of this.renderRoot.querySelectorAll<HTMLElement>('.reasoning.live .rscroll')) {
+      el.scrollLeft = el.scrollWidth;
+    }
     // 状态浮窗:项目目录就绪/切换即取 git 状态(浮窗自动显示)
     if (cwd && cwd !== this.gitCwd) {
       this.gitCwd = cwd;
@@ -1461,10 +1454,10 @@ export class GrfChat extends GrfPanel {
                 ${!sid || sid.startsWith('draft:')
                   ? this.renderEmpty()
                   : (rt?.items ?? []).map((it) => this.renderItem(it))}
+                ${running ? html`<div class="run-ring" title="会话运行中"></div>` : nothing}
               </div>
             </div>
             ${this.renderChatNav(rt?.items ?? [])}
-            ${running ? html`<span class="run-ring" title="会话运行中"></span>` : nothing}
           </div>
           ${this.noComposer
             ? nothing
@@ -1913,7 +1906,6 @@ export class GrfChat extends GrfPanel {
               ${unsafeHTML(renderMarkdown(it.text))}
               ${it.streaming && !it.text ? html`<span class="cursor"></span>` : nothing}
             </div>
-            ${it.streaming && it.text ? html`<div class="gen">生成中…</div>` : nothing}
           </div>
         `;
       case 'reasoning':
@@ -1958,7 +1950,8 @@ export class GrfChat extends GrfPanel {
       else this.reasoningOpen.add(it.id);
       this.requestUpdate();
     };
-    // 流式思考中:单行高亮"正在思考: <滚动内容>",内容从左向右循环滚动
+    // 流式思考中:单行高亮"正在思考: …";内容不满一行时从左显示,
+    // 超出后跟随模型输出滚动(updated 里推到末尾)
     if (it.streaming && !open) {
       return html`
         <div class="reasoning live" @click=${toggle} title="点击展开思考全文">
