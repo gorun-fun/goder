@@ -83,6 +83,9 @@ export class GrfScope extends Emitter {
   async start(): Promise<void> {
     await this.reloadIndex();
     await this.refreshConversations();
+    // 恢复上次退出时所在的会话(仅真实 sid;草稿/已不存在的会话忽略)
+    const last = this.index.lastActiveSessionId;
+    if (last && this.conversations.has(last)) this.selectSession(last);
     void this.probeHealth();
     this.refreshTimer = setInterval(() => {
       void this.tick();
@@ -385,7 +388,9 @@ export class GrfScope extends Emitter {
     const rec = this.index.sessions[sid];
     if (rec) this.activeProjectId = rec.projectId;
     if (!sid.startsWith('draft:')) {
+      this.index.lastActiveSessionId = sid; // 记住上次所在会话(启动恢复用)
       this.markSessionSeen(sid);
+      this.persistIndex(); // markSessionSeen 同值时跳过,这里保证落盘
       void this.loadHistoryIfNeeded(sid);
       void this.syncRunningState(sid);
     }
@@ -446,6 +451,7 @@ export class GrfScope extends Emitter {
     }
     delete this.index.sessions[sid];
     this.runtimes.delete(sid);
+    if (this.index.lastActiveSessionId === sid) this.index.lastActiveSessionId = undefined;
     if (this.activeSessionId === sid) this.activeSessionId = undefined;
     this.persistIndex();
     await this.refreshConversations();
@@ -620,6 +626,7 @@ export class GrfScope extends Emitter {
         lastResponseId: undefined,
       };
       this.activeSessionId = newSid;
+      this.index.lastActiveSessionId = newSid; // 草稿转正:接管"上次会话"
       this.persistIndex();
     };
 

@@ -39,7 +39,7 @@ export class GrfComposer extends LitElement {
         transition: border-color 0.15s;
       }
       .wrap:focus-within {
-        border-color: var(--grf-accent);
+        border-color: var(--grf-border-hover);
       }
       /* 应答态:输入框整体变高,内嵌问题与选项 */
       .wrap.asking {
@@ -139,21 +139,16 @@ export class GrfComposer extends LitElement {
         width: 15px;
         height: 15px;
       }
-      .send {
-        background: var(--grf-accent);
-        border-color: var(--grf-accent);
-        color: #fff;
-      }
-      .send:hover:not(:disabled) {
-        filter: brightness(1.12);
-      }
+      /* 发送/停止:统一白底黑图标,悬停轻微变暗 */
+      .send,
       .stop {
-        background: var(--grf-error-soft);
-        border-color: var(--grf-error);
-        color: var(--grf-error);
+        background: #fff;
+        border-color: #fff;
+        color: #111;
       }
+      .send:hover:not(:disabled),
       .stop:hover:not(:disabled) {
-        background: rgba(229, 83, 75, 0.22);
+        filter: brightness(0.9);
       }
       .attach {
         color: var(--grf-text-dim);

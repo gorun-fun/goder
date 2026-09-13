@@ -305,6 +305,9 @@ export class GrfFileView extends GrfPanel {
         margin: 12px 0;
       }
       .md table {
+        display: block;
+        overflow-x: auto;
+        max-width: 100%;
         border-collapse: collapse;
         margin: 0 0 8px;
         font-size: var(--grf-font-size-sm);
@@ -313,6 +316,13 @@ export class GrfFileView extends GrfPanel {
       .md td {
         border: 1px solid var(--grf-border-soft);
         padding: 4px 9px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .md th {
+        background: var(--grf-bg-hover);
+        font-weight: 650;
+        white-space: nowrap;
       }
       .empty {
         padding: 40px 16px;

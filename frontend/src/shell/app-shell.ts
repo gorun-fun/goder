@@ -137,16 +137,18 @@ export class GrfAppShell extends GrfPanel {
         background: var(--grf-bg-hover);
         color: var(--grf-text);
       }
+      /* 激活态:与聊天头部 .tg.on 同款,不显示强调色,仅淡背景 */
       .side-top .toggler button.on {
-        color: var(--grf-accent-text);
-        background: var(--grf-accent-soft);
+        color: var(--grf-text);
+        background: var(--grf-bg-active);
       }
       .side-top .toggler svg {
         width: 13px;
         height: 13px;
       }
       /* 左栏拖拽条:绝对定位悬浮在左栏右边界上(左右各压 4px),不占布局
-       * 空间 —— 左栏与工作卡完全贴合无边距;默认隐形,悬停亮出强调色 */
+       * 空间 —— 左栏与工作卡完全贴合无边距;默认隐形,悬停亮出中性灰
+       * (不用强调色,避免分界线变蓝) */
       .gutter-v {
         position: absolute;
         top: 0;
@@ -163,7 +165,7 @@ export class GrfAppShell extends GrfPanel {
         background: transparent;
       }
       .gutter-v:hover::after {
-        background: var(--grf-accent);
+        background: var(--grf-border-hover);
       }
       /* 主体工作面板:左侧贴住左栏(无边距),右侧 5px 边距衬托黑色圆角
        * 卡片;顶部贴住窗口上沿、底部拉通到窗口底 —— 卡片头部与左栏顶行

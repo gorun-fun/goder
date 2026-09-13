@@ -26,6 +26,8 @@ export interface ProjectsIndex {
   version: 1;
   projects: ProjectRecord[];
   sessions: Record<string, SessionRecord>; // sid → 记录
+  /** 上次退出时所在的会话(真实 sid;启动时恢复选中,草稿不记录) */
+  lastActiveSessionId?: string;
 }
 
 export function emptyIndex(): ProjectsIndex {

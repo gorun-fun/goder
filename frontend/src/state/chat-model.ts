@@ -34,6 +34,9 @@ export interface ReasoningItem extends Base {
   kind: 'reasoning';
   text: string;
   streaming: boolean;
+  /** 思考起止时刻(live 流式才有;用于完成后显示"思考 · 时长") */
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export interface ToolItem extends Base {
@@ -322,6 +325,7 @@ export function applyEvent(rt: SessionRuntime, ev: SSEEvent): boolean {
     for (const i of items) {
       if ((i.kind === 'assistant' || i.kind === 'reasoning') && i.streaming) {
         i.streaming = false;
+        if (i.kind === 'reasoning' && i.startedAt && !i.endedAt) i.endedAt = Date.now();
         changed = true;
       }
     }
@@ -423,6 +427,7 @@ export function applyResponseSnapshot(rt: SessionRuntime, snap: import('../api/t
   for (const i of rt.items) {
     if ((i.kind === 'assistant' || i.kind === 'reasoning') && i.streaming) {
       i.streaming = false;
+      if (i.kind === 'reasoning' && i.startedAt && !i.endedAt) i.endedAt = Date.now();
       changed = true;
     }
     if (i.kind === 'tool' && i.status === 'running') {
@@ -497,10 +502,11 @@ function upsertOutputItem(rt: SessionRuntime, item: OutputItem, done: boolean): 
       if (existing) {
         if (text) existing.text = text;
         existing.streaming = !done;
+        if (done && existing.startedAt && !existing.endedAt) existing.endedAt = Date.now();
         return true;
       }
       if (text || !done) {
-        rt.items.push({ kind: 'reasoning', id: qid, text, streaming: !done });
+        rt.items.push({ kind: 'reasoning', id: qid, text, streaming: !done, startedAt: Date.now(), ...(done ? { endedAt: Date.now() } : {}) });
         return true;
       }
       return false;

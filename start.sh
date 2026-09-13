@@ -18,12 +18,22 @@ GH_DATA_MARK="grf-harness-ui/server-data"
 mkdir -p "$RUN_DIR"
 
 app_command() {
-  # 优先 .app 内的二进制,其次裸二进制;输出空表示没有可执行文件
-  if [ -x "$APP_BUNDLE/Contents/MacOS/grf-harness-ui" ]; then
-    echo "$APP_BUNDLE/Contents/MacOS/grf-harness-ui"
-  elif [ -x "./$APP_BIN" ]; then
-    echo "./$APP_BIN"
+  # 两个二进制都在时选修改时间较新的:裸 `build` 只刷新 ./grf-harness-ui,
+  # `build app` 只刷新 .app 内的;固定优先级会启动旧二进制,改动永远不生效
+  local bundle_bin="$APP_BUNDLE/Contents/MacOS/grf-harness-ui"
+  local bare_bin="./$APP_BIN"
+  if [ -x "$bundle_bin" ] && [ -x "$bare_bin" ]; then
+    if [ "$(stat -f %m "$bundle_bin")" -ge "$(stat -f %m "$bare_bin")" ]; then
+      echo "$bundle_bin"
+    else
+      echo "$bare_bin"
+    fi
+  elif [ -x "$bundle_bin" ]; then
+    echo "$bundle_bin"
+  elif [ -x "$bare_bin" ]; then
+    echo "$bare_bin"
   fi
+  # 都不存在时输出空,由调用方兜底构建
 }
 
 running_pid() {

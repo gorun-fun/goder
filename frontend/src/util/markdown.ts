@@ -1,6 +1,6 @@
 // markdown.ts — 极简安全 markdown 渲染:全部输入先 HTML 转义,再做受限
-// 转换(标题/代码块/行内代码/粗斜体/链接/列表/引用/表格之外的一切保持原
-// 样文本),不引入第三方依赖,输出可直接 innerHTML。
+// 转换(标题/代码块/行内代码/粗斜体/链接/列表/引用/表格,其余保持原样
+// 文本),不引入第三方依赖,输出可直接 innerHTML。
 
 function esc(s: string): string {
   return s
@@ -45,6 +45,44 @@ function inline(text: string): string {
   return out;
 }
 
+// 表格行拆分:去掉首尾竖线,按未转义竖线切分(\| 为字面竖线),单元格
+// trim 后原样返回,交给 inline() 转换。
+function splitRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  const cells: string[] = [];
+  let cur = '';
+  for (let j = 0; j < s.length; j++) {
+    if (s[j] === '\\' && s[j + 1] === '|') {
+      cur += '|';
+      j++;
+    } else if (s[j] === '|') {
+      cells.push(cur.trim());
+      cur = '';
+    } else {
+      cur += s[j];
+    }
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+// GFM 分隔行(如 | :--- | ---: |):仅由 | : - 空白组成、每格至少一个 -。
+// 是则返回每列对齐方式数组,否则 null。
+function tableAligns(line: string): string[] | null {
+  const cells = splitRow(line);
+  if (!cells.length) return null;
+  const aligns: string[] = [];
+  for (const c of cells) {
+    if (!/^:?-+:?$/.test(c)) return null;
+    const l = c.startsWith(':');
+    const r = c.endsWith(':');
+    aligns.push(l && r ? 'center' : r ? 'right' : 'left');
+  }
+  return aligns;
+}
+
 export function renderMarkdown(src: string): string {
   const lines = (src ?? '').replace(/\r\n?/g, '\n').split('\n');
   const html: string[] = [];
@@ -55,6 +93,13 @@ export function renderMarkdown(src: string): string {
     const tag = ordered ? 'ol' : 'ul';
     html.push(`<${tag}>${items.map((it) => `<li>${it}</li>`).join('')}</${tag}>`);
   };
+
+  // 表格起点:当前行含竖线且下一行是合法分隔行
+  const isTableStart = (idx: number): boolean =>
+    idx + 1 < lines.length &&
+    !!lines[idx].trim() &&
+    lines[idx].includes('|') &&
+    tableAligns(lines[idx + 1]) !== null;
 
   while (i < lines.length) {
     const line = lines[i];
@@ -109,6 +154,30 @@ export function renderMarkdown(src: string): string {
       continue;
     }
 
+    // GFM 表格:表头行 + 分隔行 + 连续含竖线数据行;列数按表头补齐/截断,
+    // 对齐方式取自分隔行(默认左对齐,不加冗余 style)
+    if (isTableStart(i)) {
+      const head = splitRow(line);
+      const aligns = tableAligns(lines[i + 1])!;
+      i += 2;
+      const body: string[][] = [];
+      while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+        body.push(splitRow(lines[i]));
+        i++;
+      }
+      const cell = (txt: string, k: number, tag: 'th' | 'td') => {
+        const a = aligns[k] ?? 'left';
+        return `<${tag}${a !== 'left' ? ` style="text-align:${a}"` : ''}>${inline(txt)}</${tag}>`;
+      };
+      html.push(
+        `<table class="md-table"><thead><tr>${head.map((c, k) => cell(c, k, 'th')).join('')}</tr></thead>` +
+          `<tbody>${body
+            .map((r) => `<tr>${head.map((_h, k) => cell(r[k] ?? '', k, 'td')).join('')}</tr>`)
+            .join('')}</tbody></table>`,
+      );
+      continue;
+    }
+
     // 无序列表
     if (/^\s*[-*+]\s+/.test(line)) {
       const items: string[] = [];
@@ -140,7 +209,8 @@ export function renderMarkdown(src: string): string {
       !/^#{1,6}\s/.test(lines[i]) &&
       !/^\s*[-*+]\s+/.test(lines[i]) &&
       !/^\s*\d+[.)]\s+/.test(lines[i]) &&
-      !/^>\s?/.test(lines[i])
+      !/^>\s?/.test(lines[i]) &&
+      !isTableStart(i)
     ) {
       buf.push(lines[i]);
       i++;
