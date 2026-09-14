@@ -5,6 +5,7 @@ import type {
   HistMessage,
   HistPart,
   IncompleteRequest,
+  LLMStats,
   OutputItem,
   SSEEvent,
   TodoItem,
@@ -104,15 +105,65 @@ export interface SessionRuntime {
   lastResponseId?: string;
   model?: string;
   usage?: Usage | null;
+  /** 会话累计统计(getConversation 的 stats;速度/缓存命中率等,圆环 tooltip 用) */
+  stats?: { llm: LLMStats; tools: { calls: number; time_ms: number } };
+  /** 当前生效的访问策略(getConversation 回报;草稿/旧 server 无值) */
+  policy?: string;
   todos: TodoItem[] | null;
   loaded: boolean;
   error?: string;
   /** 当前回合的 response id(给 item id 加限定,防跨回合 it_1 碰撞) */
   curRespId?: string;
+  /** 所属会话 id(工具耗时本地持久化用;线格式历史不带时间戳) */
+  sid?: string;
 }
 
 export function newRuntime(): SessionRuntime {
   return { items: [], running: false, pendingRequests: [], todos: null, loaded: false };
+}
+
+// ---------- 工具耗时本地持久化 ----------
+// 会话历史(线格式 llm.Message)不含时间戳,重开 App 后耗时无法从服务端
+// 恢复。工具结束时就把 startedAt/endedAt 按 sid+callId 记进 localStorage,
+// 历史恢复时回填到工具卡。
+const TOOL_DUR_KEY = 'grf-ui:tool-durs';
+/** 条目上限(超出丢最旧,防无限膨胀) */
+const TOOL_DUR_MAX = 4000;
+
+function readToolDurs(): Record<string, [number, number]> {
+  try {
+    const raw = localStorage.getItem(TOOL_DUR_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, [number, number]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveToolDur(sid: string | undefined, callId: string, startedAt: number, endedAt: number): void {
+  if (!sid || !callId || !startedAt || !endedAt) return;
+  try {
+    const all = readToolDurs();
+    all[`${sid}\u0000${callId}`] = [startedAt, endedAt];
+    const keys = Object.keys(all);
+    if (keys.length > TOOL_DUR_MAX) {
+      for (const k of keys.slice(0, keys.length - TOOL_DUR_MAX)) delete all[k];
+    }
+    localStorage.setItem(TOOL_DUR_KEY, JSON.stringify(all));
+  } catch {
+    /* localStorage 不可用(隐私模式等):放弃持久化,仅当次有效 */
+  }
+}
+
+// applySavedDurs 历史恢复后回填本地记录的工具耗时(不可变替换,触发渲染)。
+export function applySavedDurs(sid: string, items: ChatItem[]): void {
+  const all = readToolDurs();
+  const prefix = `${sid}\u0000`;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.kind !== 'tool' || !it.callId) continue;
+    const dur = all[prefix + it.callId];
+    if (dur) items[i] = { ...it, startedAt: dur[0], endedAt: dur[1] };
+  }
 }
 
 let seq = 0;
@@ -229,6 +280,41 @@ export function applyEvent(rt: SessionRuntime, ev: SSEEvent): boolean {
       }
       break;
     }
+    case 'grf:tool_call.args_delta': {
+      // 模型生成工具参数的流式增量(参数一流出就到,工具尚未执行):以
+      // bridge item id 寻址工具卡,没有则建卡——edit/write 的 +nn/-nn
+      // 得以随模型输出实时跳动。args 是残缺 JSON,统计端容错解析。
+      if (!ev.item_id) break;
+      const qid = `${rt.curRespId ?? 'pre'}\u0000${ev.item_id}`;
+      const delta = ev.delta ?? '';
+      const idx = items.findIndex((i) => i.kind === 'tool' && i.id === qid);
+      if (idx >= 0) {
+        const t = items[idx] as ToolItem;
+        // 不可变替换:工具卡按引用比较属性,原地改不会重渲染。
+        // 头片(name 先到、无参数)建卡后,后续事件补齐工具名。
+        items[idx] = {
+          ...t,
+          args: t.args + delta,
+          ...(ev.kind && !t.name ? { name: ev.kind } : {}),
+        };
+      } else {
+        items.push({
+          kind: 'tool',
+          id: qid,
+          callId: '',
+          name: ev.kind ?? '',
+          args: delta,
+          status: 'running',
+          output: '',
+          err: '',
+          agentId: '',
+          label: '',
+          startedAt: Date.now(),
+        });
+      }
+      changed = true;
+      break;
+    }
     case 'grf:tool_call.in_progress':
     case 'grf:tool_call.completed':
     case 'grf:tool_call.failed':
@@ -327,6 +413,18 @@ export function applyEvent(rt: SessionRuntime, ev: SSEEvent): boolean {
         i.streaming = false;
         if (i.kind === 'reasoning' && i.startedAt && !i.endedAt) i.endedAt = Date.now();
         changed = true;
+      }
+    }
+    // 失败/中断的回合:没收尾的运行中工具卡收口(参数流式建了卡但工具
+    // 未及执行,或执行中途被打断),避免永远转圈。暂停(incomplete)不收:
+    // 交互中的卡片等应答续跑。
+    if (ev.type === 'response.failed' || ev.type === 'response.cancelled') {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.kind === 'tool' && it.status === 'running') {
+          items[i] = { ...it, status: 'error', err: it.err || '回合已中断', endedAt: Date.now() };
+          changed = true;
+        }
       }
     }
     rt.lastResponseId = ev.response.id;
@@ -522,14 +620,20 @@ function upsertOutputItem(rt: SessionRuntime, item: OutputItem, done: boolean): 
 
 function upsertToolItem(rt: SessionRuntime, item: OutputItem, status?: ToolStatus): boolean {
   const items = rt.items;
-  const idx = items.findIndex(
-    (i) => i.kind === 'tool' && i.callId === item.call_id,
-  );
+  // 寻址优先 bridge item id(参数流式建的卡在 call_id 到位前只有它),
+  // 回退 call_id(历史恢复等无 item id 关联的来源)。
+  const qid = item.id ? `${rt.curRespId ?? 'pre'}\u0000${item.id}` : '';
+  let idx = qid
+    ? items.findIndex((i) => i.kind === 'tool' && i.id === qid)
+    : -1;
+  if (idx < 0 && item.call_id) {
+    idx = items.findIndex((i) => i.kind === 'tool' && i.callId === item.call_id);
+  }
   let target: ToolItem;
   if (idx < 0) {
     target = {
       kind: 'tool',
-      id: genId('t'),
+      id: qid || genId('t'),
       callId: item.call_id ?? '',
       name: item.name ?? '',
       args: item.input ?? item.arguments ?? '',
@@ -545,6 +649,7 @@ function upsertToolItem(rt: SessionRuntime, item: OutputItem, status?: ToolStatu
     // 不可变替换:工具卡按对象引用比较属性,原地改状态不会触发重渲染
     // (表现就是执行完的圈一直转)。
     target = { ...(items[idx] as ToolItem) };
+    if (item.call_id) target.callId = item.call_id;
     if (item.name) target.name = item.name;
     if (item.input || item.arguments) target.args = item.input ?? item.arguments ?? target.args;
     if (item.agent_id) target.agentId = item.agent_id;
@@ -562,6 +667,9 @@ function upsertToolItem(rt: SessionRuntime, item: OutputItem, status?: ToolStatu
   } else if (status === 'done' || (out && !status)) {
     target.status = 'done';
     target.endedAt = Date.now();
+  }
+  if (target.endedAt && target.startedAt && target.callId) {
+    saveToolDur(rt.sid, target.callId, target.startedAt, target.endedAt);
   }
   if (idx >= 0) items[idx] = target;
   // todo_write 的参数即任务列表(gh server 不发 grf:notice todos,任务
@@ -601,6 +709,8 @@ export function todosFromItems(items: ChatItem[]): TodoItem[] | null {
 function patchToolItem(rt: SessionRuntime, callId: string, patch: Partial<ToolItem>): boolean {
   const idx = rt.items.findIndex((i) => i.kind === 'tool' && i.callId === callId);
   if (idx < 0) return false;
-  rt.items[idx] = { ...(rt.items[idx] as ToolItem), ...patch };
+  const next = { ...(rt.items[idx] as ToolItem), ...patch };
+  rt.items[idx] = next;
+  if (patch.endedAt && next.startedAt) saveToolDur(rt.sid, callId, next.startedAt, next.endedAt!);
   return true;
 }

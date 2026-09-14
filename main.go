@@ -28,6 +28,7 @@ func main() {
 		Services: []application.Service{
 			application.NewService(&AppConfig{}),
 			application.NewService(sm),
+			application.NewService(&ModelConfig{}),
 			application.NewService(&Desktop{}),
 			application.NewService(GetTerminalManager()),
 		},

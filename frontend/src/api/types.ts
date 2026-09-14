@@ -154,6 +154,8 @@ export interface ConversationDetail {
   last_response_id: string;
   paused: boolean;
   running: boolean;
+  /** 当前生效的访问策略(write-workspace|off 等;旧 server 无此字段) */
+  policy?: string;
   stats: {
     llm: LLMStats;
     tools: { calls: number; time_ms: number };

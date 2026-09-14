@@ -85,6 +85,18 @@ export class GrfClient {
     return (await res.json()) as ConversationDetail;
   }
 
+  /** 运行时变更会话访问策略(立即生效,仅本会话;旧 server 404/400 时报错)。 */
+  async setConversationPolicy(id: string, policy: string): Promise<string> {
+    const res = await fetch(this.url(`/conversations/${id}/policy`), {
+      method: 'PUT',
+      headers: this.headers(),
+      body: JSON.stringify({ policy }),
+    });
+    if (!res.ok) throw await this.parseError(res);
+    const body = (await res.json()) as { policy: string };
+    return body.policy;
+  }
+
   async conversationItems(id: string): Promise<HistMessage[]> {
     const res = await fetch(this.url(`/conversations/${id}/items`), { headers: this.headers(false) });
     if (!res.ok) throw await this.parseError(res);

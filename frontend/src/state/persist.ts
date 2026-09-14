@@ -41,6 +41,9 @@ export function migrateIndex(raw: unknown): ProjectsIndex {
     version: 1,
     projects: Array.isArray(idx.projects) ? idx.projects : [],
     sessions: idx.sessions && typeof idx.sessions === 'object' ? idx.sessions : {},
+    // 上次所在会话(启动恢复选中;漏拷会导致重开不回到之前的会话)
+    lastActiveSessionId:
+      typeof idx.lastActiveSessionId === 'string' ? idx.lastActiveSessionId : undefined,
   };
 }
 

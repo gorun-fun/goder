@@ -17,6 +17,7 @@ import {
   applyResponseSnapshot,
   genId,
   historyToItems,
+  applySavedDurs,
   markRequestAnswered,
   materializeRequest,
   newRuntime,
@@ -61,6 +62,10 @@ export class GrfScope extends Emitter {
   activeProjectId?: string;
   activeSessionId?: string; // 真实 sid 或 draft id
 
+  /** 新会话访问策略偏好('write-workspace' | 'off';undefined = 跟随项目默认)。
+   * gh 的 policy 只随会话首条消息落定,故此值影响下一个新建的会话。 */
+  draftPolicy?: string;
+
   console: ConsoleEntry[] = [];
   consolePaused = false;
   private consoleMax = 800;
@@ -76,6 +81,47 @@ export class GrfScope extends Emitter {
     this.name = name;
     this.client = new GrfClient({ baseUrl: cfg.baseUrl, token: cfg.token });
     this.model = cfg.model;
+    this.draftPolicy = loadPolicyLocal(name);
+  }
+
+  /** 设置新会话策略偏好并持久化(localStorage,双形态通用)。 */
+  setDraftPolicy(p: string): void {
+    if (p !== 'write-workspace' && p !== 'off') return;
+    this.draftPolicy = p;
+    try {
+      localStorage.setItem(policyKey(this.name), p);
+    } catch {
+      /* 忽略 */
+    }
+    this.notify();
+  }
+
+  /** 设置随请求发送的模型('' = 服务端默认);本地持久化,不动连接状态。 */
+  setModel(m: string): void {
+    this.model = m || undefined;
+    saveConnLocal(this.name, {
+      baseUrl: this.client.config.baseUrl,
+      token: this.client.config.token,
+      ...(this.model ? { model: this.model } : {}),
+    });
+    this.notify();
+  }
+
+  /**
+   * 运行时变更已有会话的访问策略:立即生效、仅本会话、不落盘(与 gh
+   * set_policy 批准后同一落地路径)。旧 server 无此端点时报错提示。
+   */
+  async setSessionPolicy(sid: string, policy: string): Promise<boolean> {
+    try {
+      const applied = await this.client.setConversationPolicy(sid, policy);
+      const rt = this.runtimes.get(sid);
+      if (rt) rt.policy = applied;
+      this.log('info', `访问策略已切换为 ${applied}(本会话生效)`);
+      return true;
+    } catch (err) {
+      this.log('warn', `策略变更失败:${errText(err)}`);
+      return false;
+    }
   }
 
   // ---------- 生命周期 ----------
@@ -83,13 +129,22 @@ export class GrfScope extends Emitter {
   async start(): Promise<void> {
     await this.reloadIndex();
     await this.refreshConversations();
-    // 恢复上次退出时所在的会话(仅真实 sid;草稿/已不存在的会话忽略)
-    const last = this.index.lastActiveSessionId;
-    if (last && this.conversations.has(last)) this.selectSession(last);
+    this.maybeRestoreSession();
     void this.probeHealth();
     this.refreshTimer = setInterval(() => {
       void this.tick();
     }, 5_000);
+  }
+
+  // maybeRestoreSession 恢复上次所在会话(仅真实 sid;草稿/已不存在的忽略)。
+  // 只在当前未选中任何会话时执行:桌面态启动有竞态 —— start() 先于
+  // host 桥就绪跑 reloadIndex(此时还是 localStorage 持久化,读到空索引),
+  // 桥就绪换文件持久化重载后需再补跑一次;5 秒轮询也会反复进入,
+  // 用户已手动选过会话则不再打扰。
+  private maybeRestoreSession(): void {
+    if (this.activeSessionId) return;
+    const last = this.index.lastActiveSessionId;
+    if (last && this.conversations.has(last)) this.selectSession(last);
   }
 
   // tick 周期对齐:空闲时同步会话列表;运行中时探测服务器终态,
@@ -141,6 +196,8 @@ export class GrfScope extends Emitter {
       });
     }
     if (migrated) this.persistIndex();
+    // 桥就绪后重载(桌面态文件持久化)补跑会话恢复
+    this.maybeRestoreSession();
     this.notify();
   }
 
@@ -232,6 +289,8 @@ export class GrfScope extends Emitter {
         void this.syncRunningState(sid);
       }
     }
+    // 会话列表就绪后补跑"恢复上次会话"(索引先到、列表后到的时序)
+    this.maybeRestoreSession();
     this.notify();
   }
 
@@ -240,6 +299,9 @@ export class GrfScope extends Emitter {
       const detail = await this.client.getConversation(sid);
       const rt = this.ensureRuntime(sid);
       rt.running = detail.running;
+      // 会话累计统计(速度/缓存命中率)与当前访问策略(composer 圆环/策略按钮用)
+      if (detail.stats) rt.stats = detail.stats;
+      if (detail.policy) rt.policy = detail.policy;
       // 暂停中(等待交互):物化待答卡片(重开会话/多窗口场景)。
       if (detail.paused && !this.inflightSends.has(sid)) {
         if (detail.last_response_id) rt.lastResponseId = detail.last_response_id;
@@ -363,6 +425,7 @@ export class GrfScope extends Emitter {
       rt = newRuntime();
       this.runtimes.set(sid, rt);
     }
+    rt.sid = sid; // 工具耗时本地持久化按键用
     return rt;
   }
 
@@ -407,6 +470,8 @@ export class GrfScope extends Emitter {
       // 已有 live 物品的会话(本进程刚聊过)不重放历史。
       if (rt.items.length === 0) {
         rt.items = historyToItems(hist);
+        // 回填本地记录的工具耗时(线格式历史不带时间戳,见 chat-model)
+        applySavedDurs(sid, rt.items);
         // 回填任务列表(从最后一个 todo_write 调用还原;详情栏/状态浮窗用)
         rt.todos = todosFromItems(rt.items);
         // 恢复暂停卡片:从最新终态 response 拿 grf_requests。
@@ -429,6 +494,9 @@ export class GrfScope extends Emitter {
     if (!rt.lastResponseId) return;
     try {
       const snap = await this.client.retrieveResponse(rt.lastResponseId);
+      // 线格式历史不带 usage/model:从终态快照回填(composer 用量统计/详情栏)。
+      if (snap?.usage) rt.usage = snap.usage;
+      if (snap?.model) rt.model = snap.model;
       if (snap?.status === 'incomplete' && snap.incomplete_details?.reason === 'grf:input_required') {
         rt.pendingRequests = snap.incomplete_details.grf_requests ?? [];
         for (const req of rt.pendingRequests) {
@@ -603,8 +671,13 @@ export class GrfScope extends Emitter {
     const previous = isDraft ? undefined : rt.lastResponseId ?? this.index.sessions[sid]?.lastResponseId;
     // 首条消息携带 grf:session:项目默认配置 + 工作区(项目根目录,
     // 让 agent 的文件/终端工具直接落在项目里;无路径的项目用服务端默认)。
+    // composer 的策略选择(draftPolicy)优先于项目默认。
     const grfSession = isDraft
-      ? { workspace: draftProject?.path, ...draftProject?.defaults }
+      ? {
+          workspace: draftProject?.path,
+          ...draftProject?.defaults,
+          ...(this.draftPolicy ? { policy: this.draftPolicy } : {}),
+        }
       : undefined;
 
     const ac = new AbortController();
@@ -891,6 +964,18 @@ export const scopeConfigs = new Map<string, ConnectionConfig>();
 // 也能让 webview 冷启动更快连上)。
 const connKey = (name: string) => `grf-ui:${name}:conn`;
 
+// 新会话策略偏好持久化(随 scope 隔离;仅接受预制两值)。
+const policyKey = (name: string) => `grf-ui:${name}:policy`;
+
+function loadPolicyLocal(name: string): string | undefined {
+  try {
+    const v = localStorage.getItem(policyKey(name));
+    return v === 'write-workspace' || v === 'off' ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function saveConnLocal(name: string, cfg: ConnectionConfig): void {
   try {
     localStorage.setItem(connKey(name), JSON.stringify(cfg));
@@ -931,9 +1016,13 @@ export function getScope(name = 'default'): GrfScope {
 }
 
 export function configureScope(name: string, cfg: Partial<ConnectionConfig>): GrfScope {
+  // 兜底 base 保留已保存的 model:启动期 initWebConn 会带着仅 baseUrl/token
+  // 的补丁进来,若 base 丢掉 model 会把已选模型从本地存储里抹掉。
+  const saved = loadConnLocal(name);
   const base = scopeConfigs.get(name) ?? {
-    baseUrl: loadConnLocal(name)?.baseUrl ?? locationDefaultBase(),
-    token: loadConnLocal(name)?.token ?? '',
+    baseUrl: saved?.baseUrl ?? locationDefaultBase(),
+    token: saved?.token ?? '',
+    ...(saved?.model ? { model: saved.model } : {}),
   };
   const merged = { ...base, ...cfg };
   scopeConfigs.set(name, merged);

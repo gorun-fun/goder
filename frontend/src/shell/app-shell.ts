@@ -205,6 +205,8 @@ export class GrfAppShell extends GrfPanel {
       this.view = 'work';
     });
     this.addEventListener('grf-close-files', () => (this.filesView = null));
+    // 右栏确保展开(file-view html 眼睛开浏览器 tab 时;已开则无变化)
+    this.addEventListener('grf-show-sidebar', () => (this.showSidebar = true));
     // 左栏文件树点文件:右栏为该文件开一个独立 tab 预览(已开则激活);
     // 右栏未开时自动展开
     this.addEventListener('grf-open-file', (e: Event) => {

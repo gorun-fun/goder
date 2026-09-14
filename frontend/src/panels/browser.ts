@@ -129,6 +129,20 @@ export class GrfBrowser extends GrfPanel {
     }
   }
 
+  /** open 外部导航入口(file-view 的 html 渲染眼睛):直接加载指定地址 */
+  open(u: string): void {
+    const n = normalizeUrl(u);
+    if (!n) return;
+    this.input = n;
+    this.url = n;
+    this.frameSrc = n;
+    try {
+      localStorage.setItem(this.storeKey(), n);
+    } catch {
+      /* 忽略 */
+    }
+  }
+
   private reload(): void {
     if (!this.url) return;
     this.frameSrc = '';

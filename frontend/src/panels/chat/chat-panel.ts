@@ -10,11 +10,13 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls, panelRegistered } from '../../ui/base';
 import { renderMarkdown } from '../../util/markdown';
-import { truncate, fmtTokens, fmtDuration } from '../../util/fmt';
+import { truncate, fmtDuration } from '../../util/fmt';
+import { modelContextWindow } from '../../util/modelctx';
 import { icon } from '../../util/icons';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
 import { inWails, gitStatus, type GitStatusDTO } from '../../host/bridge';
 import type { AskItem, ChatItem } from '../../state/chat-model';
+import { settingsStore } from '../../state/settings';
 import './tool-card';
 import './ask-form';
 import './approval-card';
@@ -78,6 +80,12 @@ export class GrfChat extends GrfPanel {
   /** 状态浮窗收缩态(单行只显示 git 行级变更);浮窗本身自动显示:
    * 有 git/todo 内容才渲染,无内容不出现(无手动开关) */
   @state() private statusCollapsed = false;
+  /** 聊天列过窄(右栏/窗口挤压):状态浮窗自动收成单行,避免盖住对话内容 */
+  @state() private colNarrow = false;
+  /** 聊天列窄阈值(px):低于即自动收缩浮窗 */
+  private static readonly NARROW_AT = 560;
+  /** 聊天列宽度观察(浮窗自动收缩用) */
+  private colRo: ResizeObserver | null = null;
   /** 当前项目 git 状态(状态浮窗用;null = 未取到/不适用) */
   @state() private git: GitStatusDTO | null = null;
   @state() private gitErr = '';
@@ -87,6 +95,8 @@ export class GrfChat extends GrfPanel {
   @state() private sideWidth: number | null = null;
   /** 右栏 "+" 类型菜单展开态 */
   @state() private sideMenuOpen = false;
+  /** "+" 菜单定位:菜单左上角对齐加号左缘(距 .tabs-head 左侧的像素数) */
+  @state() private sideMenuLeft = 0;
   /** 底栏终端 tab 列表(多终端;元素常驻,激活切换保活) */
   @state() private bottomTerms: Array<{ id: string; el: HTMLElement }> = [];
   /** 底栏当前激活的终端 tab */
@@ -97,6 +107,8 @@ export class GrfChat extends GrfPanel {
   /** 刚复制成功的消息 id(图标短暂变为 ✓) */
   @state() private copiedId?: string;
   private copiedTimer = 0;
+  /** 设置页模型配置订阅(模型下拉数据源) */
+  private settingsUnsub?: () => void;
 
   /** 头部空白区为窗口拖拽区(移动/双击缩放;非桌面态静默) */
   private tdrag: TitleDrag | null = null;
@@ -177,11 +189,27 @@ export class GrfChat extends GrfPanel {
         cursor: col-resize;
         position: relative;
       }
+      /* 命中区左右各扩 5px:4px 线太细,浏览器 iframe 贴线时几乎点不中 */
+      .gutter-side::before {
+        content: '';
+        position: absolute;
+        inset: 0 -5px;
+      }
       .gutter-side::after {
         content: '';
         position: absolute;
         inset: 0 1.5px;
         background: var(--grf-border-soft);
+      }
+      /* 拖拽中:禁用右栏内嵌元素(尤其浏览器 iframe)的指针事件 ——
+       * pointermove 一旦落在 iframe 上会被其吞掉,拖拽就"卡住"难拖 */
+      :host(.dragging) .side,
+      :host(.dragging) .bt-pane {
+        pointer-events: none;
+      }
+      /* 拖拽中全局统一 col-resize 光标(元素被禁指针后光标会闪回默认) */
+      :host(.dragging) {
+        cursor: col-resize;
       }
       .gutter-side:hover::after {
         background: var(--grf-border-hover);
@@ -200,6 +228,13 @@ export class GrfChat extends GrfPanel {
       .side.off {
         display: none;
       }
+      /* tab 行外包一层定位容器:下拉菜单(.side-menu)不能放在 .side-tabs
+       * 内 —— 该行横向滚动(overflow-x:auto)会把 absolute 子元素裁掉,
+       * 表现为"+"点了菜单不出现 */
+      .tabs-head {
+        flex: none;
+        position: relative;
+      }
       .side-tabs {
         flex: none;
         display: flex;
@@ -207,7 +242,6 @@ export class GrfChat extends GrfPanel {
         gap: 2px;
         padding: 5px 6px 0;
         border-bottom: 1px solid var(--grf-border);
-        position: relative;
         user-select: none;
         min-height: 32px;
         /* 文件 tab(相对路径标题)可能很多/很长:tab 行横向滚动 */
@@ -270,7 +304,8 @@ export class GrfChat extends GrfPanel {
       .side-menu {
         position: absolute;
         top: 100%;
-        right: 6px;
+        /* 左上角对齐"+"按钮(打开时实测,见 toggleSideMenu;行内 style 覆盖) */
+        left: 0;
         z-index: 30;
         background: var(--grf-bg-raise);
         border: 1px solid var(--grf-border);
@@ -1097,16 +1132,6 @@ export class GrfChat extends GrfPanel {
         max-width: 860px;
         margin: 0 auto;
       }
-      .usage-line {
-        max-width: 860px;
-        margin: 0 auto;
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
-        padding: 3px 2px 0;
-      }
 
       /* ---------- 右上角状态浮窗 ---------- */
       .status-pop {
@@ -1271,16 +1296,53 @@ export class GrfChat extends GrfPanel {
     window.addEventListener('pointerup', this.stopResizeDrag);
     window.addEventListener('pointerdown', this.onWinPointerDown);
     this.gitTimer = window.setInterval(() => void this.pollGit(), 8000);
+    // 模型选择下拉的数据源(桌面态 gh settings.json;幂等,已加载则跳过)
+    this.settingsUnsub = settingsStore.subscribe(() => this.requestUpdate());
+    void settingsStore.loadModelCfg();
+    // file-view 的 html「眼睛」:右栏开浏览器 tab 并导航渲染 data URL。
+    // tab 状态归 app-shell 管,先上抛开 tab,等本面板带着 browser pane
+    // 重渲染后再取 grf-browser 元素导航。
+    this.addEventListener('grf-open-browser-url', (e: Event) => {
+      const { url } = (e as CustomEvent<{ url: string }>).detail;
+      this.fire('grf-side-tab-open', 'browser' as SidePanelTab);
+      this.fire('grf-show-sidebar');
+      void this.updateComplete.then(() => {
+        void this.updateComplete.then(() => {
+          const b = this.renderRoot.querySelector('grf-browser') as { open?(u: string): void } | null;
+          b?.open?.(url);
+        });
+      });
+    });
+    // 聊天列宽度观察:窄于阈值自动把状态浮窗收成单行(不遮对话内容)
+    this.colRo = new ResizeObserver((es) => {
+      const w = es[0]?.contentRect.width ?? 0;
+      const narrow = w > 0 && w < GrfChat.NARROW_AT;
+      if (narrow !== this.colNarrow) {
+        this.colNarrow = narrow;
+        if (narrow) this.statusCollapsed = true;
+      }
+    });
+    this.colRo.observe(this.renderRoot.querySelector('.col-main') ?? this);
+  }
+
+  // connectedCallback 时 .col-main 尚未渲染,首次渲染后再补挂宽度观察
+  protected firstUpdated(): void {
+    const el = this.renderRoot.querySelector('.col-main');
+    if (el && this.colRo) this.colRo.observe(el);
   }
 
   disconnectedCallback(): void {
     this.tdrag?.dispose();
     this.tdrag = null;
+    this.colRo?.disconnect();
+    this.colRo = null;
     window.removeEventListener('pointermove', this.onResizeDrag);
     window.removeEventListener('pointerup', this.stopResizeDrag);
     window.removeEventListener('pointerdown', this.onWinPointerDown);
     if (this.gitTimer) window.clearInterval(this.gitTimer);
     this.gitTimer = undefined;
+    this.settingsUnsub?.();
+    this.settingsUnsub = undefined;
     this.bottomTerms = [];
     this.bottomActiveId = '';
     this.bottomTermsBySid.clear();
@@ -1302,7 +1364,15 @@ export class GrfChat extends GrfPanel {
 
   private stopResizeDrag = (): void => {
     this.dragging = null;
+    this.classList.remove('dragging');
   };
+
+  // startResizeDrag 拖拽条按下:记录方向并给宿主挂 .dragging(禁用
+  // iframe/终端等内嵌内容的指针事件,否则拖拽一碰到它们就丢事件)。
+  private startResizeDrag(dir: 'bottom' | 'side'): void {
+    this.dragging = dir;
+    this.classList.add('dragging');
+  }
 
   // 右栏 "+" 菜单:点击菜单外任意处关闭
   private onWinPointerDown = (e: PointerEvent): void => {
@@ -1411,9 +1481,35 @@ export class GrfChat extends GrfPanel {
     const rt = sid ? s?.runtimes.get(sid) : undefined;
     const title = sid ? s!.sessionTitle(sid) : '';
     const running = (sid && s!.isRunning(sid)) ?? false;
+    // 「运行中」chip 已删(消息流自带运行指示);等待输入仍提示
     const waiting = !!rt && rt.pendingRequests.length > 0 && !running;
     // 待应答提问:交互控件渲染在底部输入框内(点击选项即确认)
     const pendingAsks = rt?.items.filter((i): i is AskItem => i.kind === 'ask' && i.state === 'pending') ?? [];
+    // 访问策略:已有会话取服务器回报(rt.policy,支持运行时变更);草稿
+    // 或未知(旧 server)回落 项目默认/本机偏好。gh 的 policy 串可能是
+    // write|read 组合,展示映射到两个预制选项。
+    const projId = sid
+      ? sid.startsWith('draft:')
+        ? s?.drafts.get(sid)?.projectId
+        : s?.index.sessions[sid]?.projectId
+      : undefined;
+    const projPolicy = s?.index.projects.find((p) => p.id === projId)?.defaults?.policy;
+    const policySrc = rt?.policy ?? s?.draftPolicy ?? projPolicy ?? 'off';
+    const policy: 'write-workspace' | 'off' = policySrc && policySrc !== 'off' ? 'write-workspace' : 'off';
+    const policyImmediate = !!sid && !sid.startsWith('draft:');
+    // 当前使用的模型:会话实际模型(服务端回报)优先,未知时回落本机选择
+    // 与 gh 配置的默认;菜单分组 = 供应商(桌面态)+ 当前模型兜底分组
+    const curModel = rt?.model || s?.model || settingsStore.modelCfg?.default || '';
+    const activeModel = s?.model || rt?.model || '';
+    const providers = (settingsStore.modelCfg?.providers ?? []).map((p) => ({
+      name: p.name,
+      models: [...p.models],
+    }));
+    if (curModel && !providers.some((g) => g.models.includes(curModel))) {
+      providers.push({ name: '当前模型', models: [curModel] });
+    }
+    // 上下文窗口按会话实际模型估算(圆环分母)
+    const contextWindow = modelContextWindow(rt?.model || curModel || undefined);
 
     return html`
       ${this.noHeader
@@ -1430,11 +1526,7 @@ export class GrfChat extends GrfPanel {
                   </span>`
                 : nothing}
               <span class="title" title=${title}>${title || '未选择会话'}</span>
-              ${running
-                ? html`<span class="chip running"><span class="dot"></span>运行中</span>`
-                : waiting
-                  ? html`<span class="chip waiting"><span class="dot"></span>等待输入</span>`
-                  : nothing}
+              ${waiting ? html`<span class="chip waiting"><span class="dot"></span>等待输入</span>` : nothing}
               <span class="actions">
                 ${this.bottomToggle
                   ? html`<button class="ghost tg ${this.bottomOn ? 'on' : ''}" title="终端(当前项目目录)" @click=${() => this.fire('grf-toggle-terminal')}>${unsafeHTML(icon.terminal)}</button>`
@@ -1468,23 +1560,22 @@ export class GrfChat extends GrfPanel {
                       .running=${running}
                       .inputRequired=${waiting}
                       .asks=${pendingAsks}
+                      .policy=${policy}
+                      .policyImmediate=${policyImmediate}
+                      .providers=${providers}
+                      .model=${curModel}
+                      .activeModel=${activeModel}
+                      .usage=${rt?.usage ?? null}
+                      .usageModel=${rt?.model ?? ''}
+                      .stats=${rt?.stats ?? null}
+                      .contextWindow=${contextWindow}
+                      @policy-change=${this.onPolicyChange}
+                      @model-change=${this.onModelChange}
                       @send=${this.onSend}
                       @answer=${this.onAskAnswer}
                       @dismiss=${this.onAskDismiss}
                       @stop=${() => void s!.cancelActive()}
                     ></grf-composer>
-                    ${rt?.usage
-                      ? html`
-                          <div class="usage-line">
-                            <span>in ${fmtTokens(rt.usage.input_tokens)}</span>
-                            <span>out ${fmtTokens(rt.usage.output_tokens)}</span>
-                            ${rt.usage.input_tokens_details?.cached_tokens
-                              ? html`<span>缓存 ${fmtTokens(rt.usage.input_tokens_details.cached_tokens)}</span>`
-                              : nothing}
-                            ${rt.model ? html`<span>${rt.model}</span>` : nothing}
-                          </div>
-                        `
-                      : nothing}
                   </div>
                 </div>
               `}
@@ -1506,7 +1597,7 @@ export class GrfChat extends GrfPanel {
   private renderBottom() {
     if (!this.bottomToggle) return nothing;
     return html`
-      <div class="gutter-h ${this.bottomOn ? '' : 'off'}" @pointerdown=${() => (this.dragging = 'bottom')}></div>
+      <div class="gutter-h ${this.bottomOn ? '' : 'off'}" @pointerdown=${() => this.startResizeDrag('bottom')}></div>
       <div class="bottom ${this.bottomOn ? '' : 'off'}" style="height:${this.bottomHeight}px">
         <div class="bt-bar">
           ${this.bottomTerms.map(
@@ -1631,7 +1722,7 @@ export class GrfChat extends GrfPanel {
     const cwd = this.store?.activeProjectPath() ?? '';
 
     return html`
-      <div class="gutter-side ${this.sidebarOn ? '' : 'off'}" @pointerdown=${() => (this.dragging = 'side')}></div>
+      <div class="gutter-side ${this.sidebarOn ? '' : 'off'}" @pointerdown=${() => this.startResizeDrag('side')}></div>
       <aside class="side ${this.sidebarOn ? '' : 'off'}" style="width:${width}px">
         ${this.renderSideBar(tabs, avail)}
         <div class="side-body">
@@ -1669,6 +1760,24 @@ export class GrfChat extends GrfPanel {
     return t.startsWith('file:') ? 'file' : (t as SidePanelKind);
   }
 
+  // toggleSideMenu 开"+"菜单:打开时实测加号位置,菜单左上角对齐加号
+  // 左缘(tab 行可横向滚动,加号位置不固定)。右侧空间不足时向左收,
+  // 保证菜单不溢出右栏。
+  private toggleSideMenu(): void {
+    if (this.sideMenuOpen) {
+      this.sideMenuOpen = false;
+      return;
+    }
+    const add = this.renderRoot.querySelector('.stab.add') as HTMLElement | null;
+    if (add) {
+      // offsetLeft 相对 .tabs-head(.side-tabs 未定位,滚动不改变 offset)
+      const head = this.renderRoot.querySelector('.tabs-head') as HTMLElement | null;
+      const max = head ? head.clientWidth - 170 : add.offsetLeft;
+      this.sideMenuLeft = Math.max(0, Math.min(add.offsetLeft, max));
+    }
+    this.sideMenuOpen = true;
+  }
+
   // tabLabel 类型 tab 用固定名;文件 tab 显示项目内相对路径。
   private tabLabel(t: SidePanelTab): string {
     if (t.startsWith('file:')) {
@@ -1698,6 +1807,7 @@ export class GrfChat extends GrfPanel {
       `;
     }
     return html`
+      <div class="tabs-head">
       <div class="side-tabs">
         ${tabs.map(
           (t) => html`
@@ -1717,30 +1827,29 @@ export class GrfChat extends GrfPanel {
             </span>
           `,
         )}
-        <span class="stab add" title="打开其他面板" @click=${() => (this.sideMenuOpen = !this.sideMenuOpen)}>
-          ${unsafeHTML(icon.plus)}
-        </span>
-        ${this.sideMenuOpen
-          ? html`
-              <div class="side-menu">
-                ${avail.map(
-                  (t) => html`
-                    <div
-                      class="mi"
-                      @click=${() => {
-                        this.sideMenuOpen = false;
-                        this.fire('grf-side-tab-open', t);
-                      }}
-                    >
-                      ${unsafeHTML(SIDE_TAB_META[this.tabKind(t)].icon)}
-                      <span>${this.tabLabel(t)}</span>
-                      ${tabs.includes(t) ? html`<span class="mitag">已打开</span>` : nothing}
-                    </div>
-                  `,
-                )}
-              </div>
-            `
-          : nothing}
+        <span class="stab add" title="打开其他面板" @click=${() => this.toggleSideMenu()}>${unsafeHTML(icon.plus)}</span>
+      </div>
+      ${this.sideMenuOpen
+        ? html`
+            <div class="side-menu" style=${`left:${this.sideMenuLeft}px`}>
+              ${avail.map(
+                (t) => html`
+                  <div
+                    class="mi"
+                    @click=${() => {
+                      this.sideMenuOpen = false;
+                      this.fire('grf-side-tab-open', t);
+                    }}
+                  >
+                    ${unsafeHTML(SIDE_TAB_META[this.tabKind(t)].icon)}
+                    <span>${this.tabLabel(t)}</span>
+                    ${tabs.includes(t) ? html`<span class="mitag">已打开</span>` : nothing}
+                  </div>
+                `,
+              )}
+            </div>
+          `
+        : nothing}
       </div>
     `;
   }
@@ -1759,8 +1868,9 @@ export class GrfChat extends GrfPanel {
     if (!hasGit && !hasTodos) return nothing;
 
     // 收缩态:单行显示 git 行级变更或任务完成度(哪个有显示哪个),
-    // 整行可点击展开(按钮点击冒泡到同一处理,效果一致)
-    if (this.statusCollapsed) {
+    // 整行可点击展开(按钮点击冒泡到同一处理,效果一致)。
+    // 聊天列过窄(colNarrow)时强制单行,避免浮窗盖住对话内容。
+    if (this.statusCollapsed || this.colNarrow) {
       const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
       return html`
         <div
@@ -2065,6 +2175,21 @@ export class GrfChat extends GrfPanel {
 
   private onSend(e: CustomEvent<{ text: string; images?: string[] }>): void {
     void this.store!.send(e.detail.text, e.detail.images);
+  }
+
+  // composer 策略选择:已有会话即时生效(服务端运行时变更);草稿则随首条消息
+  private onPolicyChange(e: CustomEvent<string>): void {
+    const sid = this.sid;
+    if (sid && !sid.startsWith('draft:')) {
+      void this.store!.setSessionPolicy(sid, e.detail);
+    } else {
+      this.store!.setDraftPolicy(e.detail);
+    }
+  }
+
+  // composer 模型选择:作为之后回合的请求模型
+  private onModelChange(e: CustomEvent<string>): void {
+    this.store!.setModel(e.detail);
   }
 
   // ---------- 用户消息:复制 / 编辑后重新发送 ----------

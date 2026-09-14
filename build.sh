@@ -26,6 +26,17 @@ case "${1:-}" in
 esac
 
 echo "==> Go 构建(wails v3 桌面)"
+# macOS:Go 链接器固定按 11.0 生成 LC_BUILD_VERSION,而新版 Xcode SDK 默认把
+# C/ObjC 目标文件编成当前系统版本(26+),链接时便刷一屏
+# "was built for newer 'macOS' version (26.0) than being linked (11.0)"。
+# 把 CGO 的部署目标显式压到同一版本即可消除(与 Info.plist 的
+# LSMinimumSystemVersion 保持一致;可用 MACOS_MIN_VERSION 覆写)。
+if [ "$(uname)" = "Darwin" ]; then
+  MACOS_MIN_VERSION="${MACOS_MIN_VERSION:-11.0}"
+  export MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN_VERSION"
+  export CGO_CFLAGS="-O2 -g -mmacosx-version-min=$MACOS_MIN_VERSION"
+  export CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$MACOS_MIN_VERSION"
+fi
 go build -o grf-harness-ui .
 echo "==> 二进制: ./grf-harness-ui"
 

@@ -9,11 +9,15 @@ import {
   inWails,
   initHostBridge,
   loadAppConfig,
+  loadModelConfig,
   saveAppConfig,
+  saveModelConfig,
   serverStart,
   serverStatus,
   serverStop,
   type AppConfigDTO,
+  type ModelConfigDTO,
+  type ProviderDTO,
   type ServerStatusDTO,
 } from '../host/bridge';
 import { getScope, configureScope, savedConn } from './scope';
@@ -93,6 +97,8 @@ class SettingsStore {
     serverAddr: '127.0.0.1:7400',
   };
   srv: ServerStatusDTO | null = null;
+  /** gh 侧模型配置(settings.json 的 providers/default);非桌面态为 null */
+  modelCfg: ModelConfigDTO | null = null;
   appearance: Appearance = { ...DEFAULT_APPEARANCE };
   /** 桌面态桥配置是否已加载完成 */
   loaded = false;
@@ -189,6 +195,73 @@ class SettingsStore {
     configureScope(scope, { model: this.cfg.defaultModel || undefined });
   }
 
+  // ---------- 模型供应商(gh settings.json;仅桌面态可读写) ----------
+
+  /** 进入模型设置时拉取;force 用于保存后或外部改动后的强制刷新。 */
+  async loadModelCfg(force = false): Promise<void> {
+    if (!inWails()) return;
+    if (this.modelCfg && !force) return;
+    const cfg = await loadModelConfig().catch(() => null);
+    if (cfg) {
+      this.modelCfg = cfg;
+      // gh 侧已有默认模型而本端未设置时回填,避免两处默认值打架。
+      if (!this.cfg.defaultModel && cfg.default) this.cfg = { ...this.cfg, defaultModel: cfg.default };
+      this.bump();
+    }
+  }
+
+  /** 把当前内存中的供应商配置写回 settings.json。 */
+  async saveModelCfg(): Promise<void> {
+    if (!this.modelCfg) return;
+    await saveModelConfig(this.modelCfg).catch(() => undefined);
+  }
+
+  private patchProviders(fn: (list: ProviderDTO[]) => ProviderDTO[]): void {
+    if (!this.modelCfg) return;
+    this.modelCfg = { ...this.modelCfg, providers: fn(this.modelCfg.providers) };
+    this.bump();
+  }
+
+  /** 新增(同名则覆盖)供应商。 */
+  addProvider(p: ProviderDTO): void {
+    this.patchProviders((l) => [...l.filter((x) => x.name !== p.name), p]);
+    void this.saveModelCfg();
+  }
+
+  updateProvider(name: string, patch: Partial<ProviderDTO>): void {
+    this.patchProviders((l) => l.map((x) => (x.name === name ? { ...x, ...patch } : x)));
+    void this.saveModelCfg();
+  }
+
+  /** 重命名;与目标名已存在时覆盖目标(旧的先摘掉,避免双份)。 */
+  renameProvider(oldName: string, newName: string): void {
+    const to = newName.trim();
+    if (!to || to === oldName) return;
+    this.patchProviders((l) => {
+      const rest = l.filter((x) => x.name !== oldName && x.name !== to);
+      const src = l.find((x) => x.name === oldName);
+      const item: ProviderDTO = { ...(src ?? { name: to, type: '', baseUrl: '', apiKey: '', models: [] }), name: to };
+      const oldIdx = l.findIndex((x) => x.name === oldName);
+      const out = [...rest];
+      out.splice(oldIdx < 0 ? out.length : Math.min(oldIdx, out.length), 0, item);
+      return out;
+    });
+    void this.saveModelCfg();
+  }
+
+  removeProvider(name: string): void {
+    this.patchProviders((l) => l.filter((x) => x.name !== name));
+    void this.saveModelCfg();
+  }
+
+  /** 默认模型:app 配置(前端请求)与 gh settings.json(服务端默认)同步写。 */
+  async setDefaultModel(scope: string, value: string): Promise<void> {
+    this.patchCfg({ defaultModel: value });
+    if (this.modelCfg) this.modelCfg = { ...this.modelCfg, default: value };
+    await this.saveCfg(scope);
+    await this.saveModelCfg();
+  }
+
   async toggleServer(): Promise<void> {
     if (!inWails()) return;
     this.srv = this.srv?.running ? await serverStop() : await serverStart();
@@ -229,6 +302,7 @@ class SettingsStore {
       if (!this.srv?.running) this.srv = await serverStart().catch(() => null);
     }
     this.loaded = true;
+    await this.loadModelCfg();
     this.applyDefaultModel(scope);
     this.bump();
   }

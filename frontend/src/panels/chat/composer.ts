@@ -1,12 +1,45 @@
 // composer.ts — 聊天输入框:自动增高、Enter 发送 / Shift+Enter 换行、
 // 粘贴/选择图片(data URL 多模态)、运行中切换为停止按钮。
+// 底部工具栏:左侧「+」附件与访问策略(弹出列表,已有会话立即生效),
+// 右侧上下文占用圆环(悬停看详情)、两级模型菜单(供应商 → 模型,按钮
+// 直接显示当前使用的模型)与发送按钮。
 // 模型暂停提问(ask)时,输入框整体变高并在框内直接展示选项与问题,
 // 点击单选选项即确认提交。
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { theme, controls } from '../../ui/base';
+import { fmtTokens } from '../../util/fmt';
 import type { AskItem } from '../../state/chat-model';
+import type { LLMStats, Usage } from '../../api/types';
 import './ask-form';
+
+/** 新会话访问策略(与 gh 预制策略选项一一对应) */
+export type DraftPolicy = 'write-workspace' | 'off';
+
+/** 模型菜单的供应商分组 */
+export interface ModelGroup {
+  name: string;
+  models: string[];
+}
+
+/**
+ * 浮层定位(fixed):.composer-area 是 overflow 滚动容器,向上弹出的
+ * 浮层若走普通 absolute 会被裁剪,故按锚点按钮的视口坐标定位。
+ */
+interface PopPos {
+  top: string;
+  left?: string;
+  right?: string;
+}
+
+const POLICY_OPTIONS: Array<{ value: DraftPolicy; label: string; desc: string }> = [
+  {
+    value: 'write-workspace',
+    label: '工作区访问',
+    desc: '文件工具与终端沙箱限制在工作区内',
+  },
+  { value: 'off', label: '完全访问', desc: '解除沙箱与读写限制' },
+];
 
 @customElement('grf-composer')
 export class GrfComposer extends LitElement {
@@ -17,9 +50,33 @@ export class GrfComposer extends LitElement {
   /** 待应答的提问(非空时输入框内嵌问题与选项) */
   @property({ type: Array }) asks: AskItem[] = [];
   @property({ type: String }) placeholder = '发送消息…(Enter 发送,Shift+Enter 换行)';
+  /** 新会话访问策略:write-workspace(工作区访问)| off(完全访问) */
+  @property({ type: String }) policy: DraftPolicy = 'off';
+  /** 策略可即时生效(已有会话;false = 草稿,随首条消息生效) */
+  @property({ type: Boolean }) policyImmediate = false;
+  /** 模型菜单数据:供应商 → 模型(空 = 无法枚举) */
+  @property({ type: Array }) providers: ModelGroup[] = [];
+  /** 当前使用的模型('' = 未知/服务端默认,按钮回落显示「默认模型」) */
+  @property({ type: String }) model = '';
+  /** 选中态模型(菜单打勾/下一回合使用;'' = 未显式选择,回落当前模型) */
+  @property({ type: String }) activeModel = '';
+  /** 本会话用量(最近一次 response 的 usage;null = 无数据) */
+  @property({ type: Object }) usage: Usage | null = null;
+  /** 用量详情里展示的会话模型(服务端回报;空 = 未知) */
+  @property({ type: String }) usageModel = '';
+  /** 会话累计统计(速度/缓存命中率;null = 未取到) */
+  @property({ type: Object }) stats: { llm: LLMStats } | null = null;
+  /** 当前模型的上下文窗口(token 数,估算;占用圆环分母) */
+  @property({ type: Number }) contextWindow = 128_000;
 
   @state() private images: string[] = [];
   @state() private text = '';
+  /** 策略弹出列表(非 null = 展开,携带锚点坐标) */
+  @state() private policyPos: PopPos | null = null;
+  /** 模型菜单(非 null = 展开,携带锚点坐标) */
+  @state() private modelPos: PopPos | null = null;
+  /** 上下文圆环 tooltip(非 null = 悬停中,携带锚点坐标) */
+  @state() private tipPos: PopPos | null = null;
 
   static styles = [
     theme,
@@ -29,6 +86,7 @@ export class GrfComposer extends LitElement {
         display: block;
       }
       .wrap {
+        position: relative;
         border: 1px solid var(--grf-border);
         border-radius: 12px;
         /* 背景与卡片同黑拉通,仅以描边勾勒输入框 */
@@ -156,6 +214,185 @@ export class GrfComposer extends LitElement {
       input[type='file'] {
         display: none;
       }
+      /* ---------- 工具栏文字按钮(策略/模型) ---------- */
+      .bar-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        border: 1px solid var(--grf-border);
+        border-radius: var(--grf-radius-sm);
+        background: transparent;
+        color: var(--grf-text-dim);
+        font-size: var(--grf-font-size-xs);
+        font-family: var(--grf-font);
+        line-height: 1;
+        padding: 5px 8px;
+        cursor: pointer;
+        flex: none;
+        max-width: 180px;
+      }
+      .bar-btn:hover,
+      .bar-btn.open {
+        border-color: var(--grf-border-hover);
+        color: var(--grf-text);
+      }
+      .bar-btn svg {
+        width: 12px;
+        height: 12px;
+        flex: none;
+      }
+      .bar-btn .cur {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      /* ---------- 弹出列表(策略/模型)与圆环 tooltip ----------
+         fixed 定位:escape .composer-area 的 overflow 裁剪,坐标在
+         打开/悬停时按锚点按钮的视口矩形计算(见 anchorPos)。 */
+      .pop,
+      .tip {
+        position: fixed;
+        transform: translateY(-100%);
+        border: 1px solid var(--grf-border);
+        border-radius: var(--grf-radius-sm);
+        background: var(--grf-card);
+        box-shadow: var(--grf-shadow);
+        z-index: 80;
+      }
+      .pop {
+        min-width: 210px;
+        max-width: 320px;
+        padding: 4px;
+        display: grid;
+        gap: 1px;
+      }
+      .pop.scrolly {
+        max-height: 320px;
+        overflow-y: auto;
+      }
+      .pop-title {
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+        padding: 5px 8px 4px;
+      }
+      .pop-group {
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+        padding: 6px 8px 2px;
+        border-top: 1px solid var(--grf-border-soft);
+        margin-top: 3px;
+      }
+      .pop-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+        width: 100%;
+        text-align: left;
+        border: none;
+        background: transparent;
+        color: var(--grf-text-dim);
+        border-radius: var(--grf-radius-sm);
+        padding: 6px 8px;
+        cursor: pointer;
+        font-size: var(--grf-font-size-sm);
+        font-family: var(--grf-font);
+      }
+      .pop-item:hover {
+        background: var(--grf-bg-hover);
+        color: var(--grf-text);
+      }
+      .pop-item .check {
+        width: 13px;
+        flex: none;
+        color: var(--grf-accent-text);
+        padding-top: 2px;
+      }
+      .pop-item .check svg {
+        width: 13px;
+        height: 13px;
+        display: block;
+      }
+      .pop-item .tx {
+        min-width: 0;
+      }
+      .pop-item .tx b {
+        display: block;
+        font-weight: 500;
+        color: var(--grf-text);
+        font-size: var(--grf-font-size-sm);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pop-item .tx i {
+        display: block;
+        font-style: normal;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+        margin-top: 1px;
+      }
+      /* ---------- 上下文占用圆环 ---------- */
+      .ctx {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        flex: none;
+        padding: 3px;
+        cursor: default;
+      }
+      .ctx svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+      }
+      .ctx .track {
+        fill: none;
+        stroke: var(--grf-border);
+        stroke-width: 2.5;
+      }
+      .ctx .fill {
+        fill: none;
+        stroke: var(--grf-accent);
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        transform: rotate(-90deg);
+        transform-origin: center;
+        transition: stroke-dashoffset 0.3s;
+      }
+      .ctx.warn .fill {
+        stroke: #e0a23c;
+      }
+      .ctx.hot .fill {
+        stroke: #e05c5c;
+      }
+      .tip {
+        min-width: 230px;
+        max-width: 300px;
+        padding: 8px 10px;
+        display: grid;
+        gap: 4px;
+      }
+      .tip .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-dim);
+      }
+      .tip .row b {
+        font-weight: 500;
+        color: var(--grf-text);
+        text-align: right;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tip .row.head {
+        color: var(--grf-text);
+        padding-bottom: 2px;
+        border-bottom: 1px solid var(--grf-border-soft);
+        margin-bottom: 2px;
+      }
     `,
   ];
 
@@ -209,15 +446,41 @@ export class GrfComposer extends LitElement {
                 @paste=${this.onPaste}
               ></textarea>
               <div class="bar">
-                <button class="ghost attach" title="附加图片" ?disabled=${this.running} @click=${this.pickImage}>
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
-                    <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1" stroke-linejoin="round" />
-                    <circle cx="6" cy="6.6" r="1.1" />
-                    <path d="M2.8 11.5l3.4-3 2.4 2.2 2.2-2 2.4 2.6" stroke-linejoin="round" />
+                <button class="ghost attach" title="添加附件(图片)" ?disabled=${this.running} @click=${this.pickImage}>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M8 3v10M3 8h10" stroke-linecap="round" />
                   </svg>
                 </button>
                 <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple @change=${this.onFile} />
+                <button
+                  class="bar-btn policy-ctl ${this.policyPos ? 'open' : ''}"
+                  title=${this.policyImmediate
+                    ? '本会话的文件/终端访问策略(选择后立即生效)'
+                    : '新会话的文件/终端访问策略(随首条消息生效)'}
+                  @click=${(e: MouseEvent) => this.togglePop('policy', e)}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                    <path d="M8 1.8l4.8 1.8v3.2c0 3.1-2 5.6-4.8 6.7-2.8-1.1-4.8-3.6-4.8-6.7V3.6L8 1.8z" stroke-linejoin="round" />
+                  </svg>
+                  <span class="cur">${this.policy === 'write-workspace' ? '工作区访问' : '完全访问'}</span>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                ${this.policyPos ? this.renderPolicyPop(this.policyPos) : nothing}
                 <span class="hint">${this.hint()}</span>
+                ${this.usage ? this.renderCtxRing() : nothing}
+                <button
+                  class="bar-btn model-ctl ${this.modelPos ? 'open' : ''}"
+                  title=${this.model || '模型(当前未知,发送首条消息后显示)'}
+                  @click=${(e: MouseEvent) => this.togglePop('model', e)}
+                >
+                  <span class="cur">${this.model || '默认模型'}</span>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                ${this.modelPos ? this.renderModelPop(this.modelPos) : nothing}
                 ${this.running
                   ? html`<button class="stop" title="停止" aria-label="停止" @click=${this.stop}>
                       <svg viewBox="0 0 16 16" fill="currentColor"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5" /></svg>
@@ -238,6 +501,158 @@ export class GrfComposer extends LitElement {
             `}
       </div>
     `;
+  }
+
+  // 策略弹出列表:两个预制选项(与 gh set_policy 一致)
+  private renderPolicyPop(pos: PopPos) {
+    return html`
+      <div class="pop policy-ctl" style=${posStyle(pos)}>
+        <div class="pop-title">${this.policyImmediate ? '访问策略(立即生效)' : '访问策略(随新会话首条消息生效)'}</div>
+        ${POLICY_OPTIONS.map(
+          (o) => html`
+            <button class="pop-item" @click=${() => this.pickPolicy(o.value)}>
+              <span class="check">${o.value === this.policy ? CHECK_SVG : nothing}</span>
+              <span class="tx"><b>${o.label}</b><i>${o.desc}</i></span>
+            </button>
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  // 模型菜单:供应商分组 → 模型(两级);选中态(下一回合使用)打勾
+  private renderModelPop(pos: PopPos) {
+    const empty = this.providers.length === 0 && !this.model;
+    const active = this.activeModel || this.model;
+    return html`
+      <div class="pop scrolly model-ctl" style=${posStyle(pos)}>
+        ${empty
+          ? html`<div class="pop-title">暂无模型列表(桌面态读取 gh 设置)</div>`
+          : nothing}
+        ${this.providers.map(
+          (g) => html`
+            <div class="pop-group">${g.name}</div>
+            ${g.models.map(
+              (m) => html`
+                <button class="pop-item" @click=${() => this.pickModel(m)}>
+                  <span class="check">${m === active ? CHECK_SVG : nothing}</span>
+                  <span class="tx"><b title=${m}>${shortModel(m)}</b></span>
+                </button>
+              `,
+            )}
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  // 上下文占用圆环 + 悬停详情
+  private renderCtxRing() {
+    const u = this.usage!;
+    // 下一回合的近似上下文 = 上回合输入 + 输出
+    const ctxTokens = u.input_tokens + u.output_tokens;
+    const win = Math.max(this.contextWindow, 1);
+    const pct = Math.min(ctxTokens / win, 1);
+    const C = 2 * Math.PI * 8; // r=8 周长
+    const cls = pct >= 0.85 ? 'hot' : pct >= 0.6 ? 'warn' : '';
+    return html`
+      <span
+        class="ctx ${cls}"
+        title="上下文占用 ${Math.round(pct * 100)}%"
+        @mouseenter=${(e: MouseEvent) => this.onTipEnter(e)}
+        @mouseleave=${() => (this.tipPos = null)}
+      >
+        <svg viewBox="0 0 20 20">
+          <circle class="track" cx="10" cy="10" r="8" />
+          <circle class="fill" cx="10" cy="10" r="8" stroke-dasharray=${C.toFixed(2)} stroke-dashoffset=${(C * (1 - pct)).toFixed(2)} />
+        </svg>
+        ${this.tipPos ? this.renderCtxTip(ctxTokens, win, pct, this.tipPos) : nothing}
+      </span>
+    `;
+  }
+
+  private renderCtxTip(ctxTokens: number, win: number, pct: number, pos: PopPos) {
+    const u = this.usage!;
+    const llm = this.stats?.llm;
+    // 缓存命中率:会话累计(stats)优先,退化为上回合 usage 推算
+    let cache = '—';
+    if (llm && llm.CachePct >= 0) cache = `${llm.CachePct}%`;
+    else if (u.input_tokens_details?.cached_tokens && u.input_tokens > 0) {
+      cache = `${Math.round((u.input_tokens_details.cached_tokens / u.input_tokens) * 100)}%`;
+    }
+    // 生成速度:完成 tokens / 纯生成耗时(会话累计)
+    let speed = '—';
+    if (llm && llm.CompletionTokens > 0 && llm.GenerationTime > 0) {
+      speed = `${Math.round(llm.CompletionTokens / (llm.GenerationTime / 1e9))} tok/s`;
+    }
+    return html`
+      <div class="tip" style=${posStyle(pos)}>
+        <div class="row head"><span>上下文占用</span><b>${fmtTokens(ctxTokens)} / ${fmtTokens(win)}(预估) · ${Math.round(pct * 100)}%</b></div>
+        <div class="row"><span>本回合输入</span><b>${fmtTokens(u.input_tokens)}</b></div>
+        <div class="row"><span>本回合输出</span><b>${fmtTokens(u.output_tokens)}</b></div>
+        <div class="row"><span>缓存命中率</span><b>${cache}</b></div>
+        <div class="row"><span>生成速度</span><b>${speed}</b></div>
+        ${this.usageModel || this.model
+          ? html`<div class="row"><span>模型</span><b title=${this.usageModel || this.model}>${this.usageModel || this.model}</b></div>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    document.addEventListener('pointerdown', this.onDocPointerDown);
+  }
+
+  disconnectedCallback(): void {
+    document.removeEventListener('pointerdown', this.onDocPointerDown);
+    super.disconnectedCallback();
+  }
+
+  // 弹出列表:点击对应控件(按钮/列表)之外的任意处关闭
+  private onDocPointerDown = (e: PointerEvent): void => {
+    if (!this.policyPos && !this.modelPos) return;
+    const path = e.composedPath() as EventTarget[];
+    const inside = (cls: string) =>
+      path.some((t) => t instanceof Element && t.classList.contains(cls));
+    if (this.policyPos && !inside('policy-ctl')) this.policyPos = null;
+    if (this.modelPos && !inside('model-ctl')) this.modelPos = null;
+  };
+
+  // 按锚点按钮的视口矩形计算浮层位置;left 对齐左缘 / right 对齐右缘
+  private anchorPos(el: Element, align: 'left' | 'right'): PopPos {
+    const r = el.getBoundingClientRect();
+    return {
+      top: `${Math.round(r.top - 8)}px`,
+      ...(align === 'left' ? { left: `${Math.round(r.left)}px` } : { right: `${Math.round(window.innerWidth - r.right)}px` }),
+    };
+  }
+
+  // 两个弹出列表互斥
+  private togglePop(which: 'policy' | 'model', e: MouseEvent): void {
+    const el = e.currentTarget as HTMLElement;
+    if (which === 'policy') {
+      this.policyPos = this.policyPos ? null : this.anchorPos(el, 'left');
+      this.modelPos = null;
+    } else {
+      this.modelPos = this.modelPos ? null : this.anchorPos(el, 'right');
+      this.policyPos = null;
+    }
+  }
+
+  // 圆环 tooltip:右对齐圆环
+  private onTipEnter(e: MouseEvent): void {
+    this.tipPos = this.anchorPos(e.currentTarget as Element, 'right');
+  }
+
+  private pickPolicy(v: DraftPolicy): void {
+    this.policyPos = null;
+    this.fire('policy-change', v);
+  }
+
+  private pickModel(v: string): void {
+    this.modelPos = null;
+    this.fire('model-change', v);
   }
 
   private hint(): string {
@@ -321,8 +736,25 @@ export class GrfComposer extends LitElement {
   }
 }
 
+const CHECK_SVG = html`
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M3 8.5l3.2 3.2L13 5" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+`;
+
+/** PopPos → 内联 style(左缘或右缘对齐 + 顶边)。 */
+function posStyle(pos: PopPos): string {
+  return `top:${pos.top};${pos.left ? `left:${pos.left}` : `right:${pos.right ?? '0'}`}`;
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     'grf-composer': GrfComposer;
   }
+}
+
+/** 菜单项去掉 provider 前缀(分组标题已显示 provider)。 */
+function shortModel(m: string): string {
+  const i = m.indexOf('/');
+  return i >= 0 ? m.slice(i + 1) : m;
 }

@@ -181,6 +181,15 @@ export function toolDetail(name: string, args: string): string {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return args.trim();
     obj = parsed as Record<string, unknown>;
   } catch {
+    // 参数还在流式生成中(残缺 JSON):容错提取关键参数(如文件路径),
+    // 取不到再展示原文。
+    const keys = TOOL_PRIMARY[name];
+    if (keys) {
+      for (const k of keys) {
+        const v = extractStringArg(args, k);
+        if (v !== undefined) return v;
+      }
+    }
     return args.trim();
   }
   const keys = TOOL_PRIMARY[name];
@@ -192,6 +201,126 @@ export function toolDetail(name: string, args: string): string {
   return Object.entries(obj)
     .map(([k, v]) => `${k}: ${valText(v)}`)
     .join('\n');
+}
+
+// ---- 文件修改工具的 +增/-删 实时统计 ----
+
+// countLines 语义同 git diffstat:按 \n 切分,尾部空行不计;空串为 0 行。
+function countLines(s: string): number {
+  if (!s) return 0;
+  const parts = s.split('\n');
+  return parts[parts.length - 1] === '' ? parts.length - 1 : parts.length;
+}
+
+// decodePartialJsonString 解码 JSON 字符串字面量的原始段(起始引号之后):
+// 容忍流式截断——值未闭合(无结束引号)或结尾转义残缺时,解码到已到达
+// 的部分为止。
+function decodePartialJsonString(raw: string): string {
+  let out = '';
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (c === '"') break; // 值完整结束
+    if (c === '\\') {
+      const n = raw[i + 1];
+      if (n === undefined) break; // 截断在转义符上
+      i++;
+      if (n === 'n') out += '\n';
+      else if (n === 't') out += '\t';
+      else if (n === 'r') out += '\r';
+      else if (n === 'u' && i + 4 < raw.length) {
+        const h = parseInt(raw.slice(i + 1, i + 5), 16);
+        if (!Number.isNaN(h)) {
+          out += String.fromCharCode(h);
+          i += 4;
+        } else out += n;
+      } else out += n; // \\ \" \/ \b \f 等按字面量
+    } else out += c;
+  }
+  return out;
+}
+
+// extractStringArg 从(可能是流式残缺的)工具参数 JSON 里取字符串字段:
+// 完整 JSON 精确解析;残缺时按 "key": 定位后转义扫描(首处匹配即真实
+// 字段——gh 侧字段名先于值出现)。该字段尚未流到返回 undefined。
+export function extractStringArg(args: string, key: string): string | undefined {
+  const s = args ?? '';
+  try {
+    const parsed = JSON.parse(s) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const v = (parsed as Record<string, unknown>)[key];
+      return typeof v === 'string' ? v : undefined;
+    }
+    return undefined;
+  } catch {
+    /* 流式残缺:走容错扫描 */
+  }
+  const m = new RegExp(`"${key}"\\s*:\\s*"`).exec(s);
+  if (!m) return undefined;
+  return decodePartialJsonString(s.slice(m.index + m[0].length));
+}
+
+// fileEditStat 文件修改类工具(edit/write)的 +增/-删 行数。参数可能是
+// 模型流式输出中的残缺 JSON——容错提取让统计随输出实时跳动,流完即精确。
+// write 覆盖旧文件时旧行数未知,只给 add;edit 完成后输出里的
+// "(N replacements)" 用于 replace_all 多处替换的倍数修正。
+// 尚未流到可统计字段时返回 undefined。
+export function fileEditStat(
+  name: string,
+  args: string,
+  output = '',
+): { add: number; del: number } | undefined {
+  if (name === 'write') {
+    const content = extractStringArg(args, 'content');
+    if (content === undefined) return undefined;
+    return { add: countLines(content), del: 0 };
+  }
+  if (name === 'edit') {
+    const oldStr = extractStringArg(args, 'old_string');
+    if (oldStr === undefined) return undefined;
+    const newStr = extractStringArg(args, 'new_string') ?? '';
+    let add = countLines(newStr);
+    let del = countLines(oldStr);
+    const m = /(\d+) replacements?\b/.exec(output ?? '');
+    if (m) {
+      const n = Math.max(1, parseInt(m[1], 10));
+      add *= n;
+      del *= n;
+    }
+    return { add, del };
+  }
+  return undefined;
+}
+
+// 工具标签行的主参数(文件工具的路径、glob/grep 的模式、bash 的命令)——
+// 与 TOOL_PRIMARY(展开明细用)分开维护,行内只放短主参数。
+const TOOL_LINE_SUBJECT: Record<string, string[]> = {
+  bash: ['command'],
+  read: ['file_path', 'path'],
+  write: ['file_path', 'path'],
+  edit: ['file_path', 'path'],
+  read_image: ['file_path', 'path'],
+  glob: ['pattern'],
+  grep: ['pattern'],
+};
+
+// toolFilePath 文件类工具(read/write/edit/read_image)的绝对路径提取
+// (参数流式残缺时容错),供行内文件名点击打开右栏文件 tab。
+export function toolFilePath(name: string, args: string): string | undefined {
+  if (!['read', 'write', 'edit', 'read_image'].includes(name)) return undefined;
+  return extractStringArg(args, 'file_path') ?? extractStringArg(args, 'path');
+}
+
+// toolPrimaryText 工具标签行的主参数文本:参数可能仍在流式生成(残缺
+// JSON),容错提取——文件名在参数刚流出时就上屏,不再只剩"运行中"转圈。
+// 取不到返回 undefined。
+export function toolPrimaryText(name: string, args: string): string | undefined {
+  const keys = TOOL_LINE_SUBJECT[name];
+  if (!keys) return undefined;
+  for (const k of keys) {
+    const v = extractStringArg(args, k);
+    if (v) return v;
+  }
+  return undefined;
 }
 
 // isToolChoiceUnsupported 命中"上游 vLLM 未开启工具调用"这类错误。

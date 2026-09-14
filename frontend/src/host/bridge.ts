@@ -82,6 +82,44 @@ export async function saveAppConfig(cfg: AppConfigDTO): Promise<void> {
   await call<void>('main.AppConfig.Save', cfg);
 }
 
+// ---------- 模型配置(ModelConfig service,gh 的 settings.json) ----------
+
+/** 一个模型供应商(对应 settings.json 的 providers.<name>) */
+export interface ProviderDTO {
+  name: string;
+  /** 协议类型;空串表示 gh 默认(OpenAI 兼容) */
+  type: string;
+  baseUrl: string;
+  apiKey: string;
+  models: string[];
+}
+
+export interface ModelConfigDTO {
+  /** settings.json 路径(展示用) */
+  path: string;
+  providers: ProviderDTO[];
+  /** 默认模型(provider/model) */
+  default: string;
+  /** 目标文件是否可写(不可写时 UI 只读) */
+  writable: boolean;
+}
+
+/** 读取供应商与默认模型;非桌面态返回 null(纯 web 态无法访问 gh 配置)。 */
+export async function loadModelConfig(): Promise<ModelConfigDTO | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<ModelConfigDTO>('main.ModelConfig.Load');
+  } catch {
+    return null;
+  }
+}
+
+/** 写回 providers 与 default;其余配置键原样保留。 */
+export async function saveModelConfig(cfg: ModelConfigDTO): Promise<void> {
+  if (!inWails()) return;
+  await call<void>('main.ModelConfig.Save', cfg);
+}
+
 // ---------- server 托管(ServerManager service) ----------
 
 export interface ServerStatusDTO {

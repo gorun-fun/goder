@@ -11,6 +11,7 @@ import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
 import { settingsStore, ACCENTS, type AccentKey, type ThemeMode, type FontSizeMode } from '../state/settings';
+import type { ProviderDTO } from '../host/bridge';
 import type { SettingsSection } from './settings-nav';
 
 @customElement('grf-settings-page')
@@ -32,6 +33,13 @@ export class GrfSettingsPage extends GrfPanel {
   private storeUnsub?: () => void;
   /** 头部空白区为窗口拖拽区(移动/双击缩放;非桌面态静默) */
   private tdrag: TitleDrag | null = null;
+  /** 模型设置:展开编辑的供应商名 */
+  private openProvs = new Set<string>();
+  /** 待二次确认删除的供应商名 */
+  private pendingDelete: string | null = null;
+  private deleteTimer?: ReturnType<typeof setTimeout>;
+  /** 默认模型候选下拉(每实例唯一 id,避免嵌入多实例撞车) */
+  private readonly dlId = `grf-models-${Math.random().toString(36).slice(2, 9)}`;
 
   static styles = [
     theme,
@@ -195,6 +203,73 @@ export class GrfSettingsPage extends GrfPanel {
         display: flex;
         gap: 8px;
       }
+      /* 供应商卡片 */
+      .prov {
+        border: 1px solid var(--grf-border);
+        border-radius: var(--grf-radius);
+        background: var(--grf-bg-raise);
+        margin-bottom: 8px;
+        overflow: hidden;
+      }
+      .prov-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .prov-head:hover {
+        background: var(--grf-bg-hover);
+      }
+      .prov-head .caret {
+        color: var(--grf-text-faint);
+        font-size: 10px;
+        width: 10px;
+        flex: none;
+      }
+      .prov-head .pname {
+        font-weight: 650;
+        font-size: var(--grf-font-size-sm);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .prov-head .tag {
+        flex: none;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-dim);
+        background: var(--grf-bg);
+        border: 1px solid var(--grf-border);
+        border-radius: 999px;
+        padding: 1px 7px;
+      }
+      .prov-head .meta {
+        margin-left: auto;
+        flex: none;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+      }
+      .prov-head .meta.warn {
+        color: var(--grf-warn);
+      }
+      .prov-body {
+        border-top: 1px solid var(--grf-border-soft);
+        padding: 10px;
+        display: grid;
+        gap: 10px;
+      }
+      .prov-body textarea {
+        min-height: 58px;
+        resize: vertical;
+        font-family: var(--grf-mono);
+        font-size: var(--grf-font-size-sm);
+      }
+      .prov-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
     `,
   ];
 
@@ -202,6 +277,7 @@ export class GrfSettingsPage extends GrfPanel {
     super.connectedCallback();
     this.tdrag = makeTitleDrag('button');
     this.storeUnsub = settingsStore.subscribe(() => this.requestUpdate());
+    if (this.section === 'models') void settingsStore.loadModelCfg();
     this.srvTimer = setInterval(() => {
       if (inWails() && this.section === 'general') void settingsStore.refreshServerStatus();
     }, 4000);
@@ -214,7 +290,15 @@ export class GrfSettingsPage extends GrfPanel {
     this.storeUnsub = undefined;
     if (this.srvTimer) clearInterval(this.srvTimer);
     this.srvTimer = undefined;
+    if (this.deleteTimer) clearTimeout(this.deleteTimer);
+    this.deleteTimer = undefined;
     super.disconnectedCallback();
+  }
+
+  protected updated(props: Map<string, unknown>): void {
+    super.updated(props);
+    // 切到模型设置时拉取 gh 侧供应商配置(已加载则跳过)。
+    if (props.has('section') && this.section === 'models') void settingsStore.loadModelCfg();
   }
 
   /** 通用提交:改配置 → 保存落盘 → 即时应用到当前 scope → 闪提示 */
@@ -413,10 +497,17 @@ export class GrfSettingsPage extends GrfPanel {
     `;
   }
 
-  // ---------- 模型设置 ----------
+  // ---------- 模型设置:默认模型 + 供应商管理 ----------
 
   private renderModels() {
     const cfg = settingsStore.cfg;
+    const mc = settingsStore.modelCfg;
+    // 候选模型:provider/model 全组合(供输入联想,也允许手填任意值)。
+    const opts: string[] = [];
+    for (const p of mc?.providers ?? []) for (const m of p.models ?? []) opts.push(`${p.name}/${m}`);
+    const readOnly = !mc || !mc.writable;
+    const needRestart = inWails() && cfg.serverMode === 'managed' && !!settingsStore.srv?.running;
+
     return html`
       <div class="sec">
         <h4>默认模型</h4>
@@ -424,18 +515,199 @@ export class GrfSettingsPage extends GrfPanel {
           provider/model
           <input
             type="text"
+            list=${this.dlId}
             .value=${cfg.defaultModel}
             placeholder="如 deepseek/deepseek-chat"
-            @change=${(e: InputEvent) => this.commit({ defaultModel: (e.target as HTMLInputElement).value })}
+            @change=${(e: InputEvent) => this.setDefaultModel((e.target as HTMLInputElement).value)}
           />
+          <datalist id=${this.dlId}>
+            ${opts.map((o) => html`<option value=${o}></option>`)}
+          </datalist>
         </label>
         <div class="hint">
-          新会话默认使用该模型;留空则沿用服务端默认。模型的密钥与供应商
-          配置在 gh 侧的 ~/.grf/settings.json 中维护。
+          新会话默认使用该模型;同时写入 gh 的 settings.json(default),终端
+          gh 与服务端默认保持一致。留空则沿用服务端默认。
         </div>
+      </div>
+
+      <div class="sec">
+        <h4>供应商</h4>
+        ${mc
+          ? html`
+              ${this.renderProviders(mc.providers, readOnly)}
+              ${readOnly
+                ? nothing
+                : html`<div class="prov-actions"><button @click=${() => this.addProv()}>${unsafeHTML(icon.plus)} 添加供应商</button></div>`}
+              <div class="hint">
+                配置保存在 <code class="tok">${mc.path}</code>(其余配置项不受影响)。
+                ${needRestart ? ' gh server 正在运行,供应商变更需重启服务后生效。' : ''}
+              </div>
+              ${needRestart
+                ? html`<div class="actions" style="margin-top:8px">
+                    <button @click=${() => void settingsStore.applyManaged(this.scope)}>重启服务以生效</button>
+                  </div>`
+                : nothing}
+            `
+          : html`<div class="hint">
+              ${inWails()
+                ? '正在读取模型配置…'
+                : '浏览器形态无法访问 gh 的模型配置(~/.grf/settings.json),供应商请在运行 gh server 的机器上用桌面版或 gh model 管理。'}
+            </div>`}
       </div>
     `;
   }
+
+  private renderProviders(list: ProviderDTO[], readOnly: boolean) {
+    if (!list.length) return html`<div class="hint">还没有供应商,点下方"添加供应商"新增一个。</div>`;
+    return html`
+      ${list.map((p) => {
+        const open = this.openProvs.has(p.name);
+        const n = (p.models ?? []).length;
+        return html`
+          <div class="prov">
+            <div class="prov-head" @click=${() => this.toggleProv(p.name)}>
+              <span class="caret">${open ? '▾' : '▸'}</span>
+              <span class="pname">${p.name}</span>
+              <span class="tag">${p.type || '默认'}</span>
+              <span class="meta ${n ? '' : 'warn'}">${n ? `${n} 个模型` : '未配置模型'}</span>
+              ${readOnly
+                ? nothing
+                : html`<button
+                    class="ghost ${this.pendingDelete === p.name ? 'danger' : ''}"
+                    @click=${(e: MouseEvent) => {
+                      e.stopPropagation();
+                      this.askDelete(p.name);
+                    }}
+                  >
+                    ${this.pendingDelete === p.name ? '确认删除' : '删除'}
+                  </button>`}
+            </div>
+            ${open
+              ? html`
+                  <div class="prov-body">
+                    <label>
+                      名称
+                      <input
+                        type="text"
+                        .value=${p.name}
+                        ?disabled=${readOnly}
+                        @change=${(e: InputEvent) => this.renameProv(p.name, (e.target as HTMLInputElement).value)}
+                      />
+                    </label>
+                    <label>
+                      协议类型
+                      <select
+                        .value=${p.type}
+                        ?disabled=${readOnly}
+                        @change=${(e: Event) => this.field(p.name, { type: (e.target as HTMLSelectElement).value })}
+                      >
+                        <option value="">默认(OpenAI 兼容)</option>
+                        <option value="OpenAI">OpenAI</option>
+                      </select>
+                    </label>
+                    <label>
+                      Base URL
+                      <input
+                        type="text"
+                        .value=${p.baseUrl}
+                        placeholder="https://api.openai.com/v1"
+                        ?disabled=${readOnly}
+                        @change=${(e: InputEvent) => this.field(p.name, { baseUrl: (e.target as HTMLInputElement).value })}
+                      />
+                    </label>
+                    <label>
+                      API Key
+                      <input
+                        type="password"
+                        .value=${p.apiKey}
+                        placeholder="sk-…(本地服务可留空)"
+                        ?disabled=${readOnly}
+                        @change=${(e: InputEvent) => this.field(p.name, { apiKey: (e.target as HTMLInputElement).value })}
+                      />
+                    </label>
+                    <label>
+                      模型(逗号或换行分隔)
+                      <textarea
+                        .value=${(p.models ?? []).join('\n')}
+                        placeholder="gpt-4o&#10;gpt-4o-mini"
+                        ?disabled=${readOnly}
+                        @change=${(e: InputEvent) => this.field(p.name, { models: parseModels((e.target as HTMLTextAreaElement).value) })}
+                      ></textarea>
+                    </label>
+                  </div>
+                `
+              : nothing}
+          </div>
+        `;
+      })}
+    `;
+  }
+
+  private setDefaultModel(v: string): void {
+    void settingsStore.setDefaultModel(this.scope, v.trim()).then(() => this.flashSaved());
+  }
+
+  private toggleProv(name: string): void {
+    if (this.openProvs.has(name)) this.openProvs.delete(name);
+    else this.openProvs.add(name);
+    this.requestUpdate();
+  }
+
+  private field(name: string, patch: Partial<ProviderDTO>): void {
+    settingsStore.updateProvider(name, patch);
+  }
+
+  /** 新增一个占位供应商并展开编辑(名称可直接改)。 */
+  private addProv(): void {
+    const list = settingsStore.modelCfg?.providers ?? [];
+    let i = 1;
+    let name = 'new-provider';
+    while (list.some((p) => p.name === name)) name = `new-provider-${++i}`;
+    settingsStore.addProvider({ name, type: '', baseUrl: '', apiKey: '', models: [] });
+    this.openProvs.add(name);
+    this.requestUpdate();
+  }
+
+  private renameProv(oldName: string, raw: string): void {
+    const to = raw.trim();
+    if (!to || to === oldName) {
+      this.requestUpdate(); // 非法输入:重渲染把输入框拉回原值
+      return;
+    }
+    settingsStore.renameProvider(oldName, to);
+    if (this.openProvs.delete(oldName)) this.openProvs.add(to);
+    if (this.pendingDelete === oldName) this.pendingDelete = null;
+    this.requestUpdate();
+  }
+
+  /** 删除需二次确认(3s 内再点一次),避免误删供应商。 */
+  private askDelete(name: string): void {
+    if (this.pendingDelete === name) {
+      this.pendingDelete = null;
+      if (this.deleteTimer) clearTimeout(this.deleteTimer);
+      this.deleteTimer = undefined;
+      settingsStore.removeProvider(name);
+      this.openProvs.delete(name);
+      this.requestUpdate();
+      return;
+    }
+    this.pendingDelete = name;
+    this.requestUpdate();
+    if (this.deleteTimer) clearTimeout(this.deleteTimer);
+    this.deleteTimer = setTimeout(() => {
+      this.pendingDelete = null;
+      this.deleteTimer = undefined;
+      this.requestUpdate();
+    }, 3000);
+  }
+}
+
+/** 解析模型输入:逗号(中英文)或换行分隔,去空白与空项。 */
+function parseModels(s: string): string[] {
+  return s
+    .split(/[,，\n]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 
 declare global {

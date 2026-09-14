@@ -16,6 +16,8 @@ import { readFileText, readImageDataUrl } from '../host/bridge';
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
 /** markdown 扩展名(提供渲染预览切换) */
 const MD_EXTS = new Set(['md', 'markdown']);
+/** html 扩展名(眼睛在右栏「浏览器」tab 内渲染) */
+const HTML_EXTS = new Set(['html', 'htm']);
 
 function extOf(path: string): string {
   const seg = path.split('/').pop() ?? '';
@@ -77,6 +79,14 @@ export class GrfFileView extends GrfPanel {
     return this.rel || this.name || this.path.split('/').pop() || this.path;
   }
 
+  // openHtmlPreview html 文件的「眼睛」:内容编码为 data URL,抛给
+  // chat-panel 在右栏开浏览器 tab 并导航渲染(与本面板的 md 预览对应)。
+  private openHtmlPreview(): void {
+    if (!this.text) return;
+    const url = `data:text/html;charset=utf-8,${encodeURIComponent(this.text)}`;
+    this.dispatchEvent(new CustomEvent('grf-open-browser-url', { detail: { url }, bubbles: true, composed: true }));
+  }
+
   render() {
     if (!this.path) {
       return html`<div class="head">文件</div><div class="empty">未选择文件(在左栏文件树中点击文件打开)</div>`;
@@ -94,7 +104,16 @@ export class GrfFileView extends GrfPanel {
             >
               ${unsafeHTML(icon.eye)}
             </button>`
-          : nothing}
+          : HTML_EXTS.has(extOf(this.path))
+            ? html`<button
+                class="eye ghost"
+                title="在右栏浏览器 tab 渲染"
+                ?disabled=${!this.text}
+                @click=${() => this.openHtmlPreview()}
+              >
+                ${unsafeHTML(icon.eye)}
+              </button>`
+            : nothing}
         <button
           class="copy ghost"
           title="复制内容"
