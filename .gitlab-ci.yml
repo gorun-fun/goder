@@ -1,0 +1,196 @@
+# ============================================================================
+# goder 持续集成 / 持续交付(Wails v3 桌面 App,macOS .app 分发)
+# 触发方式:推送 tag(git tag v0.1.0 && git push origin v0.1.0)
+#          仅 tag 触发;普通分支推送不创建任何 job(runner 为低性能单并发机,
+#          不浪费槽位)
+# 流程:    alpine node 编译前端 -> trixie go 交叉编译 wails3 darwin(arm64+amd64)
+#          -> 从 download.gorun.fun 下载 gh(grf-harness)各平台最新版直接捆绑
+#             (不从源码构建;App 独立分发,用户无需预装 gh)
+#          -> 组装 goder.app(Info.plist 模板 + 仓库内 AppIcon.icns,
+#             ldid 补 adhoc 签名)-> zip 按平台/版本目录 scp 发布到 10.8.0.5:
+#             /data/download/goder/{目标平台}/{版本号}/goder-*.zip
+#             (版本号 = tag 去 v 前缀,与 g-term/grf-harness 发布目录结构一致)
+#
+# 编译镜像固定:
+#   node:24-alpine3.24  前端(vite)
+#   golang:1.26-trixie  后端(Debian trixie/glibc)
+#   darwin 产物为 zig cc + macOS SDK 交叉(wails darwin 端是 Objective-C CGO,
+#   Linux 上没有 clang/macOS 工具链只能走 zig),ldid 补 adhoc 签名 —— 等价
+#   本地 build.sh 里 codesign -f -s - 的作用(不签名的 arm64 macho 在
+#   Apple Silicon 上会被内核直接 SIGKILL)。zig/SDK/ldid 缓存在 .ci-cache/,
+#   首次约 500MB 下载,之后跨构建复用;GitHub 直连慢时可自行换镜像源。
+#
+# 与本地 build.sh 的差异:CI 的 Linux runner 上没有 qlmanage/sips/iconutil,
+# 图标不能用 frontend/public/icon.svg 现场生成,用仓库内预生成的
+# build/darwin/AppIcon.icns(本地改图标后需重新生成提交,见 build.sh 注释)。
+#
+# 发布侧需在 GitLab CI/CD Variables 配置文件型变量:
+#   DEPLOY_SSH_PRIVATE_KEY (发布机 SSH 私钥,类型选 File) —— 与 g-term 共用
+# ============================================================================
+
+image: golang:1.26-trixie
+
+variables:
+  # 发布目标主机(内网,通过 SSH 登录)与产物目录,同 g-term 的发布机
+  DEPLOY_HOST: 10.8.0.5
+  DEPLOY_DIR: /data/download/goder
+  DEPLOY_USER: root
+  GOPROXY: "https://goproxy.cn,direct"
+  # gh(grf-harness)已发布产物的下载基地址:其下 {平台}/{版本}/gh
+  GH_DL_BASE: https://download.gorun.fun/grf-harness
+  # Go 构建缓存放进工作区,经 cache 跨 job/版本复用(docker 执行器每 job 全新
+  # 容器,默认 GOCACHE 随容器丢弃,导致每次冷编译全部标准库 + wails 依赖)
+  GOCACHE: $CI_PROJECT_DIR/.gocache
+  GOMODCACHE: $CI_PROJECT_DIR/.gomodcache
+
+stages:
+  - frontend
+  - build
+  - publish
+
+# ------------------------------ alpine node:前端 vite ---------------------
+build-frontend:
+  stage: frontend
+  image: node:24-alpine3.24
+  tags:
+    - home
+  cache:
+    key:
+      files: [frontend/package-lock.json]
+    paths: [.npmcache/]
+  variables:
+    npm_config_cache: "$CI_PROJECT_DIR/.npmcache"
+  script:
+    - npm config set registry https://registry.npmmirror.com
+    - cd frontend
+    - npm ci
+    - npm run build          # vite build -> frontend/dist(go:embed 输入)
+  artifacts:
+    paths: [frontend/dist/]
+    # 仅够 build 消费,过期即清,少占 runner/GitLab 存储
+    expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_TAG'
+
+# --------- trixie go:下载 gh 最新版 + 交叉编译 wails3 darwin 双架构 ----------
+build:
+  stage: build
+  tags:
+    - home
+  cache:
+    # 固定 key:缓存跨版本 tag 累积复用;Go 版本升级后需换 key 迫使重建,
+    # 防旧缓存与新工具链混用。.ci-cache/ 持有 zig + macOS SDK + ldid
+    key: goder-go-build-1.26
+    paths:
+      - .gocache/
+      - .gomodcache/
+      - .ci-cache/
+  before_script:
+    # aliyun 源加速;CGO 编译 wails linux 端需要 gcc 与 GTK4/WebKitGTK 6.0 头文件
+    # (go vet ./... 按 host 平台检查);curl/xz-utils 供 darwin 工具链下载解压,
+    # zip 供产物打包
+    - sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip >/dev/null
+  script:
+    - go vet ./...
+    - VERSION=${CI_COMMIT_TAG#v}
+    # ---- gh:直接下载 grf-harness 各平台最新发布版(不从源码构建) ----
+    # 目录列表页是静态 HTML,版本号目录 sort -V 取最大;两架构共用同一版本,
+    # 以 macos-arm64 的列表为准(macos/amd64 目录可能滞后半拍,先探测存在)
+    - |
+      GH_VERSION=$(curl -fsSL ${GH_DL_BASE}/macos-arm64/ | grep -oE 'href="[0-9][^"/]*/"' | cut -d'"' -f2 | tr -d / | sort -V | tail -1)
+      [ -n "$GH_VERSION" ] || { echo "获取 gh 最新版本失败"; exit 1; }
+      echo "捆绑 gh 版本: $GH_VERSION"
+      mkdir -p bin
+      curl -fsSL -o bin/gh-darwin-arm64 ${GH_DL_BASE}/macos-arm64/${GH_VERSION}/gh
+      curl -fsSL -o bin/gh-darwin-amd64  ${GH_DL_BASE}/macos/${GH_VERSION}/gh
+      chmod +x bin/gh-darwin-*
+      file bin/gh-darwin-arm64 bin/gh-darwin-amd64
+    # ---- darwin 交叉(zig cc + macOS SDK),工具链只下载一次存 .ci-cache/ ----
+    - |
+      mkdir -p .ci-cache/bin
+      case "$(uname -m)" in aarch64) ZA=aarch64 ;; *) ZA=x86_64 ;; esac
+      if [ ! -x .ci-cache/zig/zig ]; then
+        curl -fSL "https://ziglang.org/download/0.14.0/zig-linux-${ZA}-0.14.0.tar.xz" -o /tmp/zig.tar.xz
+        mkdir -p /tmp/zt && tar -xJ -f /tmp/zig.tar.xz -C /tmp/zt
+        mv /tmp/zt/zig-linux-${ZA}-0.14.0 .ci-cache/zig && rm -rf /tmp/zt /tmp/zig.tar.xz
+      fi
+      if [ ! -d .ci-cache/sdk ]; then
+        mkdir -p /tmp/st
+        curl -fSL "https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz" | tar -xJ -C /tmp/st
+        mv /tmp/st/MacOSX14.5.sdk .ci-cache/sdk && rm -rf /tmp/st
+      fi
+      if [ ! -x .ci-cache/bin/ldid ]; then
+        case "$(uname -m)" in aarch64) LA=arm64 ;; *) LA=x86_64 ;; esac
+        curl -fSL "https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_${LA}" -o .ci-cache/bin/ldid \
+          && chmod +x .ci-cache/bin/ldid || echo "WARN ldid 下载失败,产物可能未签名"
+      fi
+      # zig cc 包装器:剥掉 go/cgo 注入的 -target/-mmacosx-version-min,
+      # 指向 SDK sysroot(arm64 与 amd64 仅 -target 不同)
+      for ARCH in arm64 amd64; do
+        case "$ARCH" in arm64) ZT=aarch64 ;; *) ZT=x86_64 ;; esac
+        printf '#!/bin/sh\nARGS=""\nSKIP_NEXT=0\nfor arg in "$@"; do\n    if [ $SKIP_NEXT -eq 1 ]; then SKIP_NEXT=0; continue; fi\n    case "$arg" in\n        -target) SKIP_NEXT=1 ;;\n        -mmacosx-version-min=*) ;;\n        *) ARGS="$ARGS $arg" ;;\n    esac\ndone\nexec "%s" cc -fno-sanitize=all -target "%s-macos-none" -isysroot "%s" -I"%s/usr/include" -L"%s/usr/lib" -F"%s/System/Library/Frameworks" -w $ARGS\n' \
+          "$PWD/.ci-cache/zig/zig" "$ZT" "$PWD/.ci-cache/sdk" "$PWD/.ci-cache/sdk" "$PWD/.ci-cache/sdk" "$PWD/.ci-cache/sdk" > .ci-cache/bin/zcc-darwin-${ARCH}
+        chmod +x .ci-cache/bin/zcc-darwin-${ARCH}
+      done
+    - CC="$PWD/.ci-cache/bin/zcc-darwin-arm64" GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-darwin-arm64 .
+    - CC="$PWD/.ci-cache/bin/zcc-darwin-amd64" GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-darwin-amd64 .
+    # adhoc 重签(链接器签名在文件复制后可能失效;gh 下载件同样补签一次)
+    - '.ci-cache/bin/ldid -S bin/goder-darwin-arm64 2>/dev/null || echo "WARN arm64 adhoc 签名未执行"'
+    - '.ci-cache/bin/ldid -S bin/goder-darwin-amd64 2>/dev/null || echo "WARN amd64 adhoc 签名未执行"'
+    - '.ci-cache/bin/ldid -S bin/gh-darwin-arm64 2>/dev/null || true'
+    - '.ci-cache/bin/ldid -S bin/gh-darwin-amd64 2>/dev/null || true'
+    # ---- 组装 .app 并 zip:plist 版本号以 tag 注入;gh 捆绑进 MacOS/ ----
+    - |
+      chmod +x bin/*
+      VERSION=${CI_COMMIT_TAG#v}
+      [ -n "$VERSION" ] || VERSION="0.1.0"
+      for ARCH in arm64 amd64; do
+        rm -rf .appstage
+        mkdir -p .appstage/goder.app/Contents/MacOS .appstage/goder.app/Contents/Resources
+        sed -e "s/0.1.0/${VERSION}/g" build/darwin/Info.plist > .appstage/goder.app/Contents/Info.plist
+        cp build/darwin/AppIcon.icns .appstage/goder.app/Contents/Resources/AppIcon.icns
+        cp bin/goder-darwin-${ARCH} .appstage/goder.app/Contents/MacOS/goder
+        cp bin/gh-darwin-${ARCH} .appstage/goder.app/Contents/MacOS/gh
+        chmod +x .appstage/goder.app/Contents/MacOS/*
+        (cd .appstage && zip -qry ../bin/goder-macos-${ARCH}.zip goder.app)
+      done
+      rm -rf .appstage
+      ls -lh bin/
+  artifacts:
+    paths: [bin/]
+    # 仅够 publish 消费,过期即清,少占 runner/GitLab 存储
+    expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_TAG'
+
+# -------------- 发布:按平台/版本目录 scp 产物 zip 到 10.8.0.5 --------------
+publish:
+  stage: publish
+  tags:
+    - home
+  image: alpine:3.24
+  before_script:
+    # 使用国内 Alpine 源加速,并安装 ssh/scp(alpine 基础镜像不自带)
+    - sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+    - apk add --no-cache openssh-client
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    # DEPLOY_SSH_PRIVATE_KEY 为文件类型变量,内容已在 $CI_PROJECT_DIR/$DEPLOY_SSH_PRIVATE_KEY
+    # (运行时其值是该文件路径),复制到预期位置并清权限
+    - cp "$DEPLOY_SSH_PRIVATE_KEY" ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H ${DEPLOY_HOST} >> ~/.ssh/known_hosts 2>/dev/null
+  script:
+    # 版本号 = tag 去 v 前缀;二元组:目标平台 zip 包
+    # 目录结构同 g-term/grf-harness:/data/download/goder/{平台}/{版本}/
+    - VERSION=${CI_COMMIT_TAG#v}
+    - |
+      for spec in \
+        "macos-arm64 goder-macos-arm64.zip" \
+        "macos goder-macos-amd64.zip"; do
+        set -- $spec
+        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_DIR}/$1/${VERSION}"
+        scp -p bin/$2 ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/$1/${VERSION}/
+      done
+  rules:
+    - if: '$CI_COMMIT_TAG'

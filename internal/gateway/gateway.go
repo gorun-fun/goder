@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"git.gorun.fun/share/grf-harness-ui/internal/ghserver"
-	"git.gorun.fun/share/grf-harness-ui/internal/identity"
+	"git.gorun.fun/share/goder/internal/ghserver"
+	"git.gorun.fun/share/goder/internal/identity"
 )
 
 // Options 网关参数。

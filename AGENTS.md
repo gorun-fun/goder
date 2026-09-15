@@ -1,14 +1,14 @@
 # AGENTS.md
 
-grf-harness-ui:grf-harness(gh)的 ZCode 风格图形界面。一个 Lit 前端,多种形态:
+Goder:grf-harness(gh)的 ZCode 风格图形界面。一个 Lit 前端,多种形态:
 wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面的 web components
 库(`frontend/dist-embed/grf-ui.js`,ESM、零外部依赖、shadow DOM 自隔离),
 以及多用户 web 网关(`cmd/grf-web-serve`:一个登录用户一个独立 gh server 进程)。
 
 ## 常用命令
 
-- `./build.sh` — 前端 + 桌面二进制 `./grf-harness-ui`
-- `./build.sh app` — 组装 macOS `dist/grf-harness-ui.app`(adhoc 签名)
+- `./build.sh` — 前端 + 桌面二进制 `./goder`
+- `./build.sh app` — 组装 macOS `dist/goder.app`(adhoc 签名)
 - `./build.sh embed` — 仅构建嵌入库 `frontend/dist-embed/grf-ui.js`
 - `./build.sh web` — 纯 web 形态(grf-web-serve 网关:静态 + `/grf-api`,
   http://127.0.0.1:7700;身份模式与多用户参数见 cmd/grf-web-serve 头注释)
@@ -91,8 +91,8 @@ frontend/src/
 ## 运行时环境
 
 - 托管模式需 `gh` 可执行文件在 PATH(偏好设置可指定绝对路径);桌面默认
-  `gh server -addr 127.0.0.1:7400 -data ~/Library/Application Support/grf-harness-ui/server-data`
-- 桌面配置与项目索引存 `~/Library/Application Support/grf-harness-ui/`
+  `gh server -addr 127.0.0.1:7400 -data ~/Library/Application Support/goder/server-data`
+- 桌面配置与项目索引存 `~/Library/Application Support/goder/`
   (`index-<scope>.json`);纯 web 态项目索引存 localStorage;网关多用户
   数据在 `GRF_DATA/users/<uid>/server-data`(端口池默认 17400-18400)
 - 模型配置沿用 `~/.grf/settings.json`(GRF_HOME 可重定位)

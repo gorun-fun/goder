@@ -10,8 +10,8 @@ import (
 	"net/url"
 	"strings"
 
-	"git.gorun.fun/share/grf-harness-ui/internal/appcfg"
-	"git.gorun.fun/share/grf-harness-ui/internal/ghserver"
+	"git.gorun.fun/share/goder/internal/appcfg"
+	"git.gorun.fun/share/goder/internal/ghserver"
 )
 
 const proxyPrefix = "/grf-api"

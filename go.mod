@@ -1,4 +1,4 @@
-module git.gorun.fun/share/grf-harness-ui
+module git.gorun.fun/share/goder
 
 go 1.26
 

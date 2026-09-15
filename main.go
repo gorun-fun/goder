@@ -1,4 +1,4 @@
-// grf-harness-ui — grf-harness 的 ZCode 风格图形界面。
+// goder — grf-harness(gh)的 ZCode 风格图形界面。
 // 桌面形态:wails v3;同一前端亦产出可嵌入三方 web 的 web components。
 package main
 
@@ -23,7 +23,7 @@ func main() {
 	}()
 
 	app := application.New(application.Options{
-		Name:        "grf harness",
+		Name:        "Goder",
 		Description: "grf-harness 图形界面(项目会话 · 聊天 · 详情 · 事件台)",
 		Services: []application.Service{
 			application.NewService(&AppConfig{}),
@@ -43,7 +43,7 @@ func main() {
 	})
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "grf harness",
+		Title:  "Goder",
 		URL:    "/",
 		Width:  1240,
 		Height: 820,

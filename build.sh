@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# build.sh — grf-harness-ui 构建脚本。
-#   ./build.sh            构建前端 + wails 桌面二进制(./grf-harness-ui)
-#   ./build.sh app        组装 grf-harness-ui.app(macOS .app 包)
+# build.sh — goder 构建脚本。
+#   ./build.sh            构建前端 + wails 桌面二进制(./goder)
+#   ./build.sh app        组装 goder.app(macOS .app 包)
 #   ./build.sh embed      仅构建三方嵌入库(frontend/dist-embed/grf-ui.js)
 #   ./build.sh web        构建 + 启动纯 web 形态(grf-web-serve,联调用)
 set -euo pipefail
@@ -37,26 +37,69 @@ if [ "$(uname)" = "Darwin" ]; then
   export CGO_CFLAGS="-O2 -g -mmacosx-version-min=$MACOS_MIN_VERSION"
   export CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$MACOS_MIN_VERSION"
 fi
-go build -o grf-harness-ui .
-echo "==> 二进制: ./grf-harness-ui"
+go build -o goder .
+echo "==> 二进制: ./goder"
 
 if [ "${1:-}" = "app" ]; then
-  APP="dist/grf-harness-ui.app"
+  APP="dist/goder.app"
   rm -rf "$APP"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-  cp grf-harness-ui "$APP/Contents/MacOS/grf-harness-ui"
+
+  # 程序图标:frontend/public/icon.svg → 各尺寸 PNG → iconutil 打包 icns。
+  # 注意:CI(Linux runner)用仓库内提交的 build/darwin/AppIcon.icns,本地
+  # 改动 icon.svg 后需按本段规则重新生成一份提交,两处保持同步。
+  # 渲染器选择:ImageMagick 内置 SVG 渲染器会丢掉带 A 弧线命令的描边路径
+  # (圆环消失只剩横条),不能用;qlmanage(QuickLook)系统自带且渲染正确,
+  # rsvg-convert 作备选;都缺失时跳过,App 用系统默认图标。
+  ICONSET="dist/AppIcon.iconset"
+  rm -rf "$ICONSET"; mkdir -p "$ICONSET"
+  if qlmanage -t -s 1024 -o "$ICONSET" frontend/public/icon.svg >/dev/null 2>&1 \
+     && [ -f "$ICONSET/icon.svg.png" ]; then
+    mv "$ICONSET/icon.svg.png" "$ICONSET/master.png"
+  elif command -v rsvg-convert >/dev/null 2>&1; then
+    rsvg-convert -w 1024 -h 1024 frontend/public/icon.svg > "$ICONSET/master.png"
+  else
+    rm -rf "$ICONSET"
+    echo "==> 警告: qlmanage/rsvg-convert 均不可用,跳过图标生成"
+  fi
+  if [ -f "$ICONSET/master.png" ]; then
+    # 其余尺寸由 1024 母版缩放(sips 系统自带);512@2x 即 1024,直接用母版
+    for size in 16 32 128 256 512; do
+      sips -z $size $size "$ICONSET/master.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+      sips -z $((size*2)) $((size*2)) "$ICONSET/master.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+    done
+    mv "$ICONSET/master.png" "$ICONSET/icon_512x512@2x.png"
+    iconutil -c icns -o "$APP/Contents/Resources/AppIcon.icns" "$ICONSET"
+    rm -rf "$ICONSET"
+    echo "==> 图标: AppIcon.icns"
+  fi
+
+  cp goder "$APP/Contents/MacOS/goder"
+
+  # 捆绑 gh(独立分发:用户无需预装即可使用)。优先取构建机 PATH 里的 gh,
+  # 其次 ~/bin/gh;可用 GH_BIN=... 指定。构建机没有时警告跳过,此时
+  # App 仍可分发,但用户需自行安装 gh(或由内置解析找常见目录)。
+  GH_BIN="${GH_BIN:-$(command -v gh 2>/dev/null || true)}"
+  if [ -z "$GH_BIN" ] && [ -x "$HOME/bin/gh" ]; then GH_BIN="$HOME/bin/gh"; fi
+  if [ -n "$GH_BIN" ]; then
+    cp "$GH_BIN" "$APP/Contents/MacOS/gh"
+    echo "==> 已捆绑 gh: $GH_BIN"
+  else
+    echo "==> 警告: 构建机未找到 gh,App 内未捆绑(分发前请安装 gh 或用 GH_BIN 指定)"
+  fi
   cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>grf harness</string>
-  <key>CFBundleDisplayName</key><string>grf harness</string>
-  <key>CFBundleIdentifier</key><string>fun.gorun.grf-harness-ui</string>
+  <key>CFBundleName</key><string>Goder</string>
+  <key>CFBundleDisplayName</key><string>Goder</string>
+  <key>CFBundleIdentifier</key><string>fun.gorun.goder</string>
   <key>CFBundleVersion</key><string>0.1.0</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleExecutable</key><string>grf-harness-ui</string>
+  <key>CFBundleExecutable</key><string>goder</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>

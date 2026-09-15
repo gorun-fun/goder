@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# start.sh — grf-harness-ui 桌面 App 生命周期管理。
-#   ./start.sh build [args]   构建(透传给 ./build.sh;如 `build app` 组装 .app)
+# start.sh — goder 桌面 App 生命周期管理。
+#   ./start.sh build [args]   构建并组装 .app(无参数默认 app 目标;透传 ./build.sh)
+#   ./start.sh install [目录] 构建 .app 并安装到本地(默认 /Applications)
 #   ./start.sh start          启动(缺二进制时自动构建;后台运行,PID 记录在 .run/)
 #   ./start.sh stop           停止(优雅退出;并回收 app 托管的 gh server)
 #   ./start.sh restart        重启
@@ -10,17 +11,17 @@ cd "$(dirname "$0")"
 RUN_DIR=".run"
 PID_FILE="$RUN_DIR/app.pid"
 LOG_FILE="$RUN_DIR/app.log"
-APP_BUNDLE="dist/grf-harness-ui.app"
-APP_BIN="grf-harness-ui"
+APP_BUNDLE="dist/goder.app"
+APP_BIN="goder"
 # 托管 gh server 的数据目录特征串(stop 时定向回收,避免误杀其它 gh 实例)
-GH_DATA_MARK="grf-harness-ui/server-data"
+GH_DATA_MARK="goder/server-data"
 
 mkdir -p "$RUN_DIR"
 
 app_command() {
-  # 两个二进制都在时选修改时间较新的:裸 `build` 只刷新 ./grf-harness-ui,
+  # 两个二进制都在时选修改时间较新的:裸 `build` 只刷新 ./goder,
   # `build app` 只刷新 .app 内的;固定优先级会启动旧二进制,改动永远不生效
-  local bundle_bin="$APP_BUNDLE/Contents/MacOS/grf-harness-ui"
+  local bundle_bin="$APP_BUNDLE/Contents/MacOS/goder"
   local bare_bin="./$APP_BIN"
   if [ -x "$bundle_bin" ] && [ -x "$bare_bin" ]; then
     if [ "$(stat -f %m "$bundle_bin")" -ge "$(stat -f %m "$bare_bin")" ]; then
@@ -51,6 +52,10 @@ running_pid() {
 }
 
 do_build() {
+  # 无参数默认 `app`:经 start.sh 触发的构建一律产出 .app 包
+  if [ $# -eq 0 ]; then
+    set -- app
+  fi
   echo "==> 构建(透传参数: $*)"
   ./build.sh "$@"
 }
@@ -113,15 +118,39 @@ do_restart() {
   do_start
 }
 
+do_install() {
+  local dest="${1:-/Applications}"
+  if [ ! -d "$dest" ]; then
+    echo "安装目录不存在: $dest" >&2
+    exit 1
+  fi
+  do_build app
+  local target="$dest/goder.app"
+  local tmp="$dest/.goder.app.tmp.$$"
+  echo "==> 安装到: $target"
+  # 先拷到临时名再原子改名,避免替换到一半时留下残缺的 .app
+  rm -rf "$tmp"
+  if ! ditto "$APP_BUNDLE" "$tmp"; then
+    rm -rf "$tmp"
+    echo "安装失败(权限不足?可试试: sudo $0 install $dest)" >&2
+    exit 1
+  fi
+  rm -rf "$target"
+  mv "$tmp" "$target"
+  echo "已安装。启动: open $target"
+}
+
 case "${1:-}" in
-  build)  shift; do_build "$@" ;;
-  start)  do_start ;;
-  stop)   do_stop ;;
+  build)   shift; do_build "$@" ;;
+  install) shift; do_install "$@" ;;
+  start)   do_start ;;
+  stop)    do_stop ;;
   restart) do_restart ;;
   *)
     cat <<USAGE
-用法: $0 {build|start|stop|restart}
-  build [args]   构建(透传 ./build.sh;如 "$0 build app" 组装 .app)
+用法: $0 {build|install|start|stop|restart}
+  build [args]   构建并组装 .app(无参数默认 app 目标;透传 ./build.sh)
+  install [目录] 构建 .app 并安装到本地(默认 /Applications)
   start          启动 App(后台运行,PID 与日志在 .run/)
   stop           停止 App 并回收托管的 gh server
   restart        重启

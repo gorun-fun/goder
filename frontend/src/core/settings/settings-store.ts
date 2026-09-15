@@ -1,6 +1,6 @@
 // settings.ts — 应用级设置状态(页面唯一实例),供设置页与桌面入口共用:
 // - 常规:服务连接(托管 gh server / 远程),桌面态经 wails 桥持久化到
-//   ~/Library/Application Support/grf-harness-ui/config.json;
+//   ~/Library/Application Support/goder/config.json;
 // - 外观:主题 / 强调色 / 字号,写 documentElement 的 --grf-skin-* 挂钩
 //   (见 ui/theme.ts)穿透全部 shadow DOM 即时生效,并镜像到 localStorage,
 //   桌面与浏览器两种形态重启后都能即刻恢复;

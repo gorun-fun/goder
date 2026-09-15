@@ -3,7 +3,7 @@
 // 纯 web 态自动回退 localStorage(见 frontend core/store/persistence)。
 package main
 
-import "git.gorun.fun/share/grf-harness-ui/internal/appcfg"
+import "git.gorun.fun/share/goder/internal/appcfg"
 
 // AppConfig wails 服务(配置文件 + 每个 scope 的项目索引)。
 type AppConfig struct{}

@@ -1,5 +1,5 @@
 // Package appcfg — 桌面应用配置与项目索引的文件持久化。wails 桌面壳的
-// AppConfig 服务在其上做薄封装;数据目录为 os.UserConfigDir()/grf-harness-ui。
+// AppConfig 服务在其上做薄封装;数据目录为 os.UserConfigDir()/goder。
 package appcfg
 
 import (
@@ -31,13 +31,23 @@ func Default() Config {
 	}
 }
 
-// DefaultDir 配置目录(os.UserConfigDir()/grf-harness-ui)。
+// DefaultDir 配置目录(os.UserConfigDir()/goder)。
+// 项目原名 grf-harness-ui:改名后首次启动把旧目录整体迁移过来(配置/索引/
+// 托管 gh 的 server-data 一起搬,聊天记录不丢);新目录已存在时以新为准不动。
 func DefaultDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "grf-harness-ui")
+	dir := filepath.Join(base, "goder")
+	legacy := filepath.Join(base, "grf-harness-ui")
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if _, lerr := os.Stat(legacy); lerr == nil {
+			if rerr := os.Rename(legacy, dir); rerr != nil {
+				return "", rerr
+			}
+		}
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

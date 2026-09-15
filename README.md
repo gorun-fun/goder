@@ -1,10 +1,10 @@
-# grf-harness-ui
+# goder
 
 [grf-harness](https://git.gorun.fun/share/grf-harness)(gh)的 ZCode(Zode)风格图形界面。一个前端,多种形态:
 
 | 形态 | 说明 | 入口 |
 |------|------|------|
-| **桌面 App**(wails v3) | 可直接安装的本地应用:左边项目级会话列表、中间聊天、右栏 tab 化(详情/审查/终端/浏览器/文件)、底栏内嵌终端(进入当前项目目录);自动托管 `gh server` 子进程 | `./build.sh app` → `dist/grf-harness-ui.app` |
+| **桌面 App**(wails v3) | 可直接安装的本地应用:左边项目级会话列表、中间聊天、右栏 tab 化(详情/审查/终端/浏览器/文件)、底栏内嵌终端(进入当前项目目录);自动托管 `gh server` 子进程 | `./build.sh app` → `dist/goder.app` |
 | **三方 Web 集成** | 会话列表 / 聊天 / 详情 / 审查 / 浏览器 / 事件台等均为独立 web components,可嵌入任意第三方页面;左栏导航、右栏 tab、底栏 tab 全部经 registry 注册表装配,内置条目与三方自定义条目走同一条 API,可自由增删 | `frontend/dist-embed/grf-ui.js`(ESM,零外部依赖) |
 | **多用户 Web 网关** | `cmd/grf-web-serve`:静态托管 + `/grf-api` 多用户路由 —— **一个登录用户一个独立 gh server 进程**(独立端口与数据目录,令牌由网关注入,不下发浏览器) | `./build.sh web` |
 
@@ -32,8 +32,8 @@ ask_user_question / 工具审批的**暂停-应答链式续交**、多会话、�
 ## 快速开始
 
 ```sh
-./build.sh          # 前端 + 桌面二进制 ./grf-harness-ui
-./build.sh app      # 组装 dist/grf-harness-ui.app(macOS)
+./build.sh          # 前端 + 桌面二进制 ./goder
+./build.sh app      # 组装 dist/goder.app(macOS)
 ./build.sh embed    # 仅构建三方嵌入库
 ./build.sh web      # 纯 web 形态(静态 + 多用户网关,联调用)
 ```
@@ -45,7 +45,7 @@ ask_user_question / 工具审批的**暂停-应答链式续交**、多会话、�
 ### 桌面 App
 
 - 首启默认**托管模式**:app 启动即自行拉起 `gh server -addr 127.0.0.1:7400
-  -data ~/Library/Application Support/grf-harness-ui/server-data`(前端经
+  -data ~/Library/Application Support/goder/server-data`(前端经
   app 内同源代理 `/grf-api` 连接;**令牌由代理注入**,浏览器侧不持有);
   退出时回收子进程
 - **新建项目 = 本地目录**:点击左栏"新建项目"弹出系统目录选择器,项目名
@@ -69,7 +69,7 @@ ask_user_question / 工具审批的**暂停-应答链式续交**、多会话、�
   变为设置分区导航(常规 / 外观 / 模型设置),设置内容在工作面板大卡内
   编辑,改动即时生效并自动保存
 - 数据:项目索引与会话归属存
-  `~/Library/Application Support/grf-harness-ui/index-<scope>.json`;
+  `~/Library/Application Support/goder/index-<scope>.json`;
   会话历史与 workspace 归 gh server 管
 
 ### 纯 web 形态(调试 / 部署)

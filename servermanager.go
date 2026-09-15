@@ -6,12 +6,11 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 
-	"git.gorun.fun/share/grf-harness-ui/internal/appcfg"
-	"git.gorun.fun/share/grf-harness-ui/internal/ghserver"
+	"git.gorun.fun/share/goder/internal/appcfg"
+	"git.gorun.fun/share/goder/internal/ghserver"
 )
 
 // ServerManager wails 服务(全局单例)。
@@ -32,7 +31,7 @@ func (s *ServerManager) ServiceShutdown() {
 	s.Stop()
 }
 
-// dirs 解析当前配置对应的监听地址与数据目录(与历史目录保持一致)。
+// dirs 解析当前配置对应的监听地址与数据目录(随 appcfg 目录,含旧名迁移)。
 func (s *ServerManager) dirs() (addr, dataDir string, err error) {
 	cfg, err := (&AppConfig{}).Load()
 	if err != nil {
@@ -42,11 +41,12 @@ func (s *ServerManager) dirs() (addr, dataDir string, err error) {
 	if addr == "" {
 		addr = "127.0.0.1:7400"
 	}
-	base, err := os.UserConfigDir()
+	// 配置目录(appcfg.DefaultDir,含旧目录名 grf-harness-ui 迁移)下的 server-data
+	base, err := appcfg.DefaultDir()
 	if err != nil {
 		return "", "", err
 	}
-	dataDir = filepath.Join(base, "grf-harness-ui", "server-data")
+	dataDir = filepath.Join(base, "server-data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return "", "", err
 	}
@@ -74,12 +74,11 @@ func (s *ServerManager) Start() ghserver.Status {
 		return s.statusLocked()
 	}
 	cfg, _ := (&AppConfig{}).Load()
-	bin := cfg.GhBinary
+	// 解析顺序:显式配置 → App 包内捆绑副本 → 常见安装目录 → PATH;
+	// Finder/Dock 启动的 App PATH 只有系统目录,不能只靠 LookPath。
+	bin := ghserver.ResolveGhBin(cfg.GhBinary)
 	if bin == "" {
-		bin = "gh"
-	}
-	if _, err := exec.LookPath(bin); err != nil {
-		s.lastErr = "找不到 gh 二进制(请安装 grf-harness 或在偏好设置里配置路径)"
+		s.lastErr = "找不到 gh 二进制(未捆绑且未安装;请在偏好设置里配置路径)"
 		return s.statusLocked()
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
