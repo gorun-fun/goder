@@ -980,14 +980,14 @@ export class GrfChat extends GrfPanel {
         overflow: auto;
         line-height: 1.6;
       }
-      /* 流式思考中:单行高亮,内容从左向右循环滚动 */
+      /* 流式思考中:单行高亮,内容从左向右循环滚动;跟随外观强调色 */
       .reasoning.live {
         display: flex;
         align-items: center;
         gap: 7px;
         cursor: pointer;
-        color: var(--grf-reasoning);
-        background: var(--grf-reasoning-soft);
+        color: var(--grf-accent-text);
+        background: var(--grf-accent-soft);
         border-radius: var(--grf-radius-sm);
         padding: 4px 10px;
         font-size: var(--grf-font-size-sm);
@@ -1292,7 +1292,9 @@ export class GrfChat extends GrfPanel {
     const activeModel = s?.model || rt?.model || '';
     const providers = (settingsStore.modelCfg?.providers ?? []).map((p) => ({
       name: p.name,
-      models: [...p.models],
+      // models 判空:Go 侧 nil 切片序列化为 null,直接展开会抛 TypeError
+      // 冻结整个聊天面板(会话点不开/三栏开关失效)
+      models: [...(p.models ?? [])],
     }));
     if (curModel && !providers.some((g) => g.models.includes(curModel))) {
       providers.push({ name: '当前模型', models: [curModel] });

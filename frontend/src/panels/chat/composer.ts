@@ -32,6 +32,27 @@ interface PopPos {
   right?: string;
 }
 
+/** 斜杠指令(输入 / 呼出补全;按分组展示)。
+ *  指令语义全部由 gh server(grf-harness)拦截执行——前端只做输入补全
+ *  与原样发送,不改写、不本地执行(与 server/commands.go 的指令表同步)。 */
+interface SlashCommand {
+  name: string;
+  group: string;
+  desc: string;
+  argHint?: string;
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  // ---------- 基础 ----------
+  { name: 'init', group: '基础', desc: '初始化项目:扫描工作区生成 AGENTS.md' },
+  { name: 'plan', group: '基础', desc: '计划模式开关', argHint: 'on | off(缺省开启)' },
+  { name: 'compact', group: '基础', desc: '压缩当前会话上下文' },
+  { name: 'goal', group: '基础', desc: '查看/设定会话目标', argHint: '目标描述(缺省查看当前 goal)' },
+  // ---------- 创造 ----------
+  { name: 'skill', group: '创造', desc: '按一句话描述创建技能', argHint: '技能用途描述(必填)' },
+  { name: 'plugin', group: '创造', desc: '安装插件', argHint: '插件名称(官方服务器校验后自动安装)' },
+];
+
 const POLICY_OPTIONS: Array<{ value: DraftPolicy; label: string; desc: string }> = [
   {
     value: 'write-workspace',
@@ -49,7 +70,7 @@ export class GrfComposer extends LitElement {
   @property({ type: Boolean }) inputRequired = false;
   /** 待应答的提问(非空时输入框内嵌问题与选项) */
   @property({ type: Array }) asks: AskItem[] = [];
-  @property({ type: String }) placeholder = '发送消息…(Enter 发送,Shift+Enter 换行)';
+  @property({ type: String }) placeholder = '发送消息…(/ 指令,Enter 发送,Shift+Enter 换行)';
   /** 新会话访问策略:write-workspace(工作区访问)| off(完全访问) */
   @property({ type: String }) policy: DraftPolicy = 'off';
   /** 策略可即时生效(已有会话;false = 草稿,随首条消息生效) */
@@ -77,6 +98,10 @@ export class GrfComposer extends LitElement {
   @state() private modelPos: PopPos | null = null;
   /** 上下文圆环 tooltip(非 null = 悬停中,携带锚点坐标) */
   @state() private tipPos: PopPos | null = null;
+  /** 斜杠指令菜单:选中项索引(菜单是否展开由 text 派生,见 slashOpen) */
+  @state() private slashIdx = 0;
+  /** 斜杠菜单被关闭(Esc/补全/点击外部),输入变化后复位 */
+  @state() private slashDismissed = false;
 
   static styles = [
     theme,
@@ -297,7 +322,8 @@ export class GrfComposer extends LitElement {
         font-size: var(--grf-font-size-sm);
         font-family: var(--grf-font);
       }
-      .pop-item:hover {
+      .pop-item:hover,
+      .pop-item.sel {
         background: var(--grf-bg-hover);
         color: var(--grf-text);
       }
@@ -445,6 +471,7 @@ export class GrfComposer extends LitElement {
                 @keydown=${this.onKeydown}
                 @paste=${this.onPaste}
               ></textarea>
+              ${this.slashOpen ? this.renderSlashPop() : nothing}
               <div class="bar">
                 <button class="ghost attach" title="添加附件(图片)" ?disabled=${this.running} @click=${this.pickImage}>
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -501,6 +528,77 @@ export class GrfComposer extends LitElement {
             `}
       </div>
     `;
+  }
+
+  // ---------- 斜杠指令 ----------
+
+  /** 首个单词(含 /),作为指令名补全的过滤词 */
+  private get slashWord(): string {
+    return this.text.split(/\s/, 1)[0];
+  }
+
+  /** 按前缀过滤出的指令项 */
+  private get slashItems(): SlashCommand[] {
+    if (!this.text.startsWith('/')) return [];
+    const w = this.slashWord.slice(1).toLowerCase();
+    return SLASH_COMMANDS.filter((c) => c.name.startsWith(w));
+  }
+
+  /** 菜单展开:以 / 开头、尚未输入空格/换行、有匹配项且未被关闭 */
+  private get slashOpen(): boolean {
+    return (
+      !this.slashDismissed &&
+      this.text.startsWith('/') &&
+      this.slashWord.length === this.text.length &&
+      this.slashItems.length > 0
+    );
+  }
+
+  // 指令菜单:锚定输入框左缘向上弹出,按分组展示;↑↓ 选择、Tab/Enter 补全、Esc 关闭
+  private renderSlashPop() {
+    const ta = this.renderRoot.querySelector('textarea');
+    if (!ta) return nothing;
+    const items = this.slashItems;
+    const sel = items[Math.min(this.slashIdx, items.length - 1)];
+    // 分组保持 SLASH_COMMANDS 顺序;↑↓ 的索引是展平后的 items 索引
+    const byGroup = new Map<string, SlashCommand[]>();
+    for (const c of items) {
+      const g = byGroup.get(c.group) ?? [];
+      g.push(c);
+      byGroup.set(c.group, g);
+    }
+    return html`
+      <div class="pop slash-ctl" style=${posStyle(this.anchorPos(ta, 'left'))}>
+        ${[...byGroup.entries()].map(
+          ([group, cmds]) => html`
+            <div class="pop-group">${group}</div>
+            ${cmds.map(
+              (c) => html`
+                <button
+                  class="pop-item ${c === sel ? 'sel' : ''}"
+                  @click=${() => this.completeSlash(c.name)}
+                >
+                  <span class="tx"><b>/${c.name}</b><i>${c.desc}${c.argHint ? ` · ${c.argHint}` : ''}</i></span>
+                </button>
+              `,
+            )}
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  /** 补全指令名:填入 "/name " 并关闭菜单(焦点回输入框) */
+  private completeSlash(name: string): void {
+    this.text = `/${name} `;
+    this.slashDismissed = true;
+    const ta = this.renderRoot.querySelector('textarea');
+    if (ta) {
+      ta.value = this.text;
+      this.autosize(ta);
+      ta.focus();
+      ta.setSelectionRange(this.text.length, this.text.length);
+    }
   }
 
   // 策略弹出列表:两个预制选项(与 gh set_policy 一致)
@@ -611,12 +709,16 @@ export class GrfComposer extends LitElement {
 
   // 弹出列表:点击对应控件(按钮/列表)之外的任意处关闭
   private onDocPointerDown = (e: PointerEvent): void => {
-    if (!this.policyPos && !this.modelPos) return;
+    if (!this.policyPos && !this.modelPos && !this.slashOpen) return;
     const path = e.composedPath() as EventTarget[];
     const inside = (cls: string) =>
       path.some((t) => t instanceof Element && t.classList.contains(cls));
     if (this.policyPos && !inside('policy-ctl')) this.policyPos = null;
     if (this.modelPos && !inside('model-ctl')) this.modelPos = null;
+    // 斜杠菜单:点击菜单项或输入框内保持展开
+    if (this.slashOpen && !inside('slash-ctl') && !path.some((t) => t instanceof HTMLTextAreaElement)) {
+      this.slashDismissed = true;
+    }
   };
 
   // 按锚点按钮的视口矩形计算浮层位置;left 对齐左缘 / right 对齐右缘
@@ -664,6 +766,8 @@ export class GrfComposer extends LitElement {
   private onInput(e: InputEvent): void {
     const ta = e.target as HTMLTextAreaElement;
     this.text = ta.value;
+    this.slashIdx = 0;
+    this.slashDismissed = false;
     this.autosize(ta);
   }
 
@@ -673,8 +777,39 @@ export class GrfComposer extends LitElement {
   }
 
   private onKeydown(e: KeyboardEvent): void {
+    if (this.slashOpen) {
+      const items = this.slashItems;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.slashIdx = (Math.min(this.slashIdx, items.length - 1) + 1) % items.length;
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.slashIdx = (Math.min(this.slashIdx, items.length - 1) - 1 + items.length) % items.length;
+        return;
+      }
+      if (e.key === 'Escape') {
+        this.slashDismissed = true;
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        this.completeSlash(items[Math.min(this.slashIdx, items.length - 1)].name);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
+      // 菜单展开且高亮项未输全:Enter 先补全指令名
+      if (this.slashOpen) {
+        const word = this.slashWord.slice(1);
+        const sel = this.slashItems[Math.min(this.slashIdx, this.slashItems.length - 1)];
+        if (sel && sel.name !== word) {
+          this.completeSlash(sel.name);
+          return;
+        }
+      }
       this.submit();
     }
   }
@@ -718,8 +853,14 @@ export class GrfComposer extends LitElement {
     if (this.running || this.inputRequired) return;
     if (!this.text.trim() && !this.images.length) return;
     this.fire('send', { text: this.text, images: this.images });
-    this.text = '';
+    this.clearInput();
     this.images = [];
+  }
+
+  private clearInput(): void {
+    this.text = '';
+    this.slashDismissed = false;
+    this.slashIdx = 0;
     const ta = this.renderRoot.querySelector('textarea');
     if (ta) {
       ta.value = '';
