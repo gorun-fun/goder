@@ -87,25 +87,11 @@ if [ "${1:-}" = "app" ]; then
   else
     echo "==> 警告: 构建机未找到 gh,App 内未捆绑(分发前请安装 gh 或用 GH_BIN 指定)"
   fi
-  cat > "$APP/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleName</key><string>Goder</string>
-  <key>CFBundleDisplayName</key><string>Goder</string>
-  <key>CFBundleIdentifier</key><string>fun.gorun.goder</string>
-  <key>CFBundleVersion</key><string>0.1.0</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleExecutable</key><string>goder</string>
-  <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>LSMinimumSystemVersion</key><string>11.0</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
-</dict>
-</plist>
-PLIST
+  # 版本号跟随 grf-harness(gh)最新发布 tag;gh 不变而本程序再发版时
+  # 追加 .postN(规则与自动推算见 scripts/version.sh,CI 同源)
+  VERSION="$(sh scripts/version.sh)" || VERSION="0.1.0"
+  echo "==> 版本: $VERSION"
+  sed -e "s/0\.1\.0/${VERSION}/g" build/darwin/Info.plist > "$APP/Contents/Info.plist"
   codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
   echo "==> App 包: $APP(未签 adhoc;分发请自行正式签名/公证)"
 fi

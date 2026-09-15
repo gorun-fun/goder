@@ -6,10 +6,12 @@
 # 流程:    alpine node 编译前端 -> trixie go 交叉编译 wails3 darwin(arm64+amd64)
 #          -> 从 download.gorun.fun 下载 gh(grf-harness)各平台最新版直接捆绑
 #             (不从源码构建;App 独立分发,用户无需预装 gh)
-#          -> 组装 goder.app(Info.plist 模板 + 仓库内 AppIcon.icns,
+#          -> 组装 Goder.app(Info.plist 模板 + 仓库内 AppIcon.icns,
 #             ldid 补 adhoc 签名)-> zip 按平台/版本目录 scp 发布到 10.8.0.5:
 #             /data/download/goder/{目标平台}/{版本号}/goder-*.zip
-#             (版本号 = tag 去 v 前缀,与 g-term/grf-harness 发布目录结构一致)
+#             版本号不取本仓库 tag:跟随 grf-harness 最新发布 tag;gh 不变
+#             而本程序再发版时追加 .postN(推算在 scripts/version.sh,与本地
+#             build.sh 同源;build 阶段写入 bin/VERSION 供 publish 读取)。
 #
 # 编译镜像固定:
 #   node:24-alpine3.24  前端(vite)
@@ -93,7 +95,9 @@ build:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip >/dev/null
   script:
     - go vet ./...
-    - VERSION=${CI_COMMIT_TAG#v}
+    # 版本号跟随 grf-harness 最新发布 tag(gh 不变而本程序再发版追加 .postN)
+    - VERSION=$(sh scripts/version.sh)
+    - echo "Goder 版本: $VERSION"
     # ---- gh:直接下载 grf-harness 各平台最新发布版(不从源码构建) ----
     # 目录列表页是静态 HTML,版本号目录 sort -V 取最大;两架构共用同一版本,
     # 以 macos-arm64 的列表为准(macos/amd64 目录可能滞后半拍,先探测存在)
@@ -140,11 +144,11 @@ build:
     - '.ci-cache/bin/ldid -S bin/goder-darwin-amd64 2>/dev/null || echo "WARN amd64 adhoc 签名未执行"'
     - '.ci-cache/bin/ldid -S bin/gh-darwin-arm64 2>/dev/null || true'
     - '.ci-cache/bin/ldid -S bin/gh-darwin-amd64 2>/dev/null || true'
-    # ---- 组装 .app 并 zip:plist 版本号以 tag 注入;gh 捆绑进 MacOS/ ----
+    # ---- 组装 .app 并 zip:plist 版本号用 version.sh 推算值;gh 捆绑进 MacOS/ ----
     - |
       chmod +x bin/*
-      VERSION=${CI_COMMIT_TAG#v}
       [ -n "$VERSION" ] || VERSION="0.1.0"
+      echo "$VERSION" > bin/VERSION
       for ARCH in arm64 amd64; do
         rm -rf .appstage
         mkdir -p .appstage/goder.app/Contents/MacOS .appstage/goder.app/Contents/Resources
@@ -181,9 +185,9 @@ publish:
     - chmod 600 ~/.ssh/id_rsa
     - ssh-keyscan -H ${DEPLOY_HOST} >> ~/.ssh/known_hosts 2>/dev/null
   script:
-    # 版本号 = tag 去 v 前缀;二元组:目标平台 zip 包
-    # 目录结构同 g-term/grf-harness:/data/download/goder/{平台}/{版本}/
-    - VERSION=${CI_COMMIT_TAG#v}
+    # 版本号在 build 阶段经 scripts/version.sh 推算(跟随 grf-harness,
+    # gh 不变时 .postN 递增),经 bin/VERSION 产物传过来
+    - VERSION=$(cat bin/VERSION)
     - |
       for spec in \
         "macos-arm64 goder-macos-arm64.zip" \
