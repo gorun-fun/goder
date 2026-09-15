@@ -33,6 +33,7 @@ func main() {
 			application.NewService(&desktop.AppConfig{}),
 			application.NewService(sm),
 			application.NewService(&desktop.ModelConfig{}),
+			application.NewService(&desktop.AgentConfig{}),
 			application.NewService(&desktop.Desktop{}),
 			application.NewService(desktop.GetTerminalManager()),
 		},

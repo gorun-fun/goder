@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -37,16 +38,21 @@ type ProcConfig struct {
 
 // Proc 单个 gh server 的句柄。Stop 后不再复用,需要时新建。
 type Proc struct {
-	mu      sync.Mutex
-	cfg     ProcConfig
-	cmd     *exec.Cmd
-	running bool
-	pid     int
-	token   string
-	lastErr string
-	logFile *os.File
-	logPath string
-	lastUse time.Time
+	mu         sync.Mutex
+	cfg        ProcConfig
+	cmd        *exec.Cmd
+	running    bool
+	pid        int
+	adoptedPid int // 收养实例的监听进程 pid(Stop 时一并回收,见 killGroupLocked)
+	token      string
+	lastErr    string
+	logFile    *os.File
+	logPath    string
+	lastUse    time.Time
+	// 父进程退出看门狗:read 阻塞在管道上,宿主退出(任意方式,含强杀/
+	// 崩溃)管道 EOF → 按 pid 回收 gh,保证不留孤儿。
+	watch  *exec.Cmd
+	watchW *os.File
 }
 
 // NewProc 按配置创建进程句柄(未启动)。
@@ -72,12 +78,17 @@ func (p *Proc) Start() Status {
 	p.cleanupLocked()
 
 	// 先探测:上次遗留的健康实例直接收养(读其落盘 token)。
-	if tok, ok := probeAdopt(p.cfg); ok {
+	if tok, apid, ok := probeAdopt(p.cfg); ok {
 		p.token = tok
 		p.running = true
 		p.pid = 0
+		p.adoptedPid = apid
 		p.lastErr = ""
 		p.lastUse = time.Now()
+		if apid != 0 {
+			// 收养实例不在本进程组:只按 pid 回收(它的进程组属于别人)
+			p.startWatchdog(apid, false)
+		}
 		return p.statusLocked()
 	}
 
@@ -112,9 +123,40 @@ func (p *Proc) Start() Status {
 	}
 	p.running = true
 	p.lastUse = time.Now()
+	// 亲生子进程按进程组回收(gh 可能再派生子进程)
+	p.startWatchdog(p.pid, true)
 	// 回收子进程,避免僵尸。
 	go func() { _ = cmd.Wait() }()
 	return p.statusLocked()
+}
+
+// startWatchdog 给 gh 挂父进程退出看门狗:sh 阻塞读管道,宿主进程退出
+// (正常退出/崩溃/被强杀,fd 全部关闭)触发 EOF,按进程组回收 gh。
+// 优雅 Stop 时由 cleanupLocked 主动关闭管道并清掉看门狗。
+func (p *Proc) startWatchdog(pid int, group bool) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return
+	}
+	target := fmt.Sprintf("-%d", pid) // 进程组(负 pid)
+	if !group {
+		target = fmt.Sprintf("%d", pid) // 收养实例:仅 pid,避免误伤其进程组邻居
+	}
+	script := fmt.Sprintf(
+		"read x || true; kill -TERM %s 2>/dev/null; sleep 1; kill -KILL %s 2>/dev/null; exit 0",
+		target, target)
+	watch := exec.Command("/bin/sh", "-c", script)
+	watch.Stdin = r
+	// 独立进程组:不随 gh 或宿主的进程组回收牵连。
+	watch.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := watch.Start(); err != nil {
+		r.Close()
+		w.Close()
+		return
+	}
+	r.Close() // 读端已交给 sh,宿主侧只保留写端
+	p.watch = watch
+	p.watchW = w
 }
 
 // Stop 终止托管实例(收养实例仅清理本地状态)。
@@ -162,8 +204,17 @@ func (p *Proc) statusLocked() Status {
 			p.cleanupLocked()
 			return st
 		}
+		// 收养实例死亡同样校正(pid 探测失败时 adoptedPid 可能为 0,跳过)
+		if p.pid == 0 && p.adoptedPid != 0 && !alive(p.adoptedPid) {
+			p.cleanupLocked()
+			return st
+		}
 		st.Running = true
-		st.PID = p.pid
+		if p.pid != 0 {
+			st.PID = p.pid
+		} else if p.adoptedPid != 0 {
+			st.PID = p.adoptedPid
+		}
 		st.Token = p.token
 	}
 	return st
@@ -197,6 +248,18 @@ func (p *Proc) waitReadyLocked() error {
 }
 
 func (p *Proc) killGroupLocked() {
+	// 收养实例不属于本进程组,单独按 pid 回收(桌面退出时 gh 随之关闭,
+	// 不留孤儿;杀失败静默——进程可能已退出)。先记录再清理,避免与
+	// cleanupLocked 交互遗漏。
+	adopted := p.adoptedPid
+	p.adoptedPid = 0
+	if adopted != 0 && alive(adopted) {
+		_ = syscall.Kill(adopted, syscall.SIGTERM)
+		time.Sleep(300 * time.Millisecond)
+		if alive(adopted) {
+			_ = syscall.Kill(adopted, syscall.SIGKILL)
+		}
+	}
 	if p.pid == 0 {
 		return
 	}
@@ -214,35 +277,70 @@ func (p *Proc) cleanupLocked() {
 		p.logFile.Close()
 		p.logFile = nil
 	}
+	// 优雅回收后看门狗无用武之地:关管道 + 结束 sh,避免常驻。
+	if p.watchW != nil {
+		p.watchW.Close()
+		p.watchW = nil
+	}
+	if p.watch != nil && p.watch.Process != nil {
+		watch := p.watch
+		_ = watch.Process.Kill()
+		go func() { _ = watch.Wait() }()
+		p.watch = nil
+	}
 	p.cmd = nil
 	p.running = false
 	p.pid = 0
+	p.adoptedPid = 0
 	p.token = ""
 }
 
 // probeAdopt 探测 addr 上是否已有健康实例且令牌已落盘(上次遗留可收养)。
-func probeAdopt(cfg ProcConfig) (string, bool) {
+// 返回(令牌, 监听进程 pid, 是否可收养);pid 探测失败为 0(不影响收养,
+// 仅退出回收时按 pid 杀不到,由 start.sh stop 兜底)。
+func probeAdopt(cfg ProcConfig) (string, int, bool) {
 	tokenPath := filepath.Join(cfg.DataDir, "token")
 	b, err := os.ReadFile(tokenPath)
 	if err != nil {
-		return "", false
+		return "", 0, false
 	}
 	tok := strings.TrimSpace(string(b))
 	if tok == "" {
-		return "", false
+		return "", 0, false
 	}
 	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/v1/health", cfg.Addr), nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	client := &http.Client{Timeout: 900 * time.Millisecond}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", false
+		return "", 0, false
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", false
+		return "", 0, false
 	}
-	return tok, true
+	return tok, listenerPID(cfg.Addr), true
+}
+
+// listenerPID 找 addr 上监听进程的 pid(lsof;非 POSIX 平台或未安装时返回 0)。
+func listenerPID(addr string) int {
+	port := addr
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		port = addr[i+1:]
+	}
+	out, err := exec.Command("lsof", "-tiTCP:"+port, "-sTCP:LISTEN").Output()
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func alive(pid int) bool {

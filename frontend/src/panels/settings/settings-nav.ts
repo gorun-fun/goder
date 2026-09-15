@@ -1,7 +1,7 @@
 // settings-nav.ts — <grf-settings-nav>:设置视图的左栏导航。
-// 顶部返回工作区,下方分区列表(常规/外观/模型设置);当前分区由宿主
-// (app-shell)持有,经 section 属性下发,切换时冒泡 grf-settings-section
-// 事件。底部身份区与 <grf-session-list> 一致。
+// 顶部返回工作区,下方两级分组:基础(外观/模型)与智能体(Harness/插件/
+// MCP/技能);当前分区由宿主(app-shell)持有,经 section 属性下发,切换时
+// 冒泡 grf-settings-section 事件。底部身份区与 <grf-session-list> 一致。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
@@ -9,12 +9,12 @@ import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { desktopUserName } from '../../host/bridge';
 
-export type SettingsSection = 'general' | 'appearance' | 'models';
+export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills';
 
 @customElement('grf-settings-nav')
 export class GrfSettingsNav extends GrfPanel {
   /** 当前分区(宿主下发) */
-  @property({ type: String }) section: SettingsSection = 'general';
+  @property({ type: String }) section: SettingsSection = 'appearance';
   /** 与 session-list 对齐:嵌入态宿主自管身份区时可隐藏底部 */
   @property({ type: Boolean, attribute: 'no-connection' }) noConnectionFooter = false;
 
@@ -71,6 +71,9 @@ export class GrfSettingsNav extends GrfPanel {
         font-weight: 650;
         letter-spacing: 0.4px;
         user-select: none;
+      }
+      .list .title {
+        padding: 10px 12px 8px;
       }
       .item {
         display: flex;
@@ -134,24 +137,42 @@ export class GrfSettingsNav extends GrfPanel {
   }
 
   render() {
-    const items: [SettingsSection, string, string][] = [
-      ['general', '常规', icon.settings],
-      ['appearance', '外观', icon.palette],
-      ['models', '模型设置', icon.brain],
+    // 两组分区:基础(界面与模型)/ 智能体(harness 运行时扩展)
+    const groups: [string, [SettingsSection, string, string][]][] = [
+      [
+        '基础设置',
+        [
+          ['appearance', '外观', icon.palette],
+          ['models', '模型', icon.brain],
+        ],
+      ],
+      [
+        '智能体',
+        [
+          ['harness', 'Harness', icon.settings],
+          ['plugins', '插件', icon.zap],
+          ['mcp', 'MCP', icon.db],
+          ['skills', '技能', icon.wrench],
+        ],
+      ],
     ];
     return html`
       <div class="back" title="返回工作区" @click=${() => this.fire('grf-close-settings')}>
         ${unsafeHTML(icon.arrowLeft)}
         <span>返回工作区</span>
       </div>
-      <div class="title">设置</div>
       <div class="list">
-        ${items.map(
-          ([key, label, ic]) => html`
-            <div class="item ${this.section === key ? 'on' : ''}" @click=${() => this.fire('grf-settings-section', key)}>
-              ${unsafeHTML(ic)}
-              <span>${label}</span>
-            </div>
+        ${groups.map(
+          ([glabel, items]) => html`
+            <div class="title">${glabel}</div>
+            ${items.map(
+              ([key, label, ic]) => html`
+                <div class="item ${this.section === key ? 'on' : ''}" @click=${() => this.fire('grf-settings-section', key)}>
+                  ${unsafeHTML(ic)}
+                  <span>${label}</span>
+                </div>
+              `,
+            )}
           `,
         )}
       </div>

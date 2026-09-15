@@ -128,6 +128,199 @@ export async function saveModelConfig(cfg: ModelConfigDTO): Promise<void> {
   await call<void>(`${SVC}.ModelConfig.Save`, cfg);
 }
 
+/** 探测供应商可用模型(GET {baseURL}/models,OpenAI 兼容);非桌面态返回 null。 */
+export async function detectModels(p: ProviderDTO): Promise<string[] | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<string[]>(`${SVC}.ModelConfig.DetectModels`, p);
+  } catch {
+    return null;
+  }
+}
+
+// ---------- 智能体扩展(AgentConfig service,插件/MCP/技能) ----------
+
+/** 一个插件/远程 MCP(settings.json 的 plugins 数组项)。 */
+export interface PluginDTO {
+  name: string;
+  /** 本地 stdio 插件:可执行文件 + 参数 */
+  command: string[];
+  /** 远程 MCP:Streamable HTTP 端点 */
+  url: string;
+  /** 远程 MCP:Bearer token */
+  token: string;
+  /** 工具调用超时秒数;0 = 默认 */
+  timeout: number;
+}
+
+export interface PluginsDTO {
+  /** settings.json 路径(展示用) */
+  path: string;
+  /** 自动发现目录(~/.grf/plugins)路径 */
+  dir: string;
+  /** true = 显式列表模式;false = 自动发现(~/.grf/plugins/) */
+  explicit: boolean;
+  plugins: PluginDTO[];
+  /** 自动发现目录下的可执行文件名 */
+  discovered: string[];
+  writable: boolean;
+}
+
+export interface SkillDTO {
+  name: string;
+  description: string;
+  /** SKILL.md 绝对路径(展示用) */
+  path: string;
+  /** true = 已禁用(SKILL.md 改名 .disabled,内容保留) */
+  disabled: boolean;
+}
+
+export interface SkillsDTO {
+  /** skills 目录路径(展示用) */
+  path: string;
+  skills: SkillDTO[];
+  writable: boolean;
+}
+
+/** 读取插件/MCP 配置;非桌面态返回 null。 */
+export async function loadPlugins(): Promise<PluginsDTO | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<PluginsDTO>(`${SVC}.AgentConfig.PluginsLoad`);
+  } catch {
+    return null;
+  }
+}
+
+/** 写回 plugins 键(explicit=false 删键回到自动发现)。 */
+export async function savePlugins(cfg: PluginsDTO): Promise<void> {
+  if (!inWails()) return;
+  await call<void>(`${SVC}.AgentConfig.PluginsSave`, cfg);
+}
+
+/** 列出技能(~/.grf/skills);非桌面态返回 null。 */
+export async function loadSkills(): Promise<SkillsDTO | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<SkillsDTO>(`${SVC}.AgentConfig.SkillsLoad`);
+  } catch {
+    return null;
+  }
+}
+
+/** 读取技能全文;失败返回 null。 */
+export async function getSkillContent(name: string): Promise<string | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<string>(`${SVC}.AgentConfig.SkillGet`, name);
+  } catch {
+    return null;
+  }
+}
+
+/** 新建/覆盖技能;失败返回错误信息。 */
+export async function saveSkill(name: string, content: string): Promise<string | null> {
+  if (!inWails()) return '仅桌面形态可管理技能';
+  try {
+    await call<void>(`${SVC}.AgentConfig.SkillSave`, name, content);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** 删除技能目录;失败返回错误信息。 */
+export async function deleteSkill(name: string): Promise<string | null> {
+  if (!inWails()) return '仅桌面形态可管理技能';
+  try {
+    await call<void>(`${SVC}.AgentConfig.SkillDelete`, name);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** 官方下载服务器上一个版本的可用产物列表。 */
+export interface RemoteReleaseDTO {
+  version: string;
+  files: string[];
+}
+
+/** 官方服务器可安装的插件列表;非桌面态/无产物返回 null/空。 */
+export async function pluginRemoteList(): Promise<RemoteReleaseDTO | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<RemoteReleaseDTO>(`${SVC}.AgentConfig.PluginRemoteList`);
+  } catch {
+    return null;
+  }
+}
+
+/** 在线安装插件(下载到 ~/.grf/plugins,显式模式下自动入列);返回错误信息或 null。 */
+export async function pluginInstall(name: string): Promise<string | null> {
+  if (!inWails()) return '仅桌面形态可安装插件';
+  try {
+    await call<void>(`${SVC}.AgentConfig.PluginInstall`, name);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** 删除插件(内置浏览器/电脑操作不可删);返回错误信息或 null。 */
+export async function pluginDelete(name: string): Promise<string | null> {
+  if (!inWails()) return '仅桌面形态可删除插件';
+  try {
+    await call<void>(`${SVC}.AgentConfig.PluginDelete`, name);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** 官方服务器可安装的技能列表(暂无产物返回空)。 */
+export async function skillRemoteList(): Promise<RemoteReleaseDTO | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<RemoteReleaseDTO>(`${SVC}.AgentConfig.SkillRemoteList`);
+  } catch {
+    return null;
+  }
+}
+
+/** 在线安装技能(x.md → skills/<name>/SKILL.md);返回错误信息或 null。 */
+export async function skillInstall(file: string): Promise<string | null> {
+  if (!inWails()) return '仅桌面形态可安装技能';
+  try {
+    await call<void>(`${SVC}.AgentConfig.SkillInstall`, file);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** 启用/禁用技能(SKILL.md ↔ SKILL.md.disabled);返回错误信息或 null。 */
+export async function skillSetEnabled(name: string, enabled: boolean): Promise<string | null> {
+  if (!inWails()) return '仅桌面形态可操作';
+  try {
+    await call<void>(`${SVC}.AgentConfig.SkillSetEnabled`, name, enabled);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** 从任意 URL 拉取 SKILL.md 安装为技能;返回错误信息或 null。 */
+export async function skillInstallFromURL(name: string, url: string): Promise<string | null> {
+  if (!inWails()) return '仅桌面形态可安装技能';
+  try {
+    await call<void>(`${SVC}.AgentConfig.SkillInstallFromURL`, name, url);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
 // ---------- server 托管(ServerManager service) ----------
 
 export interface ServerStatusDTO {

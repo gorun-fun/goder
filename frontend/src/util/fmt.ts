@@ -129,10 +129,107 @@ const TOOL_LABELS: Record<string, string> = {
   job_list: '列出作业',
   job_output: '查看作业输出',
   job_kill: '结束作业',
+  // 浏览器插件(grf-browser)
+  browser_click: '浏览器·点击',
+  browser_double_click: '浏览器·双击',
+  browser_hover: '浏览器·悬停',
+  browser_type: '浏览器·输入',
+  browser_press_key: '浏览器·按键',
+  browser_navigate: '浏览器·打开网页',
+  browser_back: '浏览器·后退',
+  browser_forward: '浏览器·前进',
+  browser_reload: '浏览器·刷新',
+  browser_close: '浏览器·关闭',
+  browser_scroll: '浏览器·滚动',
+  browser_snapshot: '浏览器·页面快照',
+  browser_take_screenshot: '浏览器·截图',
+  browser_get_text: '浏览器·获取文本',
+  browser_select_option: '浏览器·选择选项',
+  browser_evaluate: '浏览器·执行脚本',
+  browser_wait_for: '浏览器·等待',
+  browser_file_upload: '浏览器·上传文件',
+  browser_tabs: '浏览器·标签页',
+  browser_console_messages: '浏览器·控制台日志',
+  browser_network_requests: '浏览器·网络请求',
+  browser_cookies: '浏览器·Cookies',
+  // 桌面控制插件(grf-computer)
+  computer_click: '电脑·点击',
+  computer_type: '电脑·输入',
+  computer_key: '电脑·按键',
+  computer_move: '电脑·移动鼠标',
+  computer_drag: '电脑·拖拽',
+  computer_scroll: '电脑·滚动',
+  computer_screenshot: '电脑·截屏',
+  computer_clipboard: '电脑·剪贴板',
+  computer_screen_size: '电脑·屏幕尺寸',
+  computer_wait: '电脑·等待',
+};
+
+/** 插件前缀与常见动词的中文对照(未收录的 browser_、computer_ 系列兜底拼译) */
+const TOOL_PREFIX: Record<string, string> = { browser: '浏览器', computer: '电脑' };
+const TOOL_WORDS: Record<string, string> = {
+  click: '点击',
+  double: '双击',
+  type: '输入',
+  input: '输入',
+  hover: '悬停',
+  key: '按键',
+  press: '按键',
+  navigate: '打开网页',
+  open: '打开',
+  close: '关闭',
+  back: '后退',
+  forward: '前进',
+  reload: '刷新',
+  scroll: '滚动',
+  snapshot: '页面快照',
+  screenshot: '截图',
+  take: '',
+  get: '获取',
+  text: '文本',
+  select: '选择',
+  option: '选项',
+  evaluate: '执行脚本',
+  wait: '等待',
+  for: '',
+  file: '文件',
+  upload: '上传',
+  download: '下载',
+  tab: '标签页',
+  tabs: '标签页',
+  console: '控制台',
+  messages: '消息',
+  network: '网络',
+  requests: '请求',
+  cookies: 'Cookies',
+  clipboard: '剪贴板',
+  screen: '屏幕',
+  size: '尺寸',
+  move: '移动',
+  drag: '拖拽',
+  page: '页面',
+  find: '查找',
+  search: '搜索',
+  save: '保存',
+  delete: '删除',
+  read: '读取',
+  write: '写入',
 };
 
 export function toolLabel(name: string): string {
-  return TOOL_LABELS[name] ?? (name || '工具');
+  const known = TOOL_LABELS[name];
+  if (known) return known;
+  // 插件工具兜底:按前缀 + 动词词典拼出中文名,避免直接展示 browser_xxx
+  const parts = name.split('_').filter(Boolean);
+  const prefix = TOOL_PREFIX[parts[0]];
+  if (prefix) {
+    const rest = parts
+      .slice(1)
+      .map((w) => TOOL_WORDS[w] ?? w)
+      .join('');
+    return `${prefix}·${rest || '操作'}`;
+  }
+  return name || '工具';
 }
 
 // 时长(中文单位):3秒 / 1.5秒 / 0.4秒 / 1分5秒。

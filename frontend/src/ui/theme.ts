@@ -39,8 +39,8 @@ export const theme = css`
     --grf-reasoning: #8d7ce8;
     --grf-reasoning-soft: rgba(141, 124, 232, 0.1);
     --grf-shadow: var(--grf-skin-shadow, 0 8px 28px rgba(0, 0, 0, 0.4));
-    /* 主体工作卡片底色(聊天/设置等黑色圆角大卡) */
-    --grf-card: var(--grf-skin-card, #000);
+    /* 主体工作卡片底色(聊天/设置等圆角大卡),比导航栏(--grf-bg-raise)深一档 */
+    --grf-card: var(--grf-skin-card, #13151b);
     --grf-scroll-thumb: var(--grf-skin-scroll-thumb, #333845);
     --grf-border-hover: var(--grf-skin-border-hover, #363b47);
 
@@ -106,6 +106,8 @@ export const controls = css`
   }
   input[type='text'],
   input[type='password'],
+  input[type='number'],
+  input:not([type]),
   textarea,
   select {
     font-family: var(--grf-font);

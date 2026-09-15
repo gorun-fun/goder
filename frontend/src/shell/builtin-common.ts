@@ -13,7 +13,7 @@ import '../panels/inspector/browser';
 import '../panels/console/console';
 
 /** 会话列表导航设置分区的状态类型(shell 经 grf-nav-state 持有)。 */
-export type SettingsSection = 'general' | 'appearance' | 'models';
+export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills';
 
 let registered = false;
 
@@ -45,12 +45,12 @@ export function registerBuiltinCommon(): void {
     view: (ctx, state) =>
       html`<grf-settings-nav
         scope=${ctx.scope}
-        .section=${(state as SettingsSection) ?? 'general'}
+        .section=${(state as SettingsSection) ?? 'appearance'}
       ></grf-settings-nav>`,
     center: (ctx, state) =>
       html`<grf-settings-page
         scope=${ctx.scope}
-        .section=${(state as SettingsSection) ?? 'general'}
+        .section=${(state as SettingsSection) ?? 'appearance'}
         .leftToggle=${ctx.shell?.leftOn === false}
         .leftOn=${ctx.shell?.leftOn ?? true}
         .leftLights=${ctx.shell?.desktopLights ?? false}

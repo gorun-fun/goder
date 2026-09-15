@@ -26,7 +26,7 @@ export { configureScope, getScope, UNGROUPED } from '../core/store/scope';
 export type { GrfScope, ConnectionConfig, AuthConfig } from '../core/store/scope';
 import type { AuthConfig } from '../core/store/scope';
 export { settingsStore, ACCENTS } from '../core/settings/settings-store';
-export type { Appearance, ThemeMode, AccentKey, FontSizeMode } from '../core/settings/settings-store';
+export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settings-store';
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';

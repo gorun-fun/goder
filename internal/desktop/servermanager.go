@@ -5,6 +5,7 @@
 package desktop
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -26,8 +27,10 @@ var serverManager = &ServerManager{}
 // GetServerManager 取全局 ServerManager。
 func GetServerManager() *ServerManager { return serverManager }
 
-// ServiceShutdown wails 退出钩子:停掉托管进程。
+// ServiceShutdown wails 退出钩子:停掉托管进程(gh server 随 App 关闭,
+// 不留孤儿)。
 func (s *ServerManager) ServiceShutdown() {
+	log.Printf("[servermanager] 退出:回收托管 gh server")
 	s.Stop()
 }
 
@@ -85,7 +88,16 @@ func (s *ServerManager) Start() ghserver.Status {
 		s.lastErr = err.Error()
 		return s.statusLocked()
 	}
-	// 配置可能变更(地址/二进制),每次 Start 重建进程句柄。
+	// 配置可能变更(地址/二进制),不一致时重建进程句柄;一致且仍在运行则
+	// 直接复用 —— Start 可能被 main 冷启动与前端桥引导各调一次,重复
+	// NewProc 会丢掉持有 gh 子进程 pid 的旧句柄,退出时将回收不到进程。
+	if s.proc != nil {
+		st := s.proc.Status()
+		if st.Running && st.Addr == addr && st.DataDir == dataDir {
+			s.proc.Touch()
+			return st
+		}
+	}
 	s.proc = ghserver.NewProc(ghserver.ProcConfig{GhBin: bin, Addr: addr, DataDir: dataDir})
 	st := s.proc.Start()
 	s.lastErr = st.LastError

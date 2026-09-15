@@ -3,7 +3,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { theme, controls } from '../../ui/panel';
-import { toolArgSummary } from '../../util/fmt';
+import { toolArgSummary, toolLabel } from '../../util/fmt';
 import type { ApprovalItem } from '../../core/model/chat-model';
 
 @customElement('grf-approval-card')
@@ -85,7 +85,7 @@ export class GrfApprovalCard extends LitElement {
       return html`<div class="card">
         <div class="banner">${it.state === 'approved' ? '✓ 已批准' : '✕ 已拒绝'}</div>
         <div class="done">
-          ${it.name}
+          ${toolLabel(it.name)}
           ${it.state === 'rejected' && it.feedback ? html` — 反馈:${it.feedback}` : nothing}
         </div>
       </div>`;
@@ -100,7 +100,7 @@ export class GrfApprovalCard extends LitElement {
           </svg>
           工具执行需要批准
         </div>
-        <div class="tool">${it.name} — ${toolArgSummary(it.name, it.args)}</div>
+        <div class="tool">${toolLabel(it.name)} — ${toolArgSummary(it.name, it.args)}</div>
         <pre class="args">${this.pretty(it.args)}</pre>
         ${this.showFeedback
           ? html`<textarea class="feedback" placeholder="拒绝反馈(会回给模型,例如:别动这个文件,改用 …)"></textarea>`

@@ -6,10 +6,14 @@ package desktop
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ProviderDTO 与前端 host/bridge.ts 的 ProviderDTO 对齐。
@@ -105,6 +109,11 @@ func (m *ModelConfig) Load() ModelConfigDTO {
 	sort.Strings(names)
 	for _, n := range names {
 		p := ps[n]
+		if p.Models == nil {
+			// settings.json 里缺 models 键时保持空数组:DTO 对齐前端,
+			// 序列化为 null 会让前端展开语法抛错(见 chat-panel providers)
+			p.Models = []string{}
+		}
 		out.Providers = append(out.Providers, ProviderDTO{
 			Name:    n,
 			Type:    p.Type,
@@ -201,4 +210,60 @@ func (m *ModelConfig) writable(path string) bool {
 	f.Close()
 	_ = os.Remove(name)
 	return true
+}
+
+// DetectModels 询问供应商的模型列表接口(OpenAI 兼容 GET /models),
+// 返回探测到的模型 id;供设置页"自动检测"按钮合并进现有模型列表。
+func (m *ModelConfig) DetectModels(p ProviderDTO) ([]string, error) {
+	base := strings.TrimRight(strings.TrimSpace(p.BaseURL), "/")
+	if base == "" {
+		return nil, fmt.Errorf("未配置 Base URL")
+	}
+	req, err := http.NewRequest(http.MethodGet, base+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	if k := strings.TrimSpace(p.APIKey); k != "" {
+		req.Header.Set("Authorization", "Bearer "+k)
+	}
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("接口返回 %s", resp.Status)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	// OpenAI 形状 {data:[{id}]};兼容裸数组 [{id}]
+	var ids []string
+	wrapped := struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}{}
+	if jerr := json.Unmarshal(body, &wrapped); jerr == nil && len(wrapped.Data) > 0 {
+		for _, d := range wrapped.Data {
+			if d.ID != "" {
+				ids = append(ids, d.ID)
+			}
+		}
+	} else {
+		var bare []struct {
+			ID string `json:"id"`
+		}
+		if jerr := json.Unmarshal(body, &bare); jerr != nil {
+			return nil, fmt.Errorf("响应不是可识别的模型列表 JSON")
+		}
+		for _, d := range bare {
+			if d.ID != "" {
+				ids = append(ids, d.ID)
+			}
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
 }

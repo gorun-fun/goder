@@ -35,6 +35,14 @@ export class GrfToolCard extends LitElement {
       .line:hover {
         color: var(--grf-text);
       }
+      /* 运行中:整行用主题强调色提示;调用结束回归默认弱化色 */
+      .line.running,
+      .line.running:hover {
+        color: var(--grf-accent-text);
+      }
+      .line.running .subject.file:hover {
+        color: var(--grf-accent);
+      }
       .lab {
         flex: none;
       }
@@ -128,7 +136,7 @@ export class GrfToolCard extends LitElement {
     // 完成后按输出里的 N replacements 修正 replace_all 倍数。
     const stat = fileEditStat(it.name, it.args, it.output);
     return html`
-      <div class="line" @click=${() => (this.open = !this.open)}>
+      <div class="line ${it.status === 'running' ? 'running' : ''}" @click=${() => (this.open = !this.open)}>
         <span class="lab">${label}</span>
         ${dur ? html`<span class="time">${dur}</span>` : nothing}
         ${fileName && filePath
