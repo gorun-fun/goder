@@ -2,7 +2,7 @@
 // 单用户形态:进程生命周期经 internal/ghserver.Proc 实现,这里只负责按
 // AppConfig 解析启动参数与维护全局单例(main 冷启动、服务注册与
 // /grf-api/token 端点共享同一份状态)。
-package main
+package desktop
 
 import (
 	"os"

@@ -2,7 +2,7 @@
 // 的 providers 与 default),让设置页的"模型设置"可以直接增删供应商。
 // 只改这两个键,其余配置(mouse / max_steps / policy / plugins 等)原样
 // 保留;GRF_HOME 可重定位配置目录。
-package main
+package desktop
 
 import (
 	"encoding/json"
@@ -27,6 +27,10 @@ type ModelConfigDTO struct {
 	Providers []ProviderDTO `json:"providers"` // 按名称排序
 	Default   string        `json:"default"`   // provider/model
 	Writable  bool          `json:"writable"`  // 目录/文件是否可写(决定 UI 只读)
+	// gh settings 常用项;指针为 nil 表示文件里没有该键,保存时原样保留
+	MaxSteps *int   `json:"maxSteps"`
+	Mouse    *bool  `json:"mouse"`
+	Policy   string `json:"policy"` // 空表示未设置
 }
 
 // ghProvider settings.json 中单个供应商的原始形状。
@@ -69,6 +73,25 @@ func (m *ModelConfig) Load() ModelConfigDTO {
 		var s string
 		if err := json.Unmarshal(v, &s); err == nil {
 			out.Default = s
+		}
+	}
+	// 常用项:存在才带出(指针为 nil 表示未设置)
+	if v, ok := all["max_steps"]; ok {
+		var n int
+		if err := json.Unmarshal(v, &n); err == nil {
+			out.MaxSteps = &n
+		}
+	}
+	if v, ok := all["mouse"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err == nil {
+			out.Mouse = &b
+		}
+	}
+	if v, ok := all["policy"]; ok {
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil {
+			out.Policy = s
 		}
 	}
 	var ps map[string]ghProvider
@@ -135,6 +158,22 @@ func (m *ModelConfig) Save(cfg ModelConfigDTO) error {
 	}
 	all["providers"] = provRaw
 	all["default"] = defRaw
+	// 常用项:显式设置了才写,空 policy 不落键(沿用原值或省略)
+	if cfg.MaxSteps != nil {
+		if raw, err := json.Marshal(*cfg.MaxSteps); err == nil {
+			all["max_steps"] = raw
+		}
+	}
+	if cfg.Mouse != nil {
+		if raw, err := json.Marshal(*cfg.Mouse); err == nil {
+			all["mouse"] = raw
+		}
+	}
+	if p := strings.TrimSpace(cfg.Policy); p != "" {
+		if raw, err := json.Marshal(p); err == nil {
+			all["policy"] = raw
+		}
+	}
 
 	data, err := json.MarshalIndent(all, "", "  ")
 	if err != nil {

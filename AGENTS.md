@@ -15,7 +15,7 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
 - `./start.sh start|stop|restart` — 桌面 App 生命周期(后台运行,PID/日志在 `.run/`)
 - 类型检查:`cd frontend && npx tsc --noEmit`;Go:`go build ./... && go vet ./...`
 - (无自动化测试;E2E 为真实 gh server + 真实模型的手动浏览器验证,
-  截图存 `gui-test-screenshots/`;playwright-cli 或浏览器驱动)
+  playwright-cli 或浏览器驱动)
 
 ## 结构与分层
 
@@ -31,9 +31,11 @@ internal/                Go 共享层(桌面壳与 web 网关同一套实现)
                          会话 cookie;SessionStore 接口预留持久化)
   gateway/               多用户网关:静态托管 + /grf-api 按用户路由(身份 →
                          懒拉起用户进程 → 注入令牌转发)+ auth 端点挂载 + CORS
-main.go / *.go           wails v3 桌面壳(薄壳:AppConfig/ServerManager 引用
-                         internal;/grf-api/token 冷启动端点;Desktop 原生能力、
-                         ModelConfig、TerminalManager、rootHandler 组合)
+main.go                  wails v3 桌面入口(仅装配:服务注册、窗口、embed 资源)
+internal/desktop/        桌面 wails 服务薄壳(AppConfig/ServerManager/
+                         ModelConfig/Desktop/TerminalManager + rootHandler
+                         /grf-api 反代与 /grf-api/token 冷启动端点;引用
+                         internal/appcfg、internal/ghserver)
 cmd/grf-web-serve/       多用户网关 CLI(GRF_IDENTITY=single|header|sso)
 frontend/src/
   core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗)/ model(会话运行
@@ -81,10 +83,12 @@ frontend/src/
 - `internal/ghserver/proxy.go`:WKWebView 自定义 scheme 请求不带
   Content-Length,转发前必须整体缓冲 body 并补齐长度(Go#16036),
   否则 POST body 丢失。
-- 桌面 wails 服务(`appconfig.go`/`servermanager.go`/`desktop.go`/
-  `modelconfig.go`/`terminal.go`)的 DTO 与 `frontend/src/host/bridge.ts`
-  手工对齐,两边同改保持同步;AppConfig/ServerManager 是薄壳,逻辑改动
-  应落在 internal/appcfg、internal/ghserver。
+- 桌面 wails 服务(`internal/desktop/` 下 `appconfig.go`/`servermanager.go`/
+  `desktop.go`/`modelconfig.go`/`terminal.go`)的 DTO 与
+  `frontend/src/host/bridge.ts` 手工对齐,两边同改保持同步;wails
+  `Call.ByName` 按完整包路径 FQN(`bridge.ts` 的 SVC 常量)匹配,挪包时
+  两边同步;AppConfig/ServerManager 是薄壳,逻辑改动应落在
+  internal/appcfg、internal/ghserver。
 - 前端 web 默认 baseUrl、桌面 bootstrap 顺序(先同源代理再补 token)与
   `/grf-api/token` 端点是冷启动链路的一部分,改动需回归桌面+web 两形态。
 

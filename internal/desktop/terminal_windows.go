@@ -2,7 +2,7 @@
 
 // terminal_windows.go — Windows 存根:creack/pty 不支持 Windows,内嵌终端
 // 暂不可用(方法保留与 bridge 的对齐形状,调用即报错)。
-package main
+package desktop
 
 import "fmt"
 

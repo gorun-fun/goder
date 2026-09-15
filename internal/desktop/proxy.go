@@ -2,7 +2,7 @@
 // internal/ghserver.NewProxy;这里只负责解析桌面配置(托管实例优先,
 // 远程模式取配置)并挂接 /grf-api/token 端点(前端冷启动零 wails 依赖
 // 拿连接信息)。
-package main
+package desktop
 
 import (
 	"encoding/json"
@@ -30,7 +30,7 @@ func upstreamTarget() string {
 
 // rootHandler 组合:/grf-api/* → 代理;/grf-api/token → 托管服务信息
 // (同源直读,前端冷启动无需等 wails 调用通道);其余 → 前端静态资源。
-func rootHandler(fallback http.Handler) http.Handler {
+func RootHandler(fallback http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/grf-api/token", serveManagedToken)
 	mux.Handle(proxyPrefix+"/", desktopProxy())

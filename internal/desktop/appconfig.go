@@ -1,7 +1,7 @@
 // appconfig.go — AppConfig wails 服务:应用配置与项目索引的文件持久化,
-// 实现收敛在 internal/appcfg;前端经 Call.ByName("main.AppConfig.*") 调用,
+// 实现收敛在 internal/appcfg;前端经 Call.ByName("desktop.AppConfig.*") 调用,
 // 纯 web 态自动回退 localStorage(见 frontend core/store/persistence)。
-package main
+package desktop
 
 import "git.gorun.fun/share/goder/internal/appcfg"
 

@@ -1,7 +1,7 @@
 // desktop.go — Desktop 服务:桌面态专属能力(原生目录选择、在文件管理器
-// 中显示路径、git 状态/差异读取)。前端经 Call.ByName("main.Desktop.*")
+// 中显示路径、git 状态/差异读取)。前端经 Call.ByName("desktop.Desktop.*")
 // 调用;纯 web 态不适用。
-package main
+package desktop
 
 import (
 	"bytes"

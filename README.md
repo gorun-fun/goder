@@ -190,7 +190,6 @@ frontend/src/
   host/                  wails 宿主桥(纯 web 态 no-op 回退)
   entries/               desktop.ts(桌面)/ embed.ts(嵌入库)入口
 docs/                    embedding.md(三方集成)
-gui-test-screenshots/    端到端验证截图
 ```
 
 ## 测试
@@ -199,7 +198,7 @@ gui-test-screenshots/    端到端验证截图
 - `go build ./... && go vet ./...`:Go 侧
 - 端到端(真实 gh server + 真实模型):`gh server` 起在 7401 或直接用
   `./build.sh web` 网关(自管模式自动拉起),浏览器驱动 —— 本次重构已做
-  全链路验证(见 `gui-test-screenshots/`):网关懒拉起与令牌注入、
+  全链路验证:网关懒拉起与令牌注入、
   header 多用户隔离、同源连接、真实对话 + 回复渲染、registry 自定义
   导航/右栏条目、设置分区切换。
 

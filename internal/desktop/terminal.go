@@ -1,10 +1,10 @@
 //go:build !windows
 
 // terminal.go — TerminalManager 服务:内嵌交互终端(PTY)。
-// 前端 grf-terminal 面板经 main.TerminalManager.* 调用;PTY 输出经 wails
+// 前端 grf-terminal 面板经 desktop.TerminalManager.* 调用;PTY 输出经 wails
 // 事件 grf:term-data:<id>(base64)推回前端,退出推 grf:term-exit:<id>。
 // app 退出时回收全部会话。
-package main
+package desktop
 
 import (
 	"crypto/rand"

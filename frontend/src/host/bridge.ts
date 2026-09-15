@@ -23,6 +23,10 @@ interface WailsCall {
   ByName: (name: string, ...args: unknown[]) => Promise<unknown>;
 }
 
+// wails Call.ByName 按完整 FQN(包路径.类型.方法)精确匹配;桌面服务在
+// internal/desktop,与 Go 侧 module 路径保持同步。
+const SVC = 'git.gorun.fun/share/goder/internal/desktop';
+
 let runtime: WailsCall | null = null;
 
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
@@ -71,7 +75,7 @@ export interface AppConfigDTO {
 export async function loadAppConfig(): Promise<AppConfigDTO | null> {
   if (!inWails()) return null;
   try {
-    return await call<AppConfigDTO>('main.AppConfig.Load');
+    return await call<AppConfigDTO>(`${SVC}.AppConfig.Load`);
   } catch {
     return null;
   }
@@ -79,7 +83,7 @@ export async function loadAppConfig(): Promise<AppConfigDTO | null> {
 
 export async function saveAppConfig(cfg: AppConfigDTO): Promise<void> {
   if (!inWails()) return;
-  await call<void>('main.AppConfig.Save', cfg);
+  await call<void>(`${SVC}.AppConfig.Save`, cfg);
 }
 
 // ---------- 模型配置(ModelConfig service,gh 的 settings.json) ----------
@@ -102,13 +106,17 @@ export interface ModelConfigDTO {
   default: string;
   /** 目标文件是否可写(不可写时 UI 只读) */
   writable: boolean;
+  /** gh settings 常用项;null 表示文件里没有该键,保存时原样保留 */
+  maxSteps: number | null;
+  mouse: boolean | null;
+  policy: string;
 }
 
 /** 读取供应商与默认模型;非桌面态返回 null(纯 web 态无法访问 gh 配置)。 */
 export async function loadModelConfig(): Promise<ModelConfigDTO | null> {
   if (!inWails()) return null;
   try {
-    return await call<ModelConfigDTO>('main.ModelConfig.Load');
+    return await call<ModelConfigDTO>(`${SVC}.ModelConfig.Load`);
   } catch {
     return null;
   }
@@ -117,7 +125,7 @@ export async function loadModelConfig(): Promise<ModelConfigDTO | null> {
 /** 写回 providers 与 default;其余配置键原样保留。 */
 export async function saveModelConfig(cfg: ModelConfigDTO): Promise<void> {
   if (!inWails()) return;
-  await call<void>('main.ModelConfig.Save', cfg);
+  await call<void>(`${SVC}.ModelConfig.Save`, cfg);
 }
 
 // ---------- server 托管(ServerManager service) ----------
@@ -134,7 +142,7 @@ export interface ServerStatusDTO {
 export async function serverStatus(): Promise<ServerStatusDTO | null> {
   if (!inWails()) return null;
   try {
-    return await call<ServerStatusDTO>('main.ServerManager.Status');
+    return await call<ServerStatusDTO>(`${SVC}.ServerManager.Status`);
   } catch {
     return null;
   }
@@ -142,12 +150,12 @@ export async function serverStatus(): Promise<ServerStatusDTO | null> {
 
 export async function serverStart(): Promise<ServerStatusDTO | null> {
   if (!inWails()) return null;
-  return call<ServerStatusDTO>('main.ServerManager.Start');
+  return call<ServerStatusDTO>(`${SVC}.ServerManager.Start`);
 }
 
 export async function serverStop(): Promise<ServerStatusDTO | null> {
   if (!inWails()) return null;
-  return call<ServerStatusDTO>('main.ServerManager.Stop');
+  return call<ServerStatusDTO>(`${SVC}.ServerManager.Stop`);
 }
 
 // ---------- 桌面能力(Desktop service) ----------
@@ -156,7 +164,7 @@ export async function serverStop(): Promise<ServerStatusDTO | null> {
 export async function pickFolder(): Promise<string | null> {
   if (!inWails()) return null;
   try {
-    const p = await call<string>('main.Desktop.PickFolder');
+    const p = await call<string>(`${SVC}.Desktop.PickFolder`);
     return p || null;
   } catch {
     return null;
@@ -167,7 +175,7 @@ export async function pickFolder(): Promise<string | null> {
 export async function revealPath(path: string): Promise<void> {
   if (!inWails()) return;
   try {
-    await call<void>('main.Desktop.Reveal', path);
+    await call<void>(`${SVC}.Desktop.Reveal`, path);
   } catch {
     /* 静默 */
   }
@@ -177,7 +185,7 @@ export async function revealPath(path: string): Promise<void> {
 export async function desktopUserName(): Promise<string> {
   if (!inWails()) return '';
   try {
-    return (await call<string>('main.Desktop.UserName')) || '';
+    return (await call<string>(`${SVC}.Desktop.UserName`)) || '';
   } catch {
     return '';
   }
@@ -196,7 +204,7 @@ export interface FileEntryDTO {
 export async function listDir(path: string): Promise<FileEntryDTO[] | null> {
   if (!inWails()) return null;
   try {
-    return await call<FileEntryDTO[]>('main.Desktop.ListDir', path);
+    return await call<FileEntryDTO[]>(`${SVC}.Desktop.ListDir`, path);
   } catch {
     return null;
   }
@@ -205,13 +213,13 @@ export async function listDir(path: string): Promise<FileEntryDTO[] | null> {
 /** 读取文本文件内容(右栏预览,上限 2MB);失败抛带信息的 Error,非桌面态抛不支持。 */
 export async function readFileText(path: string): Promise<string> {
   if (!inWails()) throw new Error('仅桌面态支持文件预览');
-  return call<string>('main.Desktop.ReadFile', path);
+  return call<string>(`${SVC}.Desktop.ReadFile`, path);
 }
 
 /** 读取图片文件为 data URL(右栏预览,上限 10MB);失败抛带信息的 Error。 */
 export async function readImageDataUrl(path: string): Promise<string> {
   if (!inWails()) throw new Error('仅桌面态支持图片预览');
-  return call<string>('main.Desktop.ReadImage', path);
+  return call<string>(`${SVC}.Desktop.ReadImage`, path);
 }
 
 // ---------- 终端(TerminalManager service,仅桌面) ----------
@@ -223,14 +231,14 @@ export interface TermSessionDTO {
 /** 在 cwd 启动交互终端(PTY)会话;非桌面态返回 null,启动失败抛错。 */
 export async function startTerm(cwd: string, cols: number, rows: number): Promise<TermSessionDTO | null> {
   if (!inWails()) return null;
-  return call<TermSessionDTO>('main.TerminalManager.StartTerm', cwd, cols, rows);
+  return call<TermSessionDTO>(`${SVC}.TerminalManager.StartTerm`, cwd, cols, rows);
 }
 
 /** 向终端会话写入键盘输入(会话已退出时静默)。 */
 export async function writeTerm(id: string, data: string): Promise<void> {
   if (!inWails()) return;
   try {
-    await call<void>('main.TerminalManager.WriteTerm', id, data);
+    await call<void>(`${SVC}.TerminalManager.WriteTerm`, id, data);
   } catch {
     /* 会话可能已退出 */
   }
@@ -240,7 +248,7 @@ export async function writeTerm(id: string, data: string): Promise<void> {
 export async function resizeTerm(id: string, cols: number, rows: number): Promise<void> {
   if (!inWails()) return;
   try {
-    await call<void>('main.TerminalManager.ResizeTerm', id, cols, rows);
+    await call<void>(`${SVC}.TerminalManager.ResizeTerm`, id, cols, rows);
   } catch {
     /* 静默 */
   }
@@ -250,7 +258,7 @@ export async function resizeTerm(id: string, cols: number, rows: number): Promis
 export async function killTerm(id: string): Promise<void> {
   if (!inWails()) return;
   try {
-    await call<void>('main.TerminalManager.KillTerm', id);
+    await call<void>(`${SVC}.TerminalManager.KillTerm`, id);
   } catch {
     /* 静默 */
   }
@@ -308,14 +316,14 @@ export interface GitStatusDTO {
 /** 读取仓库状态;非桌面态返回 null,git 失败抛错(如"不是 git 仓库")。 */
 export async function gitStatus(cwd: string): Promise<GitStatusDTO | null> {
   if (!inWails()) return null;
-  return call<GitStatusDTO>('main.Desktop.GitStatus', cwd);
+  return call<GitStatusDTO>(`${SVC}.Desktop.GitStatus`, cwd);
 }
 
 /** 读取单文件 diff 文本;非桌面态/失败返回 null。 */
 export async function gitDiff(cwd: string, path: string, staged: boolean): Promise<string | null> {
   if (!inWails()) return null;
   try {
-    return await call<string>('main.Desktop.GitDiff', cwd, path, staged);
+    return await call<string>(`${SVC}.Desktop.GitDiff`, cwd, path, staged);
   } catch {
     return null;
   }
@@ -326,7 +334,7 @@ export async function gitDiff(cwd: string, path: string, staged: boolean): Promi
 class WailsPersistence implements Persistence {
   async load(scope: string): Promise<ProjectsIndex | null> {
     try {
-      const raw = await call<string>('main.AppConfig.LoadIndex', scope);
+      const raw = await call<string>(`${SVC}.AppConfig.LoadIndex`, scope);
       return raw ? (JSON.parse(raw) as ProjectsIndex) : null;
     } catch {
       return null;
@@ -334,7 +342,7 @@ class WailsPersistence implements Persistence {
   }
   async save(scope: string, idx: ProjectsIndex): Promise<void> {
     try {
-      await call<void>('main.AppConfig.SaveIndex', scope, JSON.stringify(idx));
+      await call<void>(`${SVC}.AppConfig.SaveIndex`, scope, JSON.stringify(idx));
     } catch {
       /* 静默 */
     }
@@ -345,7 +353,7 @@ export async function initHostBridge(): Promise<boolean> {
   // 探针带重试:页面加载初期 wails 调用通道可能尚未就绪(传输握手)。
   for (let i = 0; i < 8; i++) {
     try {
-      await withTimeout(call('main.AppConfig.Load'), 1500);
+      await withTimeout(call(`${SVC}.AppConfig.Load`), 1500);
       wailsProbe = true;
       setPersistence(new WailsPersistence());
       return true;
