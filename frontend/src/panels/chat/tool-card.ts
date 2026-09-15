@@ -4,9 +4,9 @@
 // 输出实时上屏。ask_user_question 由上层过滤,不渲染。
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { theme } from '../../ui/base';
+import { theme } from '../../ui/panel';
 import { fileEditStat, fmtToolDuration, toolDetail, toolFilePath, toolLabel, toolPrimaryText } from '../../util/fmt';
-import type { ToolItem } from '../../state/chat-model';
+import type { ToolItem } from '../../core/model/chat-model';
 
 @customElement('grf-tool-card')
 export class GrfToolCard extends LitElement {

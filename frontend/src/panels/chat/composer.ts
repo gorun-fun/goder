@@ -7,10 +7,10 @@
 // 点击单选选项即确认提交。
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { theme, controls } from '../../ui/base';
+import { theme, controls } from '../../ui/panel';
 import { fmtTokens } from '../../util/fmt';
-import type { AskItem } from '../../state/chat-model';
-import type { LLMStats, Usage } from '../../api/types';
+import type { AskItem } from '../../core/model/chat-model';
+import type { LLMStats, Usage } from '../../core/api/types';
 import './ask-form';
 
 /** 新会话访问策略(与 gh 预制策略选项一一对应) */

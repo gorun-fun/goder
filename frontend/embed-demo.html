@@ -41,7 +41,12 @@
         display: flex;
         min-height: 0;
       }
-      /* 只嵌入会话列表 + 聊天:像"裸 grf-harness 配置开启部分 UI" */
+      /* 完整 shell 嵌入:左导航/右栏/底栏条目由 registry 定制 */
+      grf-app-shell {
+        flex: 1;
+        min-width: 0;
+      }
+      /* 演示 2:自由组合独立面板(勾掉 shell 只嵌部分面板的形态) */
       grf-session-list {
         width: 250px;
         flex: none;
@@ -65,23 +70,79 @@
   <body>
     <div class="host-nav">
       <span class="brand">三方应用 <em>Console</em></span>
-      <span class="note">本页演示:宿主自己的顶栏 + 嵌入 grf 的会话列表/聊天/事件台(scope=demo)</span>
+      <span class="note"
+        >本页演示:宿主顶栏 + grf-app-shell(经 registry 裁剪/新增左栏、右栏、底栏条目;?panels=free 切换自由组合形态)</span
+      >
     </div>
-    <div class="embed-row">
-      <grf-session-list scope="demo" no-connection></grf-session-list>
-      <div class="with-console">
-        <grf-chat scope="demo"></grf-chat>
-        <grf-console scope="demo"></grf-console>
-      </div>
+    <div class="embed-row" id="host-shell">
+      <!-- 默认:整套 shell(scope=demo),三方经 registry 定制 -->
+      <grf-app-shell scope="demo" panels="sessions,chat,sidebar,console"></grf-app-shell>
     </div>
     <script type="module">
-      // JS 方式配置连接(优先于属性)
-      import { configure } from '/src/embed/index.ts';
+      // 引入嵌入库(全量副作用:注册全部通用面板 + 内置条目)
+      import '/src/entries/embed.ts';
+      import { configure, registry } from '/src/entries/embed.ts';
+      import { html } from 'lit';
+
       const qs = new URLSearchParams(location.search);
+
+      // 连接:默认走同源网关 /grf-api(多用户网关注入令牌;也可 ?server= 直连)
       configure('demo', {
-        baseUrl: qs.get('server') ?? 'http://127.0.0.1:7400',
+        baseUrl: qs.get('server') ?? '/grf-api',
         token: qs.get('token') ?? '',
       });
+
+      // ---- UI 定制演示:三方按需裁剪与新增 ----
+      // 裁剪:隐藏内置「事件台」右栏条目
+      registry.side.hide('console');
+
+      // 新增:自定义右栏条目(拿 PanelContext:scope/store/当前会话)
+      registry.side.add({
+        id: 'about',
+        label: '关于',
+        icon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.8"/><path d="M8 7.2v3.6" stroke-linecap="round"/></svg>',
+        width: 320,
+        render: (ctx) => html`
+          <div style="padding:16px;font-size:12.5px;line-height:1.8;color:#8b909c">
+            <div style="color:#d7dae0;font-weight:650;margin-bottom:6px">自定义右栏条目</div>
+            <div>由宿主页面经 <code>registry.side.add()</code> 注册,渲染函数拿到当前 scope 数据域。</div>
+            <div style="margin-top:8px">当前会话:${ctx.sessionId ?? '(未选择)'}</div>
+            <div>连接状态:${ctx.store.connState}</div>
+          </div>
+        `,
+      });
+
+      // 新增:自定义左栏导航条目(点击宿主自己的切换按钮激活)
+      registry.nav.add({
+        id: 'host-help',
+        label: '宿主帮助',
+        order: 50,
+        view: () => html`
+          <div style="padding:16px;font-size:12.5px;line-height:1.8;color:#8b909c">
+            <div style="color:#d7dae0;font-weight:650;margin-bottom:6px">自定义左栏导航</div>
+            <div>经 registry.nav.add 注册;宿主可自绘切换 UI 调 shell.navTo('host-help')。</div>
+          </div>
+        `,
+      });
+      const shellBtn = document.createElement('button');
+      shellBtn.textContent = '切到「宿主帮助」';
+      shellBtn.style.cssText = 'margin-left:auto;background:#1b1c22;border:1px solid #2a2d36;color:#8b909c;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer';
+      shellBtn.onclick = () => document.querySelector('grf-app-shell')?.navTo('host-help');
+      document.querySelector('.host-nav')?.append(shellBtn);
+
+      // ?panels=free:自由组合独立面板形态(不用 shell)
+      if (qs.get('panels') === 'free') {
+        registry.side.show('console');
+        const host = document.getElementById('host-shell');
+        if (host) {
+          host.innerHTML = `
+          <grf-session-list scope="demo" no-connection></grf-session-list>
+          <div class="with-console">
+            <grf-chat scope="demo"></grf-chat>
+            <grf-console scope="demo"></grf-console>
+          </div>`;
+        }
+      }
     </script>
   </body>
 </html>

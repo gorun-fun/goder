@@ -8,7 +8,7 @@ export default defineConfig({
     outDir: 'dist-embed',
     emptyOutDir: true,
     lib: {
-      entry: resolve(__dirname, 'src/embed/index.ts'),
+      entry: resolve(__dirname, 'src/entries/embed.ts'),
       formats: ['es'],
       fileName: () => 'grf-ui.js',
     },

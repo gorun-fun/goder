@@ -1,0 +1,69 @@
+// embed.ts — 三方 web 集成入口(嵌入库唯一入口)。
+// 用法 A(声明式):
+//   <grf-app-shell panels="chat,sidebar"></grf-app-shell>
+//   或独立面板:<grf-session-list> / <grf-chat> / <grf-session-detail> / <grf-console>
+// 用法 B(JS 配置 + UI 定制):
+//   import { configure, registry } from 'grf-harness-ui';
+//   configure('myscope', { baseUrl: '/grf-api' });          // 网关模式无需 token
+//   registry.side.hide('console');                          // 裁剪右栏条目
+//   registry.nav.add({ id: 'help', label: '帮助', view: (ctx) => … }); // 自定义导航
+// 同一 scope 的面板共享数据;不同 scope 互不干扰。
+export { GrfAppShell } from '../shell/app-shell';
+export { GrfChat } from '../panels/chat/chat-panel';
+export { GrfSessionList } from '../panels/sessions/session-list';
+export { GrfSessionDetail } from '../panels/inspector/session-detail';
+export { GrfConsole } from '../panels/console/console';
+export { GrfReview } from '../panels/inspector/review';
+export { GrfBrowser } from '../panels/inspector/browser';
+export { GrfSettingsNav } from '../panels/settings/settings-nav';
+export { GrfSettingsPage } from '../panels/settings/settings-page';
+export { GrfComposer } from '../panels/chat/composer';
+export { GrfToolCard } from '../panels/chat/tool-card';
+export { GrfAskForm } from '../panels/chat/ask-form';
+export { GrfApprovalCard } from '../panels/chat/approval-card';
+
+export { configureScope, getScope, UNGROUPED } from '../core/store/scope';
+export type { GrfScope, ConnectionConfig, AuthConfig } from '../core/store/scope';
+import type { AuthConfig } from '../core/store/scope';
+export { settingsStore, ACCENTS } from '../core/settings/settings-store';
+export type { Appearance, ThemeMode, AccentKey, FontSizeMode } from '../core/settings/settings-store';
+export { GrfClient, GrfApiError } from '../core/api/client';
+export * from '../core/api/types';
+export { renderMarkdown } from '../util/markdown';
+export { registry, sideTabId } from '../registry/registry';
+export type {
+  PanelContext,
+  ShellState,
+  NavViewDef,
+  SideTabDef,
+  SideTabInstance,
+  BottomTabDef,
+} from '../registry/registry';
+
+import { configureScope } from '../core/store/scope';
+import { registerBuiltinCommon } from '../shell/builtin-common';
+import '../shell/app-shell';
+import '../panels/chat/chat-panel';
+import '../panels/sessions/session-list';
+import '../panels/inspector/session-detail';
+import '../panels/console/console';
+import '../panels/settings/settings-nav';
+import '../panels/settings/settings-page';
+
+// 嵌入库默认装配通用内置条目(桌面专属条目不进嵌入产物)
+registerBuiltinCommon();
+
+/** 配置一个数据域(在创建任何面板元素之前调用)。
+ * 网关模式下 token 可省(服务端按登录用户注入);auth 为多用户网关的
+ * 未登录处置预留(见 docs/embedding.md)。 */
+export function configure(
+  scope: string,
+  cfg: { baseUrl?: string; token?: string; model?: string; auth?: AuthConfig },
+): void {
+  configureScope(scope, cfg);
+}
+
+/** 显式注册全部自定义元素(渐进增强场景; import 本模块即已注册)。 */
+export function panels(): void {
+  /* import 副作用已完成注册,这里仅作显式语义入口 */
+}

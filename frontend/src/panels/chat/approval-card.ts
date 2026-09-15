@@ -2,9 +2,9 @@
 // 批准 / 拒绝(可附反馈,反馈文本会回给模型)。
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { theme, controls } from '../../ui/base';
+import { theme, controls } from '../../ui/panel';
 import { toolArgSummary } from '../../util/fmt';
-import type { ApprovalItem } from '../../state/chat-model';
+import type { ApprovalItem } from '../../core/model/chat-model';
 
 @customElement('grf-approval-card')
 export class GrfApprovalCard extends LitElement {

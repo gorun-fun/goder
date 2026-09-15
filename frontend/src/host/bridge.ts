@@ -1,7 +1,7 @@
 // bridge.ts — wails 宿主桥:仅在桌面(wails webview)内生效,纯 web 态全部
 // no-op 回退。职责:配置持久化(文件)、gh server 托管(启动/停止/状态)。
-import { setPersistence, type Persistence } from '../state/persist';
-import type { ProjectsIndex } from '../state/persist';
+import { setPersistence, type Persistence } from '../core/store/persistence';
+import type { ProjectsIndex } from '../core/store/persistence';
 
 // wails v3 桌面态检测。注意:不能只看 window._wails —— 该属性由
 // @wailsio/runtime 包加载时自设,普通浏览器懒加载后也会有;也不能依赖

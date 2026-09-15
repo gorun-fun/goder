@@ -4,9 +4,9 @@
 // 续交。
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { theme, controls } from '../../ui/base';
-import type { AskItem } from '../../state/chat-model';
-import type { AskQuestion } from '../../api/types';
+import { theme, controls } from '../../ui/panel';
+import type { AskItem } from '../../core/model/chat-model';
+import type { AskQuestion } from '../../core/api/types';
 
 @customElement('grf-ask-form')
 export class GrfAskForm extends LitElement {
