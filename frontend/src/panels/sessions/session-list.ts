@@ -10,6 +10,7 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
+import { repeat } from 'lit/directives/repeat.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtRelative } from '../../util/fmt';
@@ -174,16 +175,13 @@ export class GrfSessionList extends GrfPanel {
         background: var(--grf-accent);
         flex: none;
       }
-      /* 运行中:旋转小圆环 */
+      /* 运行中:旋转小圆环(SVG 弧线,border 画弧在小尺寸下弧长随角度抖动,
+       * 看起来像"转到一半重新开始") */
       .sess .spin {
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
-        border: 1.5px solid var(--grf-border-hover);
-        border-top-color: var(--grf-accent);
-        animation: spin 0.8s linear infinite;
+        width: 10px;
+        height: 10px;
         flex: none;
-        box-sizing: border-box;
+        animation: spin 0.9s linear infinite;
       }
       @keyframes spin {
         to {
@@ -395,7 +393,11 @@ export class GrfSessionList extends GrfPanel {
                 ${pid === s.activeProjectId && s.activeSessionId?.startsWith('draft:')
                   ? this.renderSession(s.activeSessionId, '新会话(未发送)', '')
                   : nothing}
-                ${sessions.map(([sid, rec]) => this.renderSession(sid, rec.title, rec.updatedAt ?? rec.createdAt))}
+                ${repeat(
+                  sessions,
+                  ([sid]) => sid,
+                  ([sid, rec]) => this.renderSession(sid, rec.title, rec.updatedAt ?? rec.createdAt),
+                )}
               </div>
             `}
       </div>
@@ -416,7 +418,23 @@ export class GrfSessionList extends GrfPanel {
         title=${title}
       >
         <span class="ic">
-          ${running ? html`<span class="spin"></span>` : unread ? html`<span class="dot"></span>` : nothing}
+          ${running
+            ? html`<svg class="spin" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="6" fill="none" stroke="var(--grf-border-hover)" stroke-width="2" />
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="6"
+                  fill="none"
+                  stroke="var(--grf-accent)"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-dasharray="16 38"
+                />
+              </svg>`
+            : unread
+              ? html`<span class="dot"></span>`
+              : nothing}
         </span>
         <span class="t">${title}</span>
         ${sid.startsWith('draft:')

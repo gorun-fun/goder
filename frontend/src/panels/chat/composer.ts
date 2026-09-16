@@ -7,7 +7,9 @@
 // 点击单选选项即确认提交。
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { theme, controls } from '../../ui/panel';
+import { icon } from '../../util/icons';
 import { fmtTokens } from '../../util/fmt';
 import type { AskItem } from '../../core/model/chat-model';
 import type { LLMStats, Usage } from '../../core/api/types';
@@ -62,6 +64,13 @@ const POLICY_OPTIONS: Array<{ value: DraftPolicy; label: string; desc: string }>
   { value: 'off', label: '完全访问', desc: '解除沙箱与读写限制' },
 ];
 
+/** 思考强度:值随请求 reasoning.effort 下发,由上游模型解释;空 = 服务端默认 */
+const EFFORT_OPTIONS: { value: string; label: string }[] = [
+  { value: 'low', label: '低' },
+  { value: 'high', label: '高' },
+  { value: 'max', label: '最高' },
+];
+
 @customElement('grf-composer')
 export class GrfComposer extends LitElement {
   /** 运行中(切换为停止) */
@@ -70,6 +79,8 @@ export class GrfComposer extends LitElement {
   @property({ type: Boolean }) inputRequired = false;
   /** 待应答的提问(非空时输入框内嵌问题与选项) */
   @property({ type: Array }) asks: AskItem[] = [];
+  /** 排队待发消息(回合运行中发送的,显示在输入框上方,可删除) */
+  @property({ type: Array }) queue: { text: string; images?: string[] }[] = [];
   @property({ type: String }) placeholder = '发送消息…(/ 指令,Enter 发送,Shift+Enter 换行)';
   /** 新会话访问策略:write-workspace(工作区访问)| off(完全访问) */
   @property({ type: String }) policy: DraftPolicy = 'off';
@@ -81,6 +92,8 @@ export class GrfComposer extends LitElement {
   @property({ type: String }) model = '';
   /** 选中态模型(菜单打勾/下一回合使用;'' = 未显式选择,回落当前模型) */
   @property({ type: String }) activeModel = '';
+  /** 思考强度('' = 服务端默认;low/high/max),随每个请求下发 */
+  @property({ type: String }) effort = '';
   /** 本会话用量(最近一次 response 的 usage;null = 无数据) */
   @property({ type: Object }) usage: Usage | null = null;
   /** 用量详情里展示的会话模型(服务端回报;空 = 未知) */
@@ -96,6 +109,7 @@ export class GrfComposer extends LitElement {
   @state() private policyPos: PopPos | null = null;
   /** 模型菜单(非 null = 展开,携带锚点坐标) */
   @state() private modelPos: PopPos | null = null;
+  @state() private effortPos: PopPos | null = null;
   /** 上下文圆环 tooltip(非 null = 悬停中,携带锚点坐标) */
   @state() private tipPos: PopPos | null = null;
   /** 斜杠指令菜单:选中项索引(菜单是否展开由 text 派生,见 slashOpen) */
@@ -179,6 +193,49 @@ export class GrfComposer extends LitElement {
         gap: 6px;
         flex-wrap: wrap;
       }
+      /* 排队待发消息:输入框上方逐条列出,发送前可删 */
+      .queue {
+        display: grid;
+        gap: 6px;
+      }
+      .queue-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px dashed var(--grf-border);
+        border-radius: var(--grf-radius-sm);
+        background: var(--grf-bg-raise);
+        padding: 6px 10px;
+        font-size: var(--grf-font-size-sm);
+        color: var(--grf-text-dim);
+      }
+      .queue-item .badge {
+        flex: none;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+      }
+      .queue-item .txt {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 3.2em;
+      }
+      .queue-item button {
+        flex: none;
+        padding: 2px 5px;
+        line-height: 1;
+        color: var(--grf-text-faint);
+      }
+      .queue-item button:hover {
+        color: var(--grf-danger, #d33);
+      }
+      .queue-item button svg {
+        width: 12px;
+        height: 12px;
+      }
       .img-chip {
         position: relative;
         border: 1px solid var(--grf-border);
@@ -244,7 +301,7 @@ export class GrfComposer extends LitElement {
         display: inline-flex;
         align-items: center;
         gap: 5px;
-        border: 1px solid var(--grf-border);
+        border: none; /* 策略/模型/思考强度:融入输入框,不加外框 */
         border-radius: var(--grf-radius-sm);
         background: transparent;
         color: var(--grf-text-dim);
@@ -262,9 +319,11 @@ export class GrfComposer extends LitElement {
         color: var(--grf-text);
       }
       .bar-btn svg {
-        width: 12px;
-        height: 12px;
+        width: 1em; /* 与按钮文字同高(策略盾牌/思考大脑/下拉箭头) */
+        height: 1em;
         flex: none;
+        /* 图标盒与文字 em 盒居中会略偏上,下移半个像素对齐视觉中线 */
+        transform: translateY(0.5px);
       }
       .bar-btn .cur {
         overflow: hidden;
@@ -357,6 +416,29 @@ export class GrfComposer extends LitElement {
         color: var(--grf-text-faint);
         margin-top: 1px;
       }
+      /* 指令菜单:与输入框同宽,一条指令一行,说明跟在指令名后面 */
+      .pop.slash-ctl {
+        min-width: 0;
+        max-width: none;
+        width: 100%;
+      }
+      .pop.slash-ctl .pop-item .tx {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        width: 100%;
+      }
+      .pop.slash-ctl .pop-item .tx b {
+        display: inline;
+        flex: none;
+      }
+      .pop.slash-ctl .pop-item .tx i {
+        display: inline;
+        margin-top: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       /* ---------- 上下文占用圆环 ---------- */
       .ctx {
         position: relative;
@@ -446,6 +528,23 @@ export class GrfComposer extends LitElement {
         ${asking
           ? nothing
           : html`
+              ${this.queue.length
+                ? html`
+                    <div class="queue">
+                      ${this.queue.map(
+                        (m, i) => html`
+                          <div class="queue-item">
+                            <span class="badge">排队 ${i + 1}</span>
+                            <span class="txt">${m.text || (m.images?.length ? `[${m.images.length} 张图片]` : '')}</span>
+                            <button title="删除这条排队消息" @click=${() => this.fire('queue-remove', { index: i })}>
+                              <svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+                            </button>
+                          </div>
+                        `,
+                      )}
+                    </div>
+                  `
+                : nothing}
               ${this.images.length
                 ? html`
                     <div class="imgs">
@@ -508,6 +607,18 @@ export class GrfComposer extends LitElement {
                   </svg>
                 </button>
                 ${this.modelPos ? this.renderModelPop(this.modelPos) : nothing}
+                <button
+                  class="bar-btn effort-ctl ${this.effortPos ? 'open' : ''}"
+                  title="思考强度(随每个请求下发;未选择 = 服务端默认)"
+                  @click=${(e: MouseEvent) => this.togglePop('effort', e)}
+                >
+                  ${unsafeHTML(icon.brain)}
+                  <span class="cur">${EFFORT_OPTIONS.find((o) => o.value === this.effort)?.label ?? '思考'}</span>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                ${this.effortPos ? this.renderEffortPop(this.effortPos) : nothing}
                 ${this.running
                   ? html`<button class="stop" title="停止" aria-label="停止" @click=${this.stop}>
                       <svg viewBox="0 0 16 16" fill="currentColor"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5" /></svg>
@@ -567,8 +678,15 @@ export class GrfComposer extends LitElement {
       g.push(c);
       byGroup.set(c.group, g);
     }
+    // 锚定可见输入框(.wrap 含边框内边距),与输入框同宽左对齐;
+    // top 留 10px 间隙(anchorPos 默认 8px)。
+    const box = ta.closest('.wrap') ?? ta;
+    const r = box.getBoundingClientRect();
     return html`
-      <div class="pop slash-ctl" style=${posStyle(this.anchorPos(ta, 'left'))}>
+      <div
+        class="pop slash-ctl"
+        style=${`top:${Math.round(r.top - 10)}px;left:${Math.round(r.left)}px;width:${Math.round(r.width)}px`}
+      >
         ${[...byGroup.entries()].map(
           ([group, cmds]) => html`
             <div class="pop-group">${group}</div>
@@ -644,6 +762,28 @@ export class GrfComposer extends LitElement {
     `;
   }
 
+  // 思考强度弹出列表
+  private renderEffortPop(pos: PopPos) {
+    return html`
+      <div class="pop effort-ctl" style=${posStyle(pos)}>
+        <div class="pop-title">思考强度</div>
+        ${EFFORT_OPTIONS.map(
+          (o) => html`
+            <button class="pop-item" @click=${() => this.pickEffort(o.value)}>
+              <span class="check">${o.value === this.effort ? CHECK_SVG : nothing}</span>
+              <span class="tx"><b>${o.label}</b></span>
+            </button>
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  private pickEffort(v: string): void {
+    this.effortPos = null;
+    this.fire('effort-change', v);
+  }
+
   // 上下文占用圆环 + 悬停详情
   private renderCtxRing() {
     const u = this.usage!;
@@ -709,12 +849,13 @@ export class GrfComposer extends LitElement {
 
   // 弹出列表:点击对应控件(按钮/列表)之外的任意处关闭
   private onDocPointerDown = (e: PointerEvent): void => {
-    if (!this.policyPos && !this.modelPos && !this.slashOpen) return;
+    if (!this.policyPos && !this.modelPos && !this.effortPos && !this.slashOpen) return;
     const path = e.composedPath() as EventTarget[];
     const inside = (cls: string) =>
       path.some((t) => t instanceof Element && t.classList.contains(cls));
     if (this.policyPos && !inside('policy-ctl')) this.policyPos = null;
     if (this.modelPos && !inside('model-ctl')) this.modelPos = null;
+    if (this.effortPos && !inside('effort-ctl')) this.effortPos = null;
     // 斜杠菜单:点击菜单项或输入框内保持展开
     if (this.slashOpen && !inside('slash-ctl') && !path.some((t) => t instanceof HTMLTextAreaElement)) {
       this.slashDismissed = true;
@@ -730,15 +871,21 @@ export class GrfComposer extends LitElement {
     };
   }
 
-  // 两个弹出列表互斥
-  private togglePop(which: 'policy' | 'model', e: MouseEvent): void {
+  // 弹出列表互斥
+  private togglePop(which: 'policy' | 'model' | 'effort', e: MouseEvent): void {
     const el = e.currentTarget as HTMLElement;
     if (which === 'policy') {
       this.policyPos = this.policyPos ? null : this.anchorPos(el, 'left');
       this.modelPos = null;
-    } else {
+      this.effortPos = null;
+    } else if (which === 'model') {
       this.modelPos = this.modelPos ? null : this.anchorPos(el, 'right');
       this.policyPos = null;
+      this.effortPos = null;
+    } else {
+      this.effortPos = this.effortPos ? null : this.anchorPos(el, 'right');
+      this.policyPos = null;
+      this.modelPos = null;
     }
   }
 
@@ -758,7 +905,7 @@ export class GrfComposer extends LitElement {
   }
 
   private hint(): string {
-    if (this.running) return '回合运行中…';
+    if (this.running) return '回合运行中,发送的消息将排队等候';
     if (this.inputRequired) return '模型在等待上面的交互应答';
     return '';
   }
@@ -850,7 +997,8 @@ export class GrfComposer extends LitElement {
   }
 
   private submit(): void {
-    if (this.running || this.inputRequired) return;
+    // 运行中不再拦截:消息进 scope 发送队列,当前回合结束后自动发出。
+    if (this.inputRequired) return;
     if (!this.text.trim() && !this.images.length) return;
     this.fire('send', { text: this.text, images: this.images });
     this.clearInput();

@@ -16,6 +16,7 @@ import {
   applyEvent,
   applyResponseSnapshot,
   genId,
+  goalFromItems,
   historyToItems,
   applySavedDurs,
   markRequestAnswered,
@@ -48,6 +49,8 @@ export interface ConnectionConfig {
   baseUrl: string;
   token: string;
   model?: string;
+  /** 思考强度(low/high/max;空 = 服务端默认) */
+  reasoningEffort?: string;
   auth?: AuthConfig;
 }
 
@@ -85,6 +88,8 @@ export class GrfScope extends Emitter {
   private activeAborts = new Map<string, AbortController>(); // sid → 当前流的中断器
   private streamDoneAt = new Map<string, number>(); // sid → 服务器已结束的时刻
   private watchdogHits = new Set<string>(); // 看门狗掐断的 sid(非用户取消)
+  /** sid → 排队待发消息(回合运行中用户发送的,回合结束自动发出) */
+  private sendQueues = new Map<string, { text: string; images?: string[] }[]>();
 
   private authCfg?: AuthConfig;
 
@@ -93,6 +98,7 @@ export class GrfScope extends Emitter {
     this.name = name;
     this.client = new GrfClient({ baseUrl: cfg.baseUrl, token: cfg.token });
     this.model = cfg.model;
+    this.reasoningEffort = cfg.reasoningEffort;
     this.authCfg = cfg.auth;
     this.draftPolicy = loadPolicyLocal(name);
   }
@@ -116,6 +122,20 @@ export class GrfScope extends Emitter {
       baseUrl: this.client.config.baseUrl,
       token: this.client.config.token,
       ...(this.model ? { model: this.model } : {}),
+      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
+    });
+    this.notify();
+  }
+
+  /** 思考强度('' = 服务端默认;low/high/max);本地持久化,随每个请求下发。 */
+  reasoningEffort?: string;
+  setReasoningEffort(e: string): void {
+    this.reasoningEffort = e || undefined;
+    saveConnLocal(this.name, {
+      baseUrl: this.client.config.baseUrl,
+      token: this.client.config.token,
+      ...(this.model ? { model: this.model } : {}),
+      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
     });
     this.notify();
   }
@@ -166,6 +186,16 @@ export class GrfScope extends Emitter {
     for (const sid of [...this.inflightSends]) {
       try {
         const detail = await this.client.getConversation(sid);
+        // 运行中也让统计(速度/缓存命中率/上下文占用)跟着服务器走,
+        // 不等回合结束才刷新。
+        const rt = this.runtimes.get(sid);
+        if (rt && detail.stats) {
+          const next = JSON.stringify(detail.stats);
+          if (next !== JSON.stringify(rt.stats ?? null)) {
+            rt.stats = detail.stats;
+            this.notify();
+          }
+        }
         if (!detail.running) {
           // 服务器已结束:给流一点收尾时间,仍挂着就掐断走对账。
           const since = Date.now() - (this.streamDoneAt.get(sid) ?? 0);
@@ -223,11 +253,17 @@ export class GrfScope extends Emitter {
   setConnection(cfg: Partial<ConnectionConfig>): void {
     this.client.setConfig({ baseUrl: cfg.baseUrl ?? this.client.config.baseUrl, token: cfg.token ?? this.client.config.token });
     if (cfg.model !== undefined) this.model = cfg.model;
+    if (cfg.reasoningEffort !== undefined) this.reasoningEffort = cfg.reasoningEffort;
     if (cfg.auth !== undefined) {
       this.authCfg = cfg.auth;
       this.authPrompted = false; // 换了鉴权配置后重新允许触发
     }
-    saveConnLocal(this.name, { baseUrl: this.client.config.baseUrl, token: this.client.config.token, ...(this.model ? { model: this.model } : {}) });
+    saveConnLocal(this.name, {
+      baseUrl: this.client.config.baseUrl,
+      token: this.client.config.token,
+      ...(this.model ? { model: this.model } : {}),
+      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
+    });
     this.connState = 'unknown';
     this.notify();
     void this.probeHealth();
@@ -329,6 +365,8 @@ export class GrfScope extends Emitter {
       const detail = await this.client.getConversation(sid);
       const rt = this.ensureRuntime(sid);
       rt.running = detail.running;
+      // 服务器已结束而本地还有排队消息(多窗口结束/挂死自愈后):自动发出。
+      if (!detail.running && !this.inflightSends.has(sid)) this.flushSendQueue(sid);
       // 会话累计统计(速度/缓存命中率)与当前访问策略(composer 圆环/策略按钮用)
       if (detail.stats) rt.stats = detail.stats;
       if (detail.policy) rt.policy = detail.policy;
@@ -470,10 +508,28 @@ export class GrfScope extends Emitter {
     this.runtimes.set(did, newRuntime());
     const rt = this.runtimes.get(did)!;
     rt.loaded = true; // 草稿无需加载历史
+    this.inheritProjectPrefs(projectId);
     this.activeSessionId = did;
     this.activeProjectId = projectId;
     this.notify();
     return did;
+  }
+
+  /** 新会话继承偏好:模型与思考强度取同项目最近一次会话的取值
+   * (没有记录时保持当前值)。写回 scope 级配置,composer 即时显示。 */
+  private inheritProjectPrefs(projectId: string): void {
+    const latest = Object.values(this.index.sessions)
+      .filter((r) => r.projectId === projectId && (r.model || r.effort !== undefined))
+      .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))[0];
+    if (!latest) return;
+    if (latest.model !== undefined) this.model = latest.model || undefined;
+    if (latest.effort !== undefined) this.reasoningEffort = latest.effort || undefined;
+    saveConnLocal(this.name, {
+      baseUrl: this.client.config.baseUrl,
+      token: this.client.config.token,
+      ...(this.model ? { model: this.model } : {}),
+      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
+    });
   }
 
   selectSession(sid: string): void {
@@ -504,6 +560,8 @@ export class GrfScope extends Emitter {
         applySavedDurs(sid, rt.items);
         // 回填任务列表(从最后一个 todo_write 调用还原;详情栏/状态浮窗用)
         rt.todos = todosFromItems(rt.items);
+        // 回填当前目标(按序重放 goal 工具调用;状态浮窗「目标」区块用)
+        rt.goal = goalFromItems(rt.items);
         // 恢复暂停卡片:从最新终态 response 拿 grf_requests。
         // 打开会话时 rt.lastResponseId 可能尚未同步(与 syncRunningState
         // 竞态),用索引里记录的 lastResponseId 兜底,保证暂停态可恢复。
@@ -549,6 +607,7 @@ export class GrfScope extends Emitter {
     }
     delete this.index.sessions[sid];
     this.runtimes.delete(sid);
+    this.sendQueues.delete(sid);
     if (this.index.lastActiveSessionId === sid) this.index.lastActiveSessionId = undefined;
     if (this.activeSessionId === sid) this.activeSessionId = undefined;
     this.persistIndex();
@@ -603,10 +662,10 @@ export class GrfScope extends Emitter {
   // 上游网关按后端负载均衡,部分后端没带 --enable-auto-tool-choice,重发通常
   // 会落到正常后端。该失败发生在生成之前(终态无输出),重发无副作用;重试
   // 前清掉这次失败物化的错误条目。超过上限仍失败则原样返回,由调用方展示。
-  private async requestWithRetry(rt: SessionRuntime, opts: SendOptions): Promise<ResponseResource> {
+  private async requestWithRetry(rt: SessionRuntime, sid: string, opts: SendOptions): Promise<ResponseResource> {
     const max = 3;
     for (let attempt = 0; ; attempt++) {
-      const final = await this.client.send(opts);
+      const final = await this.sendWithStreamRetry(rt, sid, opts);
       const msg = final.error?.message ?? '';
       if (
         final.status !== 'failed' ||
@@ -624,12 +683,80 @@ export class GrfScope extends Emitter {
     }
   }
 
-  async send(text: string, images?: string[], opts?: { editOf?: string }): Promise<void> {
-    const sid = this.activeSessionId;
+  // sendWithStreamRetry 连接层自愈,两类输入都覆盖:
+  //  1. 浏览器侧 fetch 抛错(事件流中断/静默断流/网络失败);
+  //  2. SSE 流正常结束但终态是 failed 且错误为连接类(如 gh 报
+  //     "llm: read stream: unexpected EOF" / "context deadline exceeded")。
+  // 先尝试从服务器终态对账(回合其实已完成或已暂停的情况直接拿快照),
+  // 否则退避后原样重发,最多 STREAM_RETRY_MAX 次;用户主动取消不重试。
+  // 重发可能造成模型重复生成,但比把会话卡死可取——服务端按会话串行,
+  // 幂等性由 lastResponseId 链保证。
+  private async sendWithStreamRetry(rt: SessionRuntime, sid: string, opts: SendOptions): Promise<ResponseResource> {
+    let sendOpts = opts;
+    for (let attempt = 0; ; attempt++) {
+      let final: ResponseResource | null = null;
+      try {
+        final = await this.client.send(sendOpts);
+      } catch (err) {
+        if (opts.signal?.aborted || attempt >= STREAM_RETRY_MAX || !isRetryableStreamError(err)) throw err;
+        this.log('warn', `连接中断(${errText(err)}),自动重试 ${attempt + 1}/${STREAM_RETRY_MAX}`);
+        // 服务器可能已受理并完成该回合:拿终态快照直接用,不盲目重发。
+        const snapped = await this.tryRecoverFinal(rt, sid);
+        if (snapped) {
+          this.log('info', '已从服务器终态恢复回合(连接中断重试期间)');
+          return snapped;
+        }
+        await new Promise((r) => setTimeout(r, Math.min(800 * (attempt + 1), 4000)));
+        continue;
+      }
+      // failed 终态且为连接类错误:清掉本次物化的错误条目,挂到失败
+      // response 之后重发一次(不挂链会分叉出新会话)。
+      const failMsg = final.error?.message ?? '';
+      if (
+        final.status === 'failed' &&
+        isRetryableStreamFailure(failMsg) &&
+        !opts.signal?.aborted &&
+        attempt < STREAM_RETRY_MAX
+      ) {
+        this.log('warn', `上游连接错误(${friendlyError(failMsg)}),自动重试 ${attempt + 1}/${STREAM_RETRY_MAX}`);
+        rt.items = rt.items.filter(
+          (i) => !(i.kind === 'error' && isRetryableStreamFailure(i.text.replace(/^(发送|应答)失败:/, ''))),
+        );
+        if (final.id) sendOpts = { ...sendOpts, previousResponseId: final.id };
+        await new Promise((r) => setTimeout(r, Math.min(800 * (attempt + 1), 4000)));
+        continue;
+      }
+      return final;
+    }
+  }
+
+  // tryRecoverFinal 查会话终态:服务器已推进到本地未见过的 response 且已到
+  // 终态,则对账并返回该快照(作为本轮 send 的结果);否则返回 null。
+  private async tryRecoverFinal(rt: SessionRuntime, sid: string): Promise<ResponseResource | null> {
+    try {
+      const detail = await this.client.getConversation(sid);
+      const last = detail.last_response_id;
+      if (!last || last === rt.lastResponseId) return null;
+      const snap = await this.client.retrieveResponse(last);
+      if (!snap) return null;
+      const status = snap.status;
+      if (status !== 'completed' && status !== 'failed' && status !== 'cancelled' && status !== 'incomplete') {
+        return null; // 仍在跑:对账无意义,等退避后重发
+      }
+      if (applyResponseSnapshot(rt, snap)) this.notify();
+      return snap;
+    } catch {
+      return null;
+    }
+  }
+
+  async send(text: string, images?: string[], opts?: { editOf?: string; sid?: string }): Promise<void> {
+    const sid = opts?.sid ?? this.activeSessionId;
     if (!sid) return;
     const rt = this.ensureRuntime(sid);
     if (this.inflightSends.has(sid) || rt.running) {
-      this.log('warn', '会话忙(同会话串行),请等待当前回合结束');
+      // 回合进行中:入队等本回合结束自动发出,不打断也不丢弃。
+      this.enqueueSend(sid, text, images);
       return;
     }
     const trimmed = text.trim();
@@ -682,6 +809,7 @@ export class GrfScope extends Emitter {
       ],
     };
 
+    // 发送时才把用户条目放进视图(排队中的消息显示在输入框上方,不进消息流)
     rt.items.push({
       kind: 'user',
       id: genId('u'),
@@ -722,6 +850,12 @@ export class GrfScope extends Emitter {
       this.drafts.delete(sid);
       this.runtimes.delete(sid);
       this.runtimes.set(newSid, rt);
+      // 排队消息跟随迁移(入队时用的还是草稿 id 的极端竞态)
+      const queued = this.sendQueues.get(sid);
+      if (queued) {
+        this.sendQueues.set(newSid, queued);
+        this.sendQueues.delete(sid);
+      }
       this.index.sessions[newSid] = {
         projectId,
         title: deriveTitle(trimmed),
@@ -742,8 +876,9 @@ export class GrfScope extends Emitter {
     };
 
     try {
-      const final = await this.requestWithRetry(rt, {
+      const final = await this.requestWithRetry(rt, realSid, {
         model: this.model,
+        reasoningEffort: this.reasoningEffort,
         input: [parts],
         previousResponseId: previous,
         grfSession: isDraft ? grfSession : undefined,
@@ -757,6 +892,9 @@ export class GrfScope extends Emitter {
       if (rec) {
         rec.lastResponseId = final.id;
         rec.updatedAt = new Date().toISOString();
+        // 记录本会话最后使用的模型/思考强度,新会话按同项目最近会话继承
+        rec.model = final.model ?? this.model ?? '';
+        rec.effort = this.reasoningEffort ?? '';
         this.persistIndex();
       }
       // 用户仍停在该会话:完成即视为已查看;已切走则保留未读标记。
@@ -791,9 +929,53 @@ export class GrfScope extends Emitter {
       this.streamDoneAt.delete(realSid);
       rt.running = false;
       // 流结束后短暂等待服务器落定,再同步一次状态。
-      setTimeout(() => void this.syncRunningState(realSid), 300);
+      setTimeout(() => {
+        void this.syncRunningState(realSid);
+        this.flushSendQueue(realSid);
+      }, 300);
       this.notify();
     }
+  }
+
+  // ---------- 发送队列(回合运行中的输入排队,结束后自动发出) ----------
+
+  /** 入队:消息显示在输入框上方的排队区(composer 渲染),回合结束后按 FIFO 发出。 */
+  private enqueueSend(sid: string, text: string, images?: string[]): void {
+    const trimmed = text.trim();
+    if (!trimmed && !images?.length) return;
+    const q = this.sendQueues.get(sid) ?? [];
+    q.push({ text: trimmed, images });
+    this.sendQueues.set(sid, q);
+    this.log('info', `会话运行中,消息已排队(第 ${q.length} 条),回合结束后自动发送`);
+    this.notify();
+  }
+
+  /** 排队中的消息(composer 输入框上方排队区用)。 */
+  queuedSends(sid: string): { text: string; images?: string[] }[] {
+    return this.sendQueues.get(sid) ?? [];
+  }
+
+  /** 删除一条排队消息(发送前用户可撤销);返回被删的消息或 null。 */
+  removeQueuedSend(sid: string, index: number): { text: string; images?: string[] } | null {
+    const q = this.sendQueues.get(sid);
+    if (!q || index < 0 || index >= q.length) return null;
+    const [removed] = q.splice(index, 1);
+    if (!q.length) this.sendQueues.delete(sid);
+    this.notify();
+    return removed ?? null;
+  }
+
+  /** 出队一条并发送;无队列或会话仍在跑时跳过(finally 路径串行调用)。 */
+  private flushSendQueue(sid: string): void {
+    const q = this.sendQueues.get(sid);
+    if (!q?.length) return;
+    if (sid.startsWith('draft:')) return; // 草稿不会是运行态,防御
+    const rt = this.runtimes.get(sid);
+    if (!rt || this.inflightSends.has(sid) || rt.running) return;
+    const { text, images } = q.shift()!;
+    if (!q.length) this.sendQueues.delete(sid);
+    // 发出时才进消息流视图;sid 指定目标会话,切走后仍按原会话发出
+    void this.send(text, images, { sid });
   }
 
   // recoverAfterStreamBreak 断流自愈:查会话终态,若服务器已推进到更新的
@@ -850,8 +1032,9 @@ export class GrfScope extends Emitter {
     this.streamDoneAt.delete(sid);
     const input: InputItem = { type: 'grf:input_result', call_id: callId, ...payload };
     try {
-      const final = await this.requestWithRetry(rt, {
+      const final = await this.requestWithRetry(rt, sid, {
         model: this.model,
+        reasoningEffort: this.reasoningEffort,
         input: [input],
         previousResponseId: rt.lastResponseId ?? this.index.sessions[sid]?.lastResponseId,
         signal: ac.signal,
@@ -864,6 +1047,8 @@ export class GrfScope extends Emitter {
       const rec = this.index.sessions[sid];
       if (rec) {
         rec.lastResponseId = final.id;
+        rec.model = final.model ?? this.model ?? rec.model;
+        rec.effort = this.reasoningEffort ?? '';
         this.persistIndex();
       }
       if (this.activeSessionId === sid) this.markSessionSeen(sid);
@@ -888,7 +1073,10 @@ export class GrfScope extends Emitter {
       this.activeAborts.delete(sid);
       this.streamDoneAt.delete(sid);
       rt.running = false;
-      setTimeout(() => void this.syncRunningState(sid), 300);
+      setTimeout(() => {
+        void this.syncRunningState(sid);
+        this.flushSendQueue(sid);
+      }, 300);
       this.notify();
     }
   }
@@ -980,6 +1168,25 @@ function deriveTitle(text: string): string {
   return t.length > 42 ? `${t.slice(0, 42)}…` : t || '新会话';
 }
 
+/** 流断连自动重试上限(事件流中断/静默超时/网络错误)。 */
+const STREAM_RETRY_MAX = 10;
+
+/** 可重试的连接类错误:事件流中断、流静默超时、网络层失败(fetch 抛 TypeError)。 */
+function isRetryableStreamError(err: unknown): boolean {
+  if (err instanceof GrfApiError) {
+    return err.code === 'stream_interrupted' || err.code === 'stream_idle_timeout' || err.status === 0;
+  }
+  return err instanceof TypeError; // fetch 网络失败(连接拒绝/断网/代理断)
+}
+
+/** 可重试的"上游连接类失败终态":gh/上游 llm 读取流断开的报错特征。
+ * 只匹配连接类,业务错误(鉴权/参数/配额)不重试——重试也一样失败。 */
+function isRetryableStreamFailure(msg: string): boolean {
+  return /unexpected eof|context deadline exceeded|client\.timeout|read stream|connection reset|broken pipe|eof/i.test(
+    msg,
+  );
+}
+
 export function errText(err: unknown): string {
   const raw =
     err instanceof GrfApiError || err instanceof Error ? err.message : String(err);
@@ -1037,6 +1244,7 @@ export function getScope(name = 'default'): GrfScope {
       baseUrl: saved?.baseUrl ?? locationDefaultBase(),
       token: saved?.token ?? '',
       ...(saved?.model ? { model: saved.model } : {}),
+      ...(saved?.reasoningEffort ? { reasoningEffort: saved.reasoningEffort } : {}),
     };
     scopeConfigs.set(name, cfg);
     s = new GrfScope(name, cfg);
@@ -1054,6 +1262,7 @@ export function configureScope(name: string, cfg: Partial<ConnectionConfig>): Gr
     baseUrl: saved?.baseUrl ?? locationDefaultBase(),
     token: saved?.token ?? '',
     ...(saved?.model ? { model: saved.model } : {}),
+    ...(saved?.reasoningEffort ? { reasoningEffort: saved.reasoningEffort } : {}),
   };
   const merged = { ...base, ...cfg };
   scopeConfigs.set(name, merged);

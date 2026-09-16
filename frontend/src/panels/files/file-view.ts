@@ -10,7 +10,7 @@ import { GrfPanel, theme, controls } from '../../ui/panel';
 import type { PropertyValues } from 'lit';
 import { icon } from '../../util/icons';
 import { renderMarkdown } from '../../util/markdown';
-import { readFileText, readImageDataUrl } from '../../host/bridge';
+import { inWails, readFileText, readImageDataUrl } from '../../host/bridge';
 
 /** 图片扩展名(走 ReadImage 预览) */
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
@@ -79,11 +79,14 @@ export class GrfFileView extends GrfPanel {
     return this.rel || this.name || this.path.split('/').pop() || this.path;
   }
 
-  // openHtmlPreview html 文件的「眼睛」:内容编码为 data URL,抛给
-  // chat-panel 在右栏开浏览器 tab 并导航渲染(与本面板的 md 预览对应)。
+  // openHtmlPreview html 文件的「眼睛」:桌面态走本地文件服务
+  // /grf-api/local-file(按真实路径渲染,相对资源/刷新均可;data URL 丢路径
+  // 上下文),非桌面形态回退 data URL。
   private openHtmlPreview(): void {
     if (!this.text) return;
-    const url = `data:text/html;charset=utf-8,${encodeURIComponent(this.text)}`;
+    const url = inWails()
+      ? `/grf-api/local-file?path=${encodeURIComponent(this.path)}`
+      : `data:text/html;charset=utf-8,${encodeURIComponent(this.text)}`;
     this.dispatchEvent(new CustomEvent('grf-open-browser-url', { detail: { url }, bubbles: true, composed: true }));
   }
 

@@ -155,6 +155,7 @@ export class GrfClient {
       input: opts.input,
     };
     if (opts.model) body.model = opts.model;
+    if (opts.reasoningEffort) body.reasoning = { effort: opts.reasoningEffort };
     if (opts.previousResponseId) body.previous_response_id = opts.previousResponseId;
     if (opts.instructions) body.instructions = opts.instructions;
     if (opts.grfSession) body['grf:session'] = opts.grfSession;

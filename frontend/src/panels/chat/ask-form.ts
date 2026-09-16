@@ -216,8 +216,9 @@ export class GrfAskForm extends LitElement {
           : nothing}
       `;
     }
-    // 全部为"单选选项题"时点击选项即提交,无需提交按钮
-    const clickSubmit = it.questions.every((q) => q.options?.length && !q.multi_select);
+    // 全部为选项题(单选/多选)时:逐题选择,选完最后一题自动提交;
+    // 含输入题时保留"提交回答"按钮(无法判定用户何时输完)。
+    const allOptions = it.questions.every((q) => !!q.options?.length);
     return html`
       <div class="card ${this.flat ? 'flat' : ''}">
         <div class="banner">
@@ -228,13 +229,13 @@ export class GrfAskForm extends LitElement {
         </div>
         ${it.questions.map((q, qi) => this.renderQuestion(q, qi))}
         <div class="actions">
-          ${clickSubmit
-            ? html`<span class="hint">点击选项即提交</span>`
-            : html`<span class="hint">多选/输入题需点"提交回答"</span>`}
+          ${allOptions
+            ? html`<span class="hint">每题选择后自动提交</span>`
+            : html`<span class="hint">逐题选择/填写后点"提交回答"</span>`}
           ${this.showDismiss
             ? html`<button class="ghost" @click=${() => this.fire('dismiss', { callId: it.callId })}>取消提问</button>`
             : nothing}
-          ${clickSubmit
+          ${allOptions
             ? nothing
             : html`<button class="primary" @click=${this.submit}>提交回答</button>`}
         </div>
@@ -270,7 +271,7 @@ export class GrfAskForm extends LitElement {
                       : html`
                           <div
                             class="opt ${this.isSelected(q.id, o.label) ? 'sel' : ''}"
-                            title="点击即提交"
+                            title=${this.item.questions.length === 1 ? '点击即提交' : '点击选中'}
                             @click=${() => this.pickSingle(q.id, o.label)}
                           >
                             <span class="dot"></span>
@@ -311,12 +312,22 @@ export class GrfAskForm extends LitElement {
     if (set.has(label)) set.delete(label);
     else set.add(label);
     this.requestUpdate();
+    this.maybeAutoSubmit();
   }
 
-  // pickSingle 单选:选中并立即提交。
+  // pickSingle 单选:记录选择;全选项题的表单在每题都有答案时自动提交。
   private pickSingle(qid: string, label: string): void {
     this.selection.set(qid, new Set([label]));
-    this.submit();
+    this.requestUpdate();
+    this.maybeAutoSubmit();
+  }
+
+  // maybeAutoSubmit 全部为选项题且每题都已选 → 自动提交(单题单选的
+  // "点击即提交"也是这条规则;多选题取消勾选到空则不提交)。
+  private maybeAutoSubmit(): void {
+    const qs = this.item.questions;
+    if (!qs.length || !qs.every((q) => q.options?.length)) return;
+    if (qs.every((q) => (this.selection.get(q.id)?.size ?? 0) > 0)) this.submit();
   }
 
   private submit(): void {

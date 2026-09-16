@@ -17,7 +17,7 @@ export class GrfStatusPop extends GrfPanel {
   /** 聊天列过窄:强制单行,避免盖住对话内容 */
   @property({ type: Boolean }) narrow = false;
 
-  /** 收缩态(单行只显示 git 行级变更);浮窗自动显示,无手动开关 */
+  /** 收缩态(单行:有任务列表时显示任务完成度,否则 git 行级变更);浮窗自动显示,无手动开关 */
   @state() private collapsed = false;
 
   static styles = [
@@ -103,7 +103,7 @@ export class GrfStatusPop extends GrfPanel {
         border-top: 1px solid var(--grf-border-soft);
       }
       .sp-sec h4 {
-        margin: 0 0 6px;
+        margin: 0 0 8px;
         font-size: var(--grf-font-size-xs);
         color: var(--grf-text-faint);
         font-weight: 650;
@@ -129,7 +129,7 @@ export class GrfStatusPop extends GrfPanel {
       .sp-kv {
         display: grid;
         grid-template-columns: auto 1fr;
-        gap: 3px 12px;
+        gap: 7px 12px;
         font-size: var(--grf-font-size-sm);
       }
       .sp-kv .k {
@@ -142,13 +142,32 @@ export class GrfStatusPop extends GrfPanel {
         font-variant-numeric: tabular-nums;
         overflow-wrap: anywhere;
       }
+      /* 目标行:阶段着色(working=蓝 / complete=绿 / blocked=红 / paused=灰) */
+      .sp-goal {
+        font-size: var(--grf-font-size-sm);
+        color: var(--grf-text);
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+        padding: 2px 0;
+      }
+      .sp-goal.complete {
+        color: var(--grf-text-faint);
+        text-decoration: line-through;
+      }
+      .sp-goal.blocked {
+        color: var(--grf-error);
+      }
+      .sp-goal.paused {
+        color: var(--grf-text-dim);
+      }
       /* todo 行:圆点着色区分状态(completed=绿 / in_progress=蓝 / 其余空心) */
       .sp-todo {
         display: flex;
         gap: 7px;
         align-items: baseline;
-        padding: 2px 0;
+        padding: 4px 0;
         font-size: var(--grf-font-size-sm);
+        line-height: 1.5;
         color: var(--grf-text-dim);
       }
       .sp-todo .sp-dot {
@@ -180,24 +199,29 @@ export class GrfStatusPop extends GrfPanel {
 
   render() {
     const s = this.store;
-    const todos = s?.runtimes.get(s.activeSessionId ?? '')?.todos ?? null;
+    const rt = s?.runtimes.get(s.activeSessionId ?? '');
+    const todos = rt?.todos ?? null;
+    const goal = rt?.goal ?? null;
     const hasGit = !!this.git;
     const hasTodos = !!todos?.length;
+    const hasGoal = !!goal;
     // 没有任何可显示的内容:整框隐藏
-    if (!hasGit && !hasTodos) return nothing;
+    if (!hasGit && !hasTodos && !hasGoal) return nothing;
 
-    // 收缩态:单行显示 git 行级变更或任务完成度(哪个有显示哪个),
-    // 整行可点击展开(按钮点击冒泡到同一处理,效果一致)。
+    // 收缩态:单行显示——优先级:任务完成度 > 目标阶段 > git 行级变更;
+    // 整行可点击展开(按钮点击冒泡到同一处理)。
     if (this.collapsed || this.narrow) {
       const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
       return html`
         <div class="status-pop collapsed" title="展开状态浮窗" @click=${() => (this.collapsed = false)}>
           <div class="sp-line">
-            ${hasGit
-              ? html`<span class="sp-diff">
-                  更改 <span class="add">+${this.git!.additions}</span> <span class="del">-${this.git!.deletions}</span>
-                </span>`
-              : html`<span>任务 ${doneCnt}/${todos!.length} 完成</span>`}
+            ${hasTodos
+              ? html`<span>任务 ${doneCnt}/${todos!.length} 完成</span>`
+              : hasGoal
+                ? html`<span>目标 ${goalPhaseText(goal!.phase)}</span>`
+                : html`<span class="sp-diff">
+                    更改 <span class="add">+${this.git!.additions}</span> <span class="del">-${this.git!.deletions}</span>
+                  </span>`}
             <button class="sp-fold" title="展开" @click=${() => (this.collapsed = false)}>
               ${unsafeHTML(icon.chevron)}
             </button>
@@ -238,13 +262,25 @@ export class GrfStatusPop extends GrfPanel {
               </div>
             `
           : nothing}
+        ${hasGoal
+          ? html`
+              <div class="sp-sec">
+                <h4>
+                  ${unsafeHTML(icon.target)} 目标
+                  <span class="sp-cnt">${goalPhaseText(goal!.phase)}</span>
+                  ${hasGit ? nothing : foldBtn}
+                </h4>
+                <div class="sp-goal ${goal!.phase}">${goal!.objective}</div>
+              </div>
+            `
+          : nothing}
         ${hasTodos
           ? html`
               <div class="sp-sec">
                 <h4>
                   ${unsafeHTML(icon.check)} 任务
                   <span class="sp-cnt">${doneCnt}/${todos!.length} 完成</span>
-                  ${hasGit ? nothing : foldBtn}
+                  ${hasGit || hasGoal ? nothing : foldBtn}
                 </h4>
                 ${todos!.map(
                   (t) => html`
@@ -265,5 +301,19 @@ export class GrfStatusPop extends GrfPanel {
 declare global {
   interface HTMLElementTagNameMap {
     'grf-status-pop': GrfStatusPop;
+  }
+}
+
+/** 目标阶段的展示文案 */
+function goalPhaseText(phase: string): string {
+  switch (phase) {
+    case 'complete':
+      return '已完成';
+    case 'paused':
+      return '已暂停';
+    case 'blocked':
+      return '受阻';
+    default:
+      return '进行中';
   }
 }

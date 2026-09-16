@@ -110,6 +110,8 @@ export interface SessionRuntime {
   /** 当前生效的访问策略(getConversation 回报;草稿/旧 server 无值) */
   policy?: string;
   todos: TodoItem[] | null;
+  /** 会话当前目标(create_goal/update_goal 推导;null = 无目标) */
+  goal?: { objective: string; phase: string } | null;
   loaded: boolean;
   error?: string;
   /** 当前回合的 response id(给 item id 加限定,防跨回合 it_1 碰撞) */
@@ -250,6 +252,11 @@ export function applyEvent(rt: SessionRuntime, ev: SSEEvent): boolean {
   if (ev.response?.['grf:session_id'] && ev.response.model) {
     rt.model = ev.response.model;
   }
+  // 用量随每个带 usage 的事件刷新(回合内多次模型调用也会推进,不等终态)。
+  if (ev.response?.usage) {
+    rt.usage = ev.response.usage;
+    changed = true;
+  }
   // 文本类 item 以 `${respId}/${itemId}` 寻址,跨回合的 it_1 不互串。
   const qid = (id: string | undefined): string | undefined =>
     id ? `${rt.curRespId ?? 'pre'}\u0000${id}` : undefined;
@@ -343,6 +350,11 @@ export function applyEvent(rt: SessionRuntime, ev: SSEEvent): boolean {
         }
         changed = true;
         break;
+      }
+      // 目标状态机:create_goal/update_goal 的 notice 同步进 rt.goal
+      // (状态浮窗「目标」区块用)。
+      if (kind === 'goal') {
+        changed = applyGoalNotice(rt, (ev.detail ?? '').trim()) || changed;
       }
       // tool/result 通知是"工具名 + 原始参数/结果"的调试行:工具调用已有
       // 专门的一行展示,不再重复;空明细的流程标记(done)也无信息量。
@@ -703,6 +715,53 @@ export function todosFromItems(items: ChatItem[]): TodoItem[] | null {
     }
   }
   return null;
+}
+
+// applyGoalNotice 把 goal notice 增量应用到运行时目标状态。
+function applyGoalNotice(rt: SessionRuntime, detail: string): boolean {
+  if (detail.startsWith('created: ')) {
+    rt.goal = { objective: detail.slice('created: '.length), phase: 'working' };
+    return true;
+  }
+  if (!rt.goal) return false;
+  if (detail === 'complete') {
+    rt.goal = { ...rt.goal, phase: 'complete' };
+    return true;
+  }
+  if (detail === 'paused') {
+    rt.goal = { ...rt.goal, phase: 'paused' };
+    return true;
+  }
+  if (detail.startsWith('resumed')) {
+    rt.goal = { ...rt.goal, phase: 'working' };
+    return true;
+  }
+  return false; // edited(rN) 等不含目标的明细:保持原状
+}
+
+// goalFromItems 从消息条目里按顺序重放 goal 工具调用,还原当前目标
+// (历史恢复用;与 todosFromItems 同一思路)。
+export function goalFromItems(items: ChatItem[]): { objective: string; phase: string } | null {
+  let goal: { objective: string; phase: string } | null = null;
+  for (const it of items) {
+    if (it.kind !== 'tool') continue;
+    let args: { objective?: string; action?: string } = {};
+    try {
+      args = JSON.parse(it.args || '{}');
+    } catch {
+      continue; // 残缺参数跳过
+    }
+    if (it.name === 'create_goal' && args.objective) {
+      goal = { objective: args.objective, phase: 'working' };
+    } else if (it.name === 'update_goal' && goal) {
+      if (args.action === 'edit' && args.objective) goal.objective = args.objective;
+      else if (args.action === 'complete') goal.phase = 'complete';
+      else if (args.action === 'pause') goal.phase = 'paused';
+      else if (args.action === 'resume') goal.phase = 'working';
+      else if (args.action === 'blocked') goal.phase = 'blocked';
+    }
+  }
+  return goal;
 }
 
 // patchToolItem 以不可变替换方式改指定 callId 的工具项及其相邻状态。

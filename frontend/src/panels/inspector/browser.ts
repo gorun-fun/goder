@@ -8,13 +8,32 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 
-/** 看起来像域名的输入自动补 https:// */
+/** 看起来像域名的输入自动补 https://;本地绝对路径转同源文件服务 */
 function normalizeUrl(v: string): string {
   const t = v.trim();
   if (!t) return '';
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^(about|data):/i.test(t)) return t;
+  // 本地绝对路径:走桌面态同源文件服务(file:// 会被 webview 源隔离拦截)
+  if (t.startsWith('/')) return localFileUrl(t);
   if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/|$|\?|#)/i.test(t)) return `https://${t}`;
   return t;
+}
+
+/** 本地文件 → 同源只读服务地址 */
+function localFileUrl(path: string): string {
+  return `/grf-api/local-file?path=${encodeURIComponent(path)}`;
+}
+
+/** 地址栏显示值:本地文件服务地址还原为可读的文件路径 */
+function displayUrl(u: string): string {
+  if (u.startsWith('/grf-api/local-file?path=')) {
+    try {
+      return decodeURIComponent(u.slice('/grf-api/local-file?path='.length));
+    } catch {
+      return u;
+    }
+  }
+  return u;
 }
 
 @customElement('grf-browser')
@@ -99,7 +118,7 @@ export class GrfBrowser extends GrfPanel {
       const saved = localStorage.getItem(this.storeKey());
       if (saved) {
         this.url = saved;
-        this.input = saved;
+        this.input = displayUrl(saved);
         this.frameSrc = saved;
       }
     } catch {
@@ -119,7 +138,7 @@ export class GrfBrowser extends GrfPanel {
   private go(): void {
     const u = normalizeUrl(this.input);
     if (!u) return;
-    this.input = u;
+    this.input = displayUrl(u);
     this.url = u;
     this.frameSrc = u;
     try {
@@ -133,7 +152,7 @@ export class GrfBrowser extends GrfPanel {
   open(u: string): void {
     const n = normalizeUrl(u);
     if (!n) return;
-    this.input = n;
+    this.input = displayUrl(n);
     this.url = n;
     this.frameSrc = n;
     try {

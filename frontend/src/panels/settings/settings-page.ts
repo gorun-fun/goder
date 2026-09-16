@@ -1206,7 +1206,8 @@ export class GrfSettingsPage extends GrfPanel {
   /** 禁用/启用技能(改名 SKILL.md ↔ SKILL.md.disabled)。 */
   private async toggleSkill(name: string, disabled: boolean): Promise<void> {
     this.agentMsg = '';
-    const err = await settingsStore.toggleSkillEnabled(name, !disabled);
+    // disabled 是点击时状态:当前已禁用 ⇒ 本次动作是启用,直接作为目标启用态传入
+    const err = await settingsStore.toggleSkillEnabled(name, disabled);
     this.agentMsg = err ? `操作失败:${err}` : disabled ? `已启用技能 ${name}` : `已禁用技能 ${name}`;
     if (!err) this.flashSaved();
     this.requestUpdate();

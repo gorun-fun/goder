@@ -207,6 +207,8 @@ export type InputItem =
 
 export interface SendOptions {
   model?: string;
+  /** 思考强度(low/high/max 等;空 = 服务端默认),随请求 reasoning.effort 下发 */
+  reasoningEffort?: string;
   input: string | InputItem[];
   previousResponseId?: string;
   instructions?: string;

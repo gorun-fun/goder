@@ -1361,18 +1361,24 @@ export class GrfChat extends GrfPanel {
                       .running=${running}
                       .inputRequired=${waiting}
                       .asks=${pendingAsks}
+                      .queue=${sid ? s!.queuedSends(sid) : []}
                       .policy=${policy}
                       .policyImmediate=${policyImmediate}
                       .providers=${providers}
                       .model=${curModel}
                       .activeModel=${activeModel}
+                      .effort=${s!.reasoningEffort ?? ''}
                       .usage=${rt?.usage ?? null}
                       .usageModel=${rt?.model ?? ''}
                       .stats=${rt?.stats ?? null}
                       .contextWindow=${contextWindow}
                       @policy-change=${this.onPolicyChange}
                       @model-change=${this.onModelChange}
+                      @effort-change=${(e: CustomEvent<string>) => s!.setReasoningEffort(e.detail)}
                       @send=${this.onSend}
+                      @queue-remove=${(e: CustomEvent<{ index: number }>) => {
+                        if (sid) s!.removeQueuedSend(sid, e.detail.index);
+                      }}
                       @answer=${this.onAskAnswer}
                       @dismiss=${this.onAskDismiss}
                       @stop=${() => void s!.cancelActive()}
