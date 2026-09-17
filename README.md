@@ -1,4 +1,4 @@
-# goder
+# Goder
 
 [grf-harness](https://git.gorun.fun/share/grf-harness)(gh)的 ZCode(Zode)风格图形界面。一个前端,多种形态:
 
