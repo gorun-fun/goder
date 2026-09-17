@@ -2,7 +2,8 @@
 # goder 持续集成 / 持续交付(Wails v3 桌面 App;三平台 × 双架构)
 # 产物:macOS .app(darwin 双架构 zig cc 交叉 + ldid adhoc 签名)、
 #      Linux zip(linux 原生架构 CGO + Debian multiarch 交叉另一架构,
-#      zip 含 goder/gh 双二进制,运行需 GTK4/WebKitGTK)、
+#      zip 只含 goder,运行需 GTK4/WebKitGTK;gh 由 App 首次启动静默
+#      自动下载)、
 #      Windows zip(wails v3 windows 前端纯 syscall 无 CGO,直接交叉;
 #      zip 只含 goder.exe,gh 由 App 首次启动弹框自动下载)。产物目录名与
 #      gh 下载侧平台目录一致。
@@ -10,8 +11,8 @@
 #          仅 tag 触发;普通分支推送不创建任何 job(runner 为低性能单并发机,
 #          不浪费槽位)
 # 流程:    alpine node 编译前端 -> trixie go 交叉编译 wails3 darwin(arm64+amd64)
-#          -> 从 download.gorun.fun 下载 gh(grf-harness)各平台最新版直接捆绑
-#             (不从源码构建;App 独立分发,用户无需预装 gh)
+#          -> 从 download.gorun.fun 下载 gh(grf-harness) darwin 最新版捆绑
+#             进 .app(不从源码构建;Linux/Windows 不捆绑,App 首启自动下载)
 #          -> 组装 Goder.app(Info.plist 模板 + 仓库内 AppIcon.icns,
 #             ldid 补 adhoc 签名)-> zip 按平台/版本目录 scp 发布到 10.8.0.5:
 #             /data/download/goder/{目标平台}/{版本号}/goder-*.zip
@@ -124,12 +125,10 @@ build:
       curl -fsSL -o bin/gh-darwin-amd64  ${GH_DL_BASE}/macos/${GH_VERSION}/gh
       # linux 目录名:amd64 → linux,arm64 → linux-arm64(与 gh 下载侧一致)
       case "$(uname -m)" in
-        aarch64) NATIVE_ARCH=arm64; NATIVE_DIR=linux-arm64; CROSS_ARCH=amd64; CROSS_DIR=linux ;;
-        *)       NATIVE_ARCH=amd64; NATIVE_DIR=linux;       CROSS_ARCH=arm64; CROSS_DIR=linux-arm64 ;;
+        aarch64) NATIVE_ARCH=arm64; CROSS_ARCH=amd64 ;;
+        *)       NATIVE_ARCH=amd64; CROSS_ARCH=arm64 ;;
       esac
-      curl -fsSL -o bin/gh-linux-${NATIVE_ARCH} ${GH_DL_BASE}/${NATIVE_DIR}/${GH_VERSION}/gh
-      curl -fsSL -o bin/gh-linux-${CROSS_ARCH}  ${GH_DL_BASE}/${CROSS_DIR}/${GH_VERSION}/gh
-      chmod +x bin/gh-*
+      chmod +x bin/gh-darwin-*
     # ---- linux 双架构:原生 CGO + 交叉(sysroot) ----
     # | 交叉侧:foreign-arch 的 GTK/WebKitGTK dev 包与原生 -dev 自冲突,不能
     # | apt 安装。镜像已预解包 arm64 闭包 sysroot(/opt/xs/arm64,amd64 host);
@@ -172,10 +171,10 @@ build:
         go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${CROSS_ARCH} .
       for ARCH in ${NATIVE_ARCH} ${CROSS_ARCH}; do
         rm -rf .linstage && mkdir .linstage
-        # zip 内统一命名 goder/gh(与解压使用方式一致),cp 显式落目标名
+        # 不捆绑 gh:App 启动时检测到缺失会静默自动下载当前系统版本(见
+        # internal/desktop/ghdownload_linux.go),zip 只含 goder。
         cp bin/goder-linux-${ARCH} .linstage/goder
-        cp bin/gh-linux-${ARCH}    .linstage/gh
-        (cd .linstage && zip -qry ../bin/goder-linux-${ARCH}.zip goder gh)
+        (cd .linstage && zip -qry ../bin/goder-linux-${ARCH}.zip goder)
       done
       rm -rf .linstage
     # ---- windows 双架构:wails v3 windows 前端为纯 syscall,无 CGO,直接交叉 ----
@@ -218,8 +217,8 @@ build:
       done
       rm -rf .appstage
       # linux/windows 产物目录名与 gh 下载侧一致
-      echo "${NATIVE_DIR} goder-linux-${NATIVE_ARCH}.zip" >> bin/PUBLISH_MANIFEST
-      echo "${CROSS_DIR} goder-linux-${CROSS_ARCH}.zip" >> bin/PUBLISH_MANIFEST
+      echo "$([ "$NATIVE_ARCH" = amd64 ] && echo linux || echo linux-arm64) goder-linux-${NATIVE_ARCH}.zip" >> bin/PUBLISH_MANIFEST
+      echo "$([ "$CROSS_ARCH" = amd64 ] && echo linux || echo linux-arm64) goder-linux-${CROSS_ARCH}.zip" >> bin/PUBLISH_MANIFEST
       echo "windows goder-windows-amd64.zip" >> bin/PUBLISH_MANIFEST
       echo "windows-arm64 goder-windows-arm64.zip" >> bin/PUBLISH_MANIFEST
       ls -lh bin/

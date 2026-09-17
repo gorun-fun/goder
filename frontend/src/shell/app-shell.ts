@@ -12,7 +12,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme } from '../ui/panel';
 import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
-import { closeWindow, isWindowMaximised, isWindowsDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
+import { closeWindow, isWindowMaximised, isFramelessDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
 import { registry, sideTabId, type PanelContext, type SideTabInstance } from '../registry/registry';
 import '../panels/files/file-list';
@@ -55,9 +55,9 @@ export class GrfAppShell extends GrfPanel {
   private readonly nativeLights =
     inWails() && /mac/i.test(navigator.platform || navigator.userAgent);
 
-  /** Windows 桌面态:窗口整窗无边框(原生标题栏与最小化/最大化/关闭都已
-   * 移除),右上角由壳自绘 .winctl;顶排头部右侧让位(见 .win)。 */
-  private readonly nativeWinControls = isWindowsDesktop();
+  /** 无边框桌面平台(Windows/Linux):窗口整窗无边框(原生标题栏与最小化/
+   * 最大化/关闭都已移除),右上角由壳自绘 .winctl;顶排头部右侧让位(见 .win)。 */
+  private readonly nativeWinControls = isFramelessDesktop();
 
   /** 窗口当前是否最大化(切换 .winctl 的最大化/还原图标) */
   @state() private winMaximised = false;

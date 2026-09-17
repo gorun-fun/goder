@@ -21,14 +21,15 @@ var assets embed.FS
 func main() {
 	sm := desktop.GetServerManager()
 
-	// Windows 环境检查门:gh 缺失时的下载弹窗(MessageBox + 进度对话框)
-	// 先走完(用户拒绝或失败也放行),之后才创建应用与主窗体("gh 下载以后
-	// 才能打开主窗体")。只做检查/下载,不启动服务 —— gh 由主窗体启动时
-	// 的冷启动拉起。其余平台 gh 已捆绑,无需此门。
-	if runtime.GOOS == "windows" {
+	// 环境检查门(Windows/Linux:gh 不随包分发):gh 缺失时走下载(Windows
+	// 弹原生对话框,Linux 静默),先完成(用户拒绝或失败也放行)才创建应用与
+	// 主窗体("gh 下载以后才能打开主窗体")。只做检查/下载,不启动服务 ——
+	// gh 由主窗体启动时的冷启动拉起。macOS 捆绑 gh,无需此门。
+	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
 		sm.EnsureGh()
 	}
 
+	rootHandler := desktop.RootHandler(application.BundledAssetFileServer(assets))
 	app := application.New(application.Options{
 		Name:        "Goder",
 		Description: "grf-harness 图形界面(项目会话 · 聊天 · 详情 · 事件台)",
@@ -42,7 +43,7 @@ func main() {
 			application.NewService(desktop.GetBrowserManager()),
 		},
 		Assets: application.AssetOptions{
-			Handler: desktop.RootHandler(application.BundledAssetFileServer(assets)),
+			Handler: rootHandler,
 			// 代理与静态资源都由我们接管,关掉逐请求日志噪音
 			DisableLogging: true,
 		},
@@ -63,6 +64,13 @@ func main() {
 		MinHeight: 560,
 	}
 	applyWindowDecorations(&winOpts)
+	// Windows:wails 资产管道整体缓冲响应、SSE 无流式(见
+	// localserv_windows.go);改从本地真实 HTTP 服务器加载,静态资产与
+	// /grf-api 同源。失败则回退 wails 资产服务(流式缺失但可用)。
+	if baseURL := startLocalServer(rootHandler); baseURL != "" {
+		winOpts.URL = baseURL
+		defer stopLocalServer()
+	}
 	mainWin := app.Window.NewWithOptions(winOpts)
 
 	// 托管模式冷启动自拉起,gh 随主窗体一起启动(所有平台同一时点):

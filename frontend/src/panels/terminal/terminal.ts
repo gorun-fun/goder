@@ -164,11 +164,7 @@ export class GrfTerminal extends GrfPanel {
       this.message = '终端仅在桌面应用内可用';
       return;
     }
-    if (!cwd) {
-      this.status = 'error';
-      this.message = '当前项目未设置本地路径(桌面态新建项目时选择目录)';
-      return;
-    }
+    // cwd 为空(未选工作区)不再拒绝:Go 侧 StartTerm 默认用户主目录。
     if (this.booting) {
       this.pendingBoot = true;
       return;

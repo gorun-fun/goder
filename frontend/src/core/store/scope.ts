@@ -30,6 +30,7 @@ import {
   type SessionRuntime,
 } from '../model/chat-model';
 import { emptyIndex, persistence, type ProjectsIndex, type ProjectRecord } from './persistence';
+import { desktopHomeDir } from '../../host/bridge';
 import { Emitter } from './emitter';
 
 export const UNGROUPED = '__ungrouped';
@@ -110,7 +111,13 @@ export class GrfScope extends Emitter {
     this.reasoningEffort = cfg.reasoningEffort;
     this.authCfg = cfg.auth;
     this.draftPolicy = loadPolicyLocal(name);
+    // 桌面态的用户主目录:未选工作区时新会话 workspace 的默认值
+    // (纯 web 态为空串,workspace 保持 undefined 走服务端默认)。
+    void desktopHomeDir().then((h) => (this.homeDir = h));
   }
+
+  /** 用户主目录(桌面态;未选工作区时新会话的默认 workspace)。 */
+  private homeDir = '';
 
   /** 设置新会话策略偏好并持久化(localStorage,双形态通用)。 */
   setDraftPolicy(p: string): void {
@@ -913,11 +920,12 @@ export class GrfScope extends Emitter {
     const draftProject = this.index.projects.find((p) => p.id === projectId);
     const previous = isDraft ? undefined : rt.lastResponseId ?? this.index.sessions[sid]?.lastResponseId;
     // 首条消息携带 grf:session:项目默认配置 + 工作区(项目根目录,
-    // 让 agent 的文件/终端工具直接落在项目里;无路径的项目用服务端默认)。
+    // 让 agent 的文件/终端工具直接落在项目里;未选工作区时默认用户
+    // 主目录 —— 直接聊天不必先建项目)。
     // composer 的策略选择(draftPolicy)优先于项目默认。
     const grfSession = isDraft
       ? {
-          workspace: draftProject?.path,
+          workspace: draftProject?.path || this.homeDir || undefined,
           ...draftProject?.defaults,
           ...(this.draftPolicy ? { policy: this.draftPolicy } : {}),
         }

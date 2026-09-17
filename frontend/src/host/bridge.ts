@@ -14,7 +14,10 @@ export function inWails(): boolean {
   if (typeof window === 'undefined') return false;
   if (typeof location !== 'undefined') {
     if (location.protocol === 'wails:' || location.protocol === 'wails-capabilities:') return true;
-    if (/^(wails\.localhost|app\.localhost)$/.test(location.hostname)) return true;
+    // wails.localhost/app.localhost = wails 资产服务;goder.localhost =
+    // Windows 桌面态从本地真实 HTTP 服务器加载(绕过 wails 资产管道的
+    // 响应整体缓冲,否则 SSE 无流式;见 main.go 的 startLocalServer)。
+    if (/^(wails\.localhost|app\.localhost|goder\.localhost)$/.test(location.hostname)) return true;
   }
   return false;
 }
@@ -379,6 +382,16 @@ export async function desktopUserName(): Promise<string> {
   if (!inWails()) return '';
   try {
     return (await call<string>(`${SVC}.Desktop.UserName`)) || '';
+  } catch {
+    return '';
+  }
+}
+
+/** 用户主目录(未选工作区时聊天/终端的默认目录);非桌面态返回空串。 */
+export async function desktopHomeDir(): Promise<string> {
+  if (!inWails()) return '';
+  try {
+    return (await call<string>(`${SVC}.Desktop.HomeDir`)) || '';
   } catch {
     return '';
   }

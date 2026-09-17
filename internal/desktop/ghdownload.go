@@ -1,8 +1,9 @@
 // ghdownload.go — gh(grf-harness)按需自动下载:核心下载逻辑(跨平台)。
-// Windows 发行包不再捆绑 gh,首次启动检测到缺失时弹原生对话框确认,
-// 从官方下载服务器(download.gorun.fun/grf-harness)拉取当前系统/架构的
-// 最新版到用户配置目录 bin/ 下,作为后续启动的解析候选。
-// 对话框与进度 UI 的平台实现在 ghdownload_windows.go(非 Windows 为 no-op)。
+// Windows/Linux 发行包不捆绑 gh,首次启动检测到缺失时从官方下载服务器
+// (download.gorun.fun/grf-harness)拉取当前系统/架构的最新版到用户配置
+// 目录 bin/ 下,作为后续启动的解析候选。
+// 交互形态按平台:Windows 弹原生对话框(ghdownload_windows.go),
+// Linux 静默下载(ghdownload_linux.go),macOS .app 已捆绑(no-op)。
 package desktop
 
 import (
@@ -173,6 +174,9 @@ func (d *ghDownload) run(url, dst string) error {
 	if err := os.Rename(tmp, dst); err != nil {
 		return err
 	}
+	// 类 Unix 需要 gh 可执行(创建默认 0666;servermanager 的托管路径
+	// 候选按执行位过滤,漏 chmod 会认不出刚下载的 gh)。Windows 上为空操作。
+	_ = os.Chmod(dst, 0o755)
 	// 完成信号:进度 UI 据此关闭对话框
 	d.pct.Store(100)
 	return nil

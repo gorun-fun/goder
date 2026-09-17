@@ -49,10 +49,13 @@ func (t *TerminalManager) ServiceShutdown() {
 	}
 }
 
-// StartTerm 在 cwd 启动一个登录 shell 的 PTY 会话。
+// StartTerm 在 cwd 启动一个登录 shell 的 PTY 会话。cwd 为空(未选工作区)
+// 时默认用户主目录:终端随时可用,不强制先选项目。
 func (t *TerminalManager) StartTerm(cwd string, cols int, rows int) (TermSessionDTO, error) {
 	if cwd == "" {
-		return TermSessionDTO{}, fmt.Errorf("工作目录为空")
+		if home, err := os.UserHomeDir(); err == nil {
+			cwd = home
+		}
 	}
 	if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
 		return TermSessionDTO{}, fmt.Errorf("工作目录不存在:%s", cwd)

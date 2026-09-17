@@ -30,6 +30,11 @@ func (d *Desktop) UserName() (string, error) {
 	return "user", nil
 }
 
+// HomeDir 用户主目录(未选工作区时聊天/终端的默认目录)。
+func (d *Desktop) HomeDir() (string, error) {
+	return os.UserHomeDir()
+}
+
 // PickFolder 打开原生目录选择器;返回所选目录绝对路径,取消返回空串。
 func (d *Desktop) PickFolder() (string, error) {
 	return application.Get().Dialog.OpenFile().

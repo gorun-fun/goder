@@ -1721,7 +1721,26 @@ export class GrfChat extends GrfPanel {
   // ---------- composer 事件 ----------
 
   private onSend(e: CustomEvent<{ text: string; images?: string[] }>): void {
+    if (!this.modelReady()) {
+      this.goModelSettings();
+      return;
+    }
     void this.store!.send(e.detail.text, e.detail.images);
+  }
+
+  /** 模型守卫:本端未选模型、当前会话也没有实际模型、gh 侧也无默认模型
+   * 时视为"未设置模型" —— 此时发送只会收到服务端报错,不如直接带用户
+   * 去设置的模型页完成配置。纯 web/嵌入态模型页依赖桌面桥,保持直接发送。 */
+  private modelReady(): boolean {
+    if (!inWails()) return true;
+    const s = this.store;
+    return !!(s?.model || s?.activeRuntime?.model || settingsStore.modelCfg?.default);
+  }
+
+  /** 跳到设置的模型分区(先切到设置页再下发分区,两事件均由 app-shell 接)。 */
+  private goModelSettings(): void {
+    this.fire('grf-open-settings');
+    this.fire('grf-settings-section', 'models');
   }
 
   // composer 策略选择:已有会话即时生效(服务端运行时变更);草稿则随首条消息
@@ -1761,7 +1780,13 @@ export class GrfChat extends GrfPanel {
     const editOf = this.editingId;
     this.cancelEdit();
     // 编辑重发:从被编辑消息处截断历史(grf:history),编辑文本作为该回合输入
-    if (text) void this.store!.send(text, undefined, editOf ? { editOf } : undefined);
+    if (text) {
+      if (!this.modelReady()) {
+        this.goModelSettings();
+        return;
+      }
+      void this.store!.send(text, undefined, editOf ? { editOf } : undefined);
+    }
   }
 
   private async copyText(id: string, text: string): Promise<void> {
