@@ -16,6 +16,14 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
 - 类型检查:`cd frontend && npx tsc --noEmit`;Go:`go build ./... && go vet ./...`
 - (无自动化测试;E2E 为真实 gh server + 真实模型的手动浏览器验证,
   playwright-cli 或浏览器驱动)
+- **发版(打版)规则**:推送 tag 触发 GitLab CI(`.gitlab-ci.yml`,
+  仅 tag 触发)。tag 与产物版本号 = gh(grf-harness)最新发布 tag;
+  gh 未更新而本程序再次发版时追加 `.postN`(N 从 0 递增,
+  推算脚本 `scripts/version.sh`,tag 名应与推算值一致)。
+  发版步骤:`sh scripts/version.sh` 得版本 → 先推送 main →
+  `git tag v<版本> && git push origin v<版本>`。
+  已发版本以下载服务器目录为准(download.gorun.fun/goder);
+  受保护 tag 不可移动,误发的 tag 只能另打新 tag 重触发。
 
 ## 结构与分层
 
