@@ -97,7 +97,7 @@ build:
     - go vet ./...
     # 版本号跟随 grf-harness 最新发布 tag(gh 不变而本程序再发版追加 .postN)
     - VERSION=$(sh scripts/version.sh)
-    - echo "Goder 版本: $VERSION"
+    - echo "Goder 版本 $VERSION"
     # ---- gh:直接下载 grf-harness 各平台最新发布版(不从源码构建) ----
     # 目录列表页是静态 HTML,版本号目录 sort -V 取最大;两架构共用同一版本,
     # 以 macos-arm64 的列表为准(macos/amd64 目录可能滞后半拍,先探测存在)
