@@ -140,7 +140,7 @@ func ensureGhDownloadUI() (string, error) {
 	}
 	if messageBox(
 		"Goder 需要配套的 gh(grf-harness)服务组件,当前系统未检测到。\n\n"+
-			"是否现在自动下载并安装?(gh "+ver+", "+sizeDesc+",来自官方下载服务器)",
+			"是否现在自动下载并安装?("+sizeDesc+",来自官方下载服务器)",
 		caption, mbYesNo|mbIconQuestion) != idYes {
 		return "", fmt.Errorf("用户取消 gh 下载;也可在偏好设置里手动配置 gh 路径")
 	}
