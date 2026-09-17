@@ -1302,17 +1302,25 @@ export class GrfChat extends GrfPanel {
     const policySrc = rt?.policy ?? s?.draftPolicy ?? projPolicy ?? 'off';
     const policy: 'write-workspace' | 'off' = policySrc && policySrc !== 'off' ? 'write-workspace' : 'off';
     const policyImmediate = !!sid && !sid.startsWith('draft:');
-    // 当前使用的模型:会话实际模型(服务端回报)优先,未知时回落本机选择
-    const curModel = rt?.model || s?.model || settingsStore.modelCfg?.default || '';
+    // 模型按钮显示"下一回合将使用的模型":本机选择优先(刚切换就能看到),
+    // 会话尚未发过消息时回落服务端回报/默认值
+    const curModel = s?.model || rt?.model || settingsStore.modelCfg?.default || '';
     const activeModel = s?.model || rt?.model || '';
     const providers = (settingsStore.modelCfg?.providers ?? []).map((p) => ({
       name: p.name,
       // models 判空:Go 侧 nil 切片序列化为 null,直接展开会抛 TypeError
-      // 冻结整个聊天面板(会话点不开/三栏开关失效)
-      models: [...(p.models ?? [])],
+      // 冻结整个聊天面板(会话点不开/三栏开关失效)。
+      // 菜单项必须带 provider/ 前缀:gh server 的 trySwitchModel 只认
+      // "provider/model" 全名,裸模型名会被忽略(切换不生效)
+      models: (p.models ?? []).map((m) => `${p.name}/${m}`),
     }));
-    if (curModel && !providers.some((g) => g.models.includes(curModel))) {
-      providers.push({ name: '当前模型', models: [curModel] });
+    // 服务端回报的 model 是裸名,补 provider 前缀对齐菜单项(勾选态匹配)
+    const toFull = (m: string): string =>
+      m && !m.includes('/') ? (providers.flatMap((g) => g.models).find((x) => x.endsWith(`/${m}`)) ?? m) : m;
+    const curFull = toFull(curModel);
+    const activeFull = toFull(activeModel);
+    if (curFull && !providers.some((g) => g.models.includes(curFull))) {
+      providers.push({ name: '当前模型', models: [curFull] });
     }
     // 上下文窗口按会话实际模型估算(圆环分母)
     const contextWindow = modelContextWindow(rt?.model || curModel || undefined);
@@ -1380,8 +1388,8 @@ export class GrfChat extends GrfPanel {
                       .policy=${policy}
                       .policyImmediate=${policyImmediate}
                       .providers=${providers}
-                      .model=${curModel}
-                      .activeModel=${activeModel}
+                      .model=${curFull}
+                      .activeModel=${activeFull}
                       .effort=${s!.reasoningEffort ?? ''}
                       .usage=${rt?.usage ?? null}
                       .usageModel=${rt?.model ?? ''}
