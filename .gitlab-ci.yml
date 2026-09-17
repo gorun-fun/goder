@@ -249,11 +249,12 @@ publish:
     # gh 不变时 .postN 递增),经 bin/VERSION 产物传过来
     - VERSION=$(cat bin/VERSION)
     # 产物清单由 build 阶段写入 bin/PUBLISH_MANIFEST(每行"目录 zip 名"),
-    # 目录名与 gh 下载侧平台目录一致:macos-arm64 / macos / linux(-arm64)
+    # 目录名与 gh 下载侧平台目录一致:macos-arm64 / macos / linux(-arm64) /
+    # windows(-arm64)。注意 ssh 必须 -n 断开 stdin,否则会吃掉循环读的清单。
     - |
       while read -r DIR ZIP; do
         [ -n "$DIR" ] || continue
-        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_DIR}/${DIR}/${VERSION}"
+        ssh -n ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_DIR}/${DIR}/${VERSION}"
         scp -p bin/$ZIP ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/${DIR}/${VERSION}/
       done < bin/PUBLISH_MANIFEST
   rules:
