@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"git.gorun.fun/share/goder/internal/appcfg"
@@ -83,7 +84,11 @@ func (s *ServerManager) Start() ghserver.Status {
 	bin := ghserver.ResolveGhBin(cfg.GhBinary)
 	if bin == "" {
 		if p, merr := managedGhPath(); merr == nil {
-			if st, serr := os.Stat(p); serr == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+			// 可执行位只对类 Unix 有意义:Windows 的 os.Stat 对普通文件
+			// 恒报 0666(无执行位),按执行位过滤会把已下载的 gh.exe
+			// 判成不可用,导致每次启动都重新弹下载框。
+			if st, serr := os.Stat(p); serr == nil && !st.IsDir() &&
+				(runtime.GOOS == "windows" || st.Mode()&0o111 != 0) {
 				bin = p
 			}
 		}

@@ -117,12 +117,6 @@ func runProgressDialog(dl *ghDownload, title string) {
 // 返回下载后的 gh 路径;用户拒绝/失败时返回错误(错误信息已弹框展示)。
 func ensureGhDownloadUI() (string, error) {
 	const caption = "Goder 环境检查"
-	if messageBox(
-		"Goder 需要配套的 gh(grf-harness)服务组件,当前系统未检测到。\n\n"+
-			"是否现在自动下载并安装?(约几十 MB,来自官方下载服务器)",
-		caption, mbYesNo|mbIconQuestion) != idYes {
-		return "", fmt.Errorf("用户取消 gh 下载;也可在偏好设置里手动配置 gh 路径")
-	}
 	dir, err := ghPlatformDir()
 	if err != nil {
 		messageBox(err.Error(), caption, mbIconError)
@@ -138,8 +132,19 @@ func ensureGhDownloadUI() (string, error) {
 		messageBox("解析数据目录失败: "+err.Error(), caption, mbIconError)
 		return "", err
 	}
-	dl := &ghDownload{version: ver}
 	url := ghDlBase + "/" + dir + "/" + ver + "/" + ghExeName()
+	// 精确大小(HEAD Content-Length);拿不到时退回模糊提示。
+	sizeDesc := "约几十 MB"
+	if sz, serr := remoteContentSize(url); serr == nil {
+		sizeDesc = fmt.Sprintf("%.1f MB", float64(sz)/(1<<20))
+	}
+	if messageBox(
+		"Goder 需要配套的 gh(grf-harness)服务组件,当前系统未检测到。\n\n"+
+			"是否现在自动下载并安装?(gh "+ver+", "+sizeDesc+",来自官方下载服务器)",
+		caption, mbYesNo|mbIconQuestion) != idYes {
+		return "", fmt.Errorf("用户取消 gh 下载;也可在偏好设置里手动配置 gh 路径")
+	}
+	dl := &ghDownload{version: ver}
 
 	// 下载在后台协程;TaskDialog 阻塞展示进度直到回调里检测到结束。
 	done := make(chan error, 1)

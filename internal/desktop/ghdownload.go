@@ -95,6 +95,20 @@ func latestGhVersion() (string, error) {
 	return best, nil
 }
 
+// remoteContentSize 探测远端文件大小(HEAD Content-Length);失败返回错误,
+// 调用方自行回退到模糊提示。
+func remoteContentSize(url string) (int64, error) {
+	resp, err := ghClient.Head(url)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 || resp.ContentLength <= 0 {
+		return 0, fmt.Errorf("HEAD 返回 %d(长度 %d)", resp.StatusCode, resp.ContentLength)
+	}
+	return resp.ContentLength, nil
+}
+
 // ghDownload 一次受控下载:progress 上报百分比(0-100),cancel 置位后中止。
 type ghDownload struct {
 	cancel  atomic.Bool
