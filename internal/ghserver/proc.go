@@ -255,8 +255,7 @@ func (p *Proc) killGroupLocked() {
 	p.adoptedPid = 0
 	if adopted != 0 && alive(adopted) {
 		_ = syscall.Kill(adopted, syscall.SIGTERM)
-		time.Sleep(300 * time.Millisecond)
-		if alive(adopted) {
+		if waitExit(adopted, 3*time.Second) {
 			_ = syscall.Kill(adopted, syscall.SIGKILL)
 		}
 	}
@@ -265,11 +264,25 @@ func (p *Proc) killGroupLocked() {
 	}
 	if alive(p.pid) {
 		_ = syscall.Kill(-p.pid, syscall.SIGTERM)
-		time.Sleep(300 * time.Millisecond)
-		if alive(p.pid) {
+		// 给 gh server 足够的优雅退出时间:SIGTERM 后要把运行中的会话
+		// 落盘(未完成回合的持久化),过早 SIGKILL 会截断写盘、重开 App
+		// 后会话内容丢失。3 秒内未退出再强杀,不让退出流程无限挂起。
+		if waitExit(p.pid, 3*time.Second) {
 			_ = syscall.Kill(-p.pid, syscall.SIGKILL)
 		}
 	}
+}
+
+// waitExit 轮询等待进程退出;仍在存活返回 true(调用方应 SIGKILL)。
+func waitExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !alive(pid) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return alive(pid)
 }
 
 func (p *Proc) cleanupLocked() {

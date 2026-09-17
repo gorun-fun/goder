@@ -47,6 +47,8 @@ export interface ToolItem extends Base {
   args: string;
   status: ToolStatus;
   output: string;
+  /** 截图类工具结果里的图片(data URL;SSE 不带,历史/回合后补取回填) */
+  images?: string[];
   err: string;
   agentId: string;
   label: string;
@@ -173,7 +175,7 @@ export function genId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 }
 
-function textOfContent(content: string | HistPart[] | undefined): string {
+export function textOfContent(content: string | HistPart[] | undefined): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content
@@ -189,6 +191,54 @@ function imagesOfContent(content: string | HistPart[] | undefined): string[] {
 
 // historyToItems 把 GET /v1/conversations/{id}/items 的 llm.Message 线格式
 // 转为 ChatItem 列表(历史恢复用)。tool 消息回填到前一条工具卡片的输出。
+
+// 截图类工具(computer_screenshot / browser_take_screenshot 等):结果带
+// image_url part,但 SSE 的 tool_call 事件不下发图片,需回合后补取历史回填。
+export function isScreenshotTool(name: string): boolean {
+  return /screenshot/i.test(name);
+}
+
+// 电脑点击类工具(left_click/right_click/double_click/mouse_down 等):
+// 行内提供「查看」链接,配合上一张截图圈出点击位置。
+export function isClickTool(name: string): boolean {
+  return /click|mouse_down|mouse_up/i.test(name);
+}
+
+// 从(可能流式残缺的)参数 JSON 里容错提取点击坐标。两种形态:
+// computer-use MCP 的 target {"type":"coordinate","x":…,"y":…} 与 gh
+// computer_click 的顶层 {"x":…,"y":…}(全局屏幕坐标)。
+export function clickCoordOf(args: string): { x: number; y: number } | undefined {
+  const m =
+    args.match(/"type"\s*:\s*"coordinate"\s*,\s*"x"\s*:\s*(-?\d+)\s*,\s*"y"\s*:\s*(-?\d+)/) ??
+    args.match(/"x"\s*:\s*(-?\d+)\s*,\s*"y"\s*:\s*(-?\d+)\s*,\s*"type"\s*:\s*"coordinate"/) ??
+    args.match(/"x"\s*:\s*(-?\d+)\s*,\s*"y"\s*:\s*(-?\d+)/);
+  return m ? { x: Number(m[1]), y: Number(m[2]) } : undefined;
+}
+
+// 解析截图工具结果里的坐标 meta("图像 WxH 像素;覆盖 display#N(全局坐标
+// x=A..B, y=C..D);scale=S"):把全局点击坐标换算回图上像素用。
+export function parseShotMeta(text: string): { ox: number; oy: number; scale: number } | undefined {
+  const m = text.match(/全局坐标 x=(-?\d+)\.\.\d+, y=(-?\d+)\.\.\d+/);
+  if (!m) return undefined;
+  const s = text.match(/scale=(\d+)/);
+  return { ox: Number(m[1]), oy: Number(m[2]), scale: s ? Number(s[1]) : 1 };
+}
+
+// 从工具输出文本兜底提取 data URL 图片:部分形态下历史不带 image_url part,
+// 但输出文本(markdown 或裸 base64)里就有图片数据。
+export function imagesOfOutput(text: string): string[] {
+  const re = /data:image\/[a-zA-Z+.-]+;base64,[A-Za-z0-9+/=]+/g;
+  return text.match(re) ?? [];
+}
+
+// gh server 的电脑截图工具把图片落盘为本地文件,会话历史里只有
+// "截图已保存: /tmp/xx.png(32 KB)"之类的文字。从这里解析出文件路径,
+// 转为桌面本地文件服务 URL 供 <img> 直读(纯 web 网关形态无此服务,降级
+// 为裂图,可接受)。
+export function shotUrlsOfFile(text: string): string[] {
+  const re = /(\/[^\s（()'"`，。]+?\.(?:png|jpe?g|webp|gif))/gi;
+  return (text.match(re) ?? []).map((p) => `/grf-api/local-file?path=${encodeURIComponent(p)}`);
+}
 export function historyToItems(hist: HistMessage[]): ChatItem[] {
   const items: ChatItem[] = [];
   const byCallId = new Map<string, ToolItem>();
@@ -199,6 +249,21 @@ export function historyToItems(hist: HistMessage[]): ChatItem[] {
       case 'user': {
         const text = textOfContent(msg.content);
         const images = imagesOfContent(msg.content);
+        // 截图类工具的结果被 gh server 记成 "[tool result: <名>]…" 的 user
+        // 消息(带 image_url part):回填到最近的同名工具卡,不进用户气泡
+        // ——只有用户亲手发的消息才允许出现在右侧。
+        const tr = text.match(/^\[tool result: ([^\]]+)\]/);
+        if (tr) {
+          for (let k = items.length - 1; k >= 0; k--) {
+            const t = items[k];
+            if (t.kind === 'tool' && t.name === tr[1] && !t.output) {
+              t.output = text;
+              if (images.length) t.images = images;
+              break;
+            }
+          }
+          break;
+        }
         if (text || images.length) {
           items.push({ kind: 'user', id: genId('u'), text, images: images.length ? images : undefined });
         }
@@ -229,8 +294,17 @@ export function historyToItems(hist: HistMessage[]): ChatItem[] {
       case 'tool': {
         const target = msg.tool_call_id ? byCallId.get(msg.tool_call_id) : undefined;
         const out = textOfContent(msg.content);
+        // 截图类工具结果带 image_url part:提取为工具卡可展示的图片;
+        // 没有 part 时从输出文本兜底(data URL 或"截图已保存"的文件路径)。
+        const images = imagesOfContent(msg.content);
         if (target) {
           target.output = out;
+          const imgs = images.length
+            ? images
+            : isScreenshotTool(target.name)
+              ? [...imagesOfOutput(out), ...shotUrlsOfFile(out)]
+              : [];
+          if (imgs.length) target.images = imgs;
           if (/^\[error\]/i.test(out.trim())) target.status = 'error';
         } else if (out.trim()) {
           items.push({ kind: 'status', id: genId('s'), text: `${msg.name ?? 'tool'}: ${out}` });
@@ -669,6 +743,12 @@ function upsertToolItem(rt: SessionRuntime, item: OutputItem, status?: ToolStatu
   }
   const out = item.output_text ?? '';
   if (out) target.output = out;
+  // 截图类工具:SSE 输出文本里若带 data URL 或"截图已保存"的本地文件
+  // 路径,立即提取上屏,不必等回合后补取历史。
+  if (out && !target.images && isScreenshotTool(target.name)) {
+    const imgs = [...imagesOfOutput(out), ...shotUrlsOfFile(out)];
+    if (imgs.length) target.images = imgs;
+  }
   if (item.err || status === 'error') {
     target.err = item.err || '工具执行失败';
     target.status = 'error';

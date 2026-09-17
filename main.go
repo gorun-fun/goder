@@ -36,6 +36,7 @@ func main() {
 			application.NewService(&desktop.AgentConfig{}),
 			application.NewService(&desktop.Desktop{}),
 			application.NewService(desktop.GetTerminalManager()),
+			application.NewService(desktop.GetBrowserManager()),
 		},
 		Assets: application.AssetOptions{
 			Handler: desktop.RootHandler(application.BundledAssetFileServer(assets)),
@@ -48,6 +49,7 @@ func main() {
 	})
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:   "main",
 		Title:  "Goder",
 		URL:    "/",
 		Width:  1240,

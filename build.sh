@@ -92,6 +92,21 @@ if [ "${1:-}" = "app" ]; then
   VERSION="$(sh scripts/version.sh)" || VERSION="0.1.0"
   echo "==> 版本: $VERSION"
   sed -e "s/0\.1\.0/${VERSION}/g" build/darwin/Info.plist > "$APP/Contents/Info.plist"
-  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
-  echo "==> App 包: $APP(未签 adhoc;分发请自行正式签名/公证)"
+  # 签名:优先 GRF_SIGN_IDENTITY(或本机 login 钥匙串里的 "Goder Dev" 自签
+  # 证书),最后回退 adhoc。adhoc 的 TCC 授权按 cdhash 记账,每次重编都会
+  # 重新弹「屏幕录制/辅助功能」权限;固定证书签名则跨构建保持授权稳定。
+  SIGN_ID="${GRF_SIGN_IDENTITY:-}"
+  if [ -z "$SIGN_ID" ] && security find-identity -v -p codesigning 2>/dev/null \
+      | grep -q '"Goder Dev"'; then
+    SIGN_ID="Goder Dev"
+  fi
+  if [ -n "$SIGN_ID" ]; then
+    codesign --force --deep --options runtime --sign "$SIGN_ID" "$APP" >/dev/null 2>&1 \
+      || codesign --force --deep --sign "$SIGN_ID" "$APP" >/dev/null 2>&1 \
+      || { echo "==> 警告: 证书签名失败,回退 adhoc"; codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true; }
+    echo "==> App 包: $APP(已签: $SIGN_ID)"
+  else
+    codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+    echo "==> App 包: $APP(未签 adhoc;分发请自行正式签名/公证)"
+  fi
 fi

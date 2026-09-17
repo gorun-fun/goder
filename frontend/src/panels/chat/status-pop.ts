@@ -1,8 +1,9 @@
-// status-pop.ts — <grf-status-pop>:聊天列右上角状态浮窗(自动显示)。
+// status-pop.ts — <grf-status-pop>:聊天列右上角状态浮窗。
 // 当前项目 git 概览(置顶)与模型 todo 任务 —— 有内容才显示对应区块,
-// 都没有则整框不渲染;首个区块标题行右侧的收缩按钮可收成单行,聊天列
-// 过窄时强制单行(narrow 属性)。todos 自行订阅 scope 数据域;git 状态由
-// 宿主(chat 面板)轮询后经属性传入。
+// 都没有则整框不渲染;默认收起为单行,用户手动展开/收起的状态跨会话
+// 持久化(localStorage);非 git 内容(任务列表/目标)发生变化时自动展开。
+// 聊天列过窄时强制单行(narrow 属性)。todos/goal 自行订阅 scope 数据域;
+// git 状态由宿主(chat 面板)轮询后经属性传入。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
@@ -17,8 +18,29 @@ export class GrfStatusPop extends GrfPanel {
   /** 聊天列过窄:强制单行,避免盖住对话内容 */
   @property({ type: Boolean }) narrow = false;
 
-  /** 收缩态(单行:有任务列表时显示任务完成度,否则 git 行级变更);浮窗自动显示,无手动开关 */
-  @state() private collapsed = false;
+  /** 展开态(收起为单行:有任务列表时显示任务完成度,否则 git 行级变更);
+   *  默认收起,手动切换持久化,任务/目标变化时自动展开 */
+  @state() private open = loadOpen();
+  /** 上次观测到的任务/目标快照(会话 id + 内容),用于检测变化触发自动展开 */
+  private snap: { sid: string; key: string } | null = null;
+
+  protected willUpdate(): void {
+    // 检测非 git 内容(任务列表/目标)变化:会话切换只重置基线不触发;
+    // 同一会话内内容变化则自动展开(不写持久化,下次启动仍以上次手动选择为准)。
+    const s = this.store;
+    const sid = s?.activeSessionId ?? '';
+    const rt = s?.runtimes.get(sid);
+    const key = JSON.stringify({
+      goal: rt?.goal ? { phase: rt.goal.phase, objective: rt.goal.objective } : null,
+      todos: rt?.todos?.map((t) => [t.status, t.content]) ?? null,
+    });
+    if (!this.snap || this.snap.sid !== sid) {
+      this.snap = { sid, key };
+    } else if (this.snap.key !== key) {
+      this.snap = { sid, key };
+      this.open = true;
+    }
+  }
 
   static styles = [
     theme,
@@ -208,12 +230,12 @@ export class GrfStatusPop extends GrfPanel {
     // 没有任何可显示的内容:整框隐藏
     if (!hasGit && !hasTodos && !hasGoal) return nothing;
 
-    // 收缩态:单行显示——优先级:任务完成度 > 目标阶段 > git 行级变更;
+    // 收起态:单行显示——优先级:任务完成度 > 目标阶段 > git 行级变更;
     // 整行可点击展开(按钮点击冒泡到同一处理)。
-    if (this.collapsed || this.narrow) {
+    if (!this.open || this.narrow) {
       const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
       return html`
-        <div class="status-pop collapsed" title="展开状态浮窗" @click=${() => (this.collapsed = false)}>
+        <div class="status-pop collapsed" title="展开状态浮窗" @click=${this.expand}>
           <div class="sp-line">
             ${hasTodos
               ? html`<span>任务 ${doneCnt}/${todos!.length} 完成</span>`
@@ -222,7 +244,7 @@ export class GrfStatusPop extends GrfPanel {
                 : html`<span class="sp-diff">
                     更改 <span class="add">+${this.git!.additions}</span> <span class="del">-${this.git!.deletions}</span>
                   </span>`}
-            <button class="sp-fold" title="展开" @click=${() => (this.collapsed = false)}>
+            <button class="sp-fold" title="展开" @click=${this.expand}>
               ${unsafeHTML(icon.chevron)}
             </button>
           </div>
@@ -232,7 +254,7 @@ export class GrfStatusPop extends GrfPanel {
 
     const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
     // 缩放按钮不单独占行:跟随首个区块(Git 优先,否则任务)的标题行,靠右
-    const foldBtn = html`<button class="sp-fold" title="收起为一行" @click=${() => (this.collapsed = true)}>
+    const foldBtn = html`<button class="sp-fold" title="收起为一行" @click=${this.collapse}>
       ${unsafeHTML(icon.chevron)}
     </button>`;
     return html`
@@ -296,11 +318,37 @@ export class GrfStatusPop extends GrfPanel {
       </div>
     `;
   }
+  /** 手动展开/收起:状态持久化,下次启动按此恢复 */
+  private expand(): void {
+    this.open = true;
+    saveOpen(true);
+  }
+  private collapse(): void {
+    this.open = false;
+    saveOpen(false);
+  }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
     'grf-status-pop': GrfStatusPop;
+  }
+}
+
+/** 浮窗展开状态的 localStorage 持久化(纯 UI 偏好,不入项目索引) */
+const OPEN_KEY = 'grf-ui:status-pop:open';
+function loadOpen(): boolean {
+  try {
+    return localStorage.getItem(OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function saveOpen(v: boolean): void {
+  try {
+    localStorage.setItem(OPEN_KEY, v ? '1' : '0');
+  } catch {
+    /* 隐私模式等存储不可用时静默 */
   }
 }
 

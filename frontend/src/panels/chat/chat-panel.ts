@@ -1346,7 +1346,7 @@ export class GrfChat extends GrfPanel {
               <div class="inner">
                 ${!sid || sid.startsWith('draft:')
                   ? this.renderEmpty()
-                  : (rt?.items ?? []).map((it) => renderItem(it, this.msgProps))}
+                  : (rt?.items ?? []).map((it) => renderItem(it, this.msgProps, rt?.items))}
                 ${running ? html`<div class="run-ring" title="会话运行中"></div>` : nothing}
               </div>
             </div>

@@ -203,7 +203,10 @@ export type InputItem =
       approved?: boolean;
       feedback?: string;
       dismiss?: boolean;
-    };
+    }
+  // 会话恢复:为上次中断未落结果的工具调用补一个结果(gh server 对
+  // "暂停等待交互"的会话只接受 grf:input_result / function_call_output)。
+  | { type: 'function_call_output'; call_id: string; output: string };
 
 export interface SendOptions {
   model?: string;

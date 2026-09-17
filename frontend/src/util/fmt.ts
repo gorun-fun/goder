@@ -438,5 +438,8 @@ export function friendlyError(msg: string): string {
       `服务返回:${msg}`
     );
   }
+  if (/paused awaiting interaction/i.test(msg)) {
+    return '会话正在等待上一次的提问/审批应答,请先完成输入框中的交互再发新消息。';
+  }
   return msg;
 }

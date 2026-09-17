@@ -6,13 +6,24 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { theme } from '../../ui/panel';
 import { fileEditStat, fmtToolDuration, toolDetail, toolFilePath, toolLabel, toolPrimaryText } from '../../util/fmt';
+import { clickCoordOf, isClickTool, parseShotMeta } from '../../core/model/chat-model';
 import type { ToolItem } from '../../core/model/chat-model';
 
 @customElement('grf-tool-card')
 export class GrfToolCard extends LitElement {
   @property({ type: Object }) item!: ToolItem;
+  /** 点击类工具的定位底图:它之前最近一张截图(data URL);缺省则不显示「查看」。 */
+  @property({ type: Object, attribute: false }) ctxShot?: string;
+  /** 底图截图的结果文本(含覆盖起点/scale meta;全局坐标换算图上像素用) */
+  @property({ type: Object, attribute: false }) ctxMeta?: string;
 
   @state() private open = false;
+  /** 截图放大浮层(点「查看截图」打开) */
+  @state() private shotOpen = false;
+  /** 点击定位图展开态(点「查看」切换) */
+  @state() private spotOpen = false;
+  /** 定位底图的原始像素尺寸(算圈圈百分比坐标用) */
+  @state() private spotSize?: { w: number; h: number };
 
   static styles = [
     theme,
@@ -111,6 +122,76 @@ export class GrfToolCard extends LitElement {
         max-height: 240px;
         overflow: auto;
       }
+      /* 截图工具:行尾「查看截图」链接 + 全屏放大浮层(点击任意处关闭) */
+      .shot-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 24px;
+        background: rgb(0 0 0 / 0.72);
+        cursor: zoom-out;
+      }
+      .shot-overlay img {
+        max-width: 92vw;
+        max-height: 86vh;
+        border-radius: 6px;
+        box-shadow: 0 8px 40px rgb(0 0 0 / 0.5);
+      }
+      /* 点击类工具:行内「查看」链接 + 展开的定位图(截图上圈出点击位置) */
+      .view {
+        flex: none;
+        color: var(--grf-accent-text);
+        text-decoration: underline dotted;
+        text-underline-offset: 3px;
+        cursor: pointer;
+      }
+      .view:hover {
+        color: var(--grf-accent);
+      }
+      .spot {
+        position: relative;
+      }
+      .spot img {
+        display: block;
+        max-width: 92vw;
+        max-height: 86vh;
+        border-radius: 6px;
+        box-shadow: 0 8px 40px rgb(0 0 0 / 0.5);
+      }
+      .spot .ring {
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--grf-accent);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        /* 呼吸圈:提示这就是本次点击的位置 */
+        animation: grf-ring 1.4s ease-in-out infinite;
+      }
+      .spot .dot {
+        position: absolute;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: var(--grf-accent);
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      @keyframes grf-ring {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgb(0 0 0 / 0);
+        }
+        50% {
+          box-shadow: 0 0 0 4px rgb(0 0 0 / 0.15);
+        }
+      }
     `,
   ];
 
@@ -135,6 +216,10 @@ export class GrfToolCard extends LitElement {
     // edit/write:参数流式期间即统计 +增/-删(残缺 JSON 容错),随输出跳动;
     // 完成后按输出里的 N replacements 修正 replace_all 倍数。
     const stat = fileEditStat(it.name, it.args, it.output);
+    // 点击类工具:坐标参数 + 前置截图齐备时,行尾给「查看」链接,展开后
+    // 在截图上圈出本次点击位置(坐标是截图栅格像素,按原始尺寸换算百分比)。
+    const spot = isClickTool(it.name) && it.status !== 'running' ? clickCoordOf(it.args) : undefined;
+    const canSpot = !!(spot && this.ctxShot);
     return html`
       <div class="line ${it.status === 'running' ? 'running' : ''}" @click=${() => (this.open = !this.open)}>
         <span class="lab">${label}</span>
@@ -165,6 +250,28 @@ export class GrfToolCard extends LitElement {
             </span>`
           : nothing}
         ${tail ? html`<span class="tail">· ${tail}</span>` : nothing}
+        ${it.images?.length
+          ? html`<span
+              class="view"
+              title="点击放大查看截图"
+              @click=${(e: Event) => {
+                e.stopPropagation();
+                this.shotOpen = true;
+              }}
+              >查看截图</span
+            >`
+          : nothing}
+        ${canSpot
+          ? html`<span
+              class="view"
+              title="查看点击位置"
+              @click=${(e: Event) => {
+                e.stopPropagation();
+                this.spotOpen = !this.spotOpen;
+              }}
+              >查看</span
+            >`
+          : nothing}
         <svg
           class="chev ${this.open ? 'open' : ''}"
           viewBox="0 0 16 16"
@@ -176,6 +283,43 @@ export class GrfToolCard extends LitElement {
         </svg>
       </div>
       ${this.open && detail ? html`<pre class="detail">${detail}</pre>` : nothing}
+      ${canSpot && this.spotOpen && this.ctxShot && spot
+        ? html`<div class="shot-overlay" title="点击关闭" @click=${() => (this.spotOpen = false)}>
+            <div class="spot">
+              <img
+                src=${this.ctxShot}
+                alt="点击位置"
+                @load=${(e: Event) => {
+                  const img = e.target as HTMLImageElement;
+                  this.spotSize = { w: img.naturalWidth, h: img.naturalHeight };
+                }}
+              />
+              ${this.spotSize
+                ? (() => {
+                    // 点击坐标是全局屏幕坐标:按截图 meta 换算回图上像素
+                    // ((全局 - 覆盖起点) × scale),meta 缺省按主屏原点/1x。
+                    const meta = this.ctxMeta ? parseShotMeta(this.ctxMeta) : undefined;
+                    const ox = meta?.ox ?? 0;
+                    const oy = meta?.oy ?? 0;
+                    const sc = meta?.scale ?? 1;
+                    const left = `${(((spot.x - ox) * sc / this.spotSize.w) * 100).toFixed(2)}%`;
+                    const top = `${(((spot.y - oy) * sc / this.spotSize.h) * 100).toFixed(2)}%`;
+                    return html`<span class="ring" style="left:${left};top:${top}"></span
+                      ><span class="dot" style="left:${left};top:${top}"></span>`;
+                  })()
+                : nothing}
+            </div>
+          </div>`
+        : nothing}
+      ${it.images?.length && this.shotOpen
+        ? html`<div
+            class="shot-overlay"
+            title="点击关闭"
+            @click=${() => (this.shotOpen = false)}
+          >
+            ${it.images.map((u) => html`<img src=${u} alt="截图" />`)}
+          </div>`
+        : nothing}
     `;
   }
 }

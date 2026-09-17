@@ -18,11 +18,15 @@ import {
   genId,
   goalFromItems,
   historyToItems,
+  isScreenshotTool,
+  imagesOfOutput,
+  shotUrlsOfFile,
   applySavedDurs,
   markRequestAnswered,
   materializeRequest,
   newRuntime,
   todosFromItems,
+  textOfContent,
   type SessionRuntime,
 } from '../model/chat-model';
 import { emptyIndex, persistence, type ProjectsIndex, type ProjectRecord } from './persistence';
@@ -89,7 +93,12 @@ export class GrfScope extends Emitter {
   private streamDoneAt = new Map<string, number>(); // sid → 服务器已结束的时刻
   private watchdogHits = new Set<string>(); // 看门狗掐断的 sid(非用户取消)
   /** sid → 排队待发消息(回合运行中用户发送的,回合结束自动发出) */
-  private sendQueues = new Map<string, { text: string; images?: string[] }[]>();
+  private sendQueues = new Map<
+    string,
+    { text: string; images?: string[]; resumeCallOutputs?: { call_id: string; output: string }[] }[]
+  >();
+  /** 已做过"暂停卡死自动修复"的会话(每会话只修一次,防循环吞掉新暂停) */
+  private pauseRepaired = new Set<string>();
 
   private authCfg?: AuthConfig;
 
@@ -578,6 +587,66 @@ export class GrfScope extends Emitter {
     this.notify();
   }
 
+  /** 截图类工具的图片不随 SSE 下发(只在会话历史的工具消息 image_url part
+   * 里):回合结束后从服务端补取一次,按 call_id 回填到工具卡。已有图片的
+   * 卡不覆盖,避免重复传输大 base64;失败静默——截图展示是增强能力。 */
+  private async attachScreenshotImages(rt: SessionRuntime, sid: string): Promise<void> {
+    const missing = rt.items.some(
+      (i) => i.kind === 'tool' && isScreenshotTool(i.name) && !i.images && i.callId,
+    );
+    if (!missing) return;
+    try {
+      const hist = await this.client.conversationItems(sid);
+      // gh server 对截图工具的结果有两种记录形态:role=tool(文本),或
+      // "[tool result: <名>]" 的 user 消息(带 image_url part,截图走这条)。
+      // live 工具卡有 callId 但历史不带,对不上 —— 改按"名字 + 先来先配"
+      // 的顺序回填。
+      const byCall = new Map<string, string[]>();
+      const byName: { name: string; urls: string[] }[] = [];
+      for (const msg of hist) {
+        if (msg.role === 'tool' && msg.tool_call_id) {
+          const text = textOfContent(msg.content);
+          const urls = Array.isArray(msg.content)
+            ? msg.content
+                .filter((p) => p.type === 'image_url' && p.image_url?.url)
+                .map((p) => p.image_url!.url)
+            : [];
+          const fallback = [...imagesOfOutput(text), ...shotUrlsOfFile(text)];
+          if (urls.length || fallback.length) byCall.set(msg.tool_call_id, urls.length ? urls : fallback);
+          continue;
+        }
+        if (msg.role === 'user' && Array.isArray(msg.content)) {
+          const text = textOfContent(msg.content);
+          const tr = text.match(/^\[tool result: ([^\]]+)\]/);
+          if (!tr) continue;
+          const urls = msg.content
+            .filter((p) => p.type === 'image_url' && p.image_url?.url)
+            .map((p) => p.image_url!.url);
+          if (urls.length) byName.push({ name: tr[1], urls });
+        }
+      }
+      let changed = false;
+      // 按名顺序配对:每张同名截图卡都占一个队列位置(已有图片的跳过但
+      // 也占位),否则全量重建队列后,后来的截图会配到最早的图(全部错位
+      // 成同一张)。
+      const seqNo = new Map<string, number>();
+      rt.items = rt.items.map((i) => {
+        if (i.kind !== 'tool' || !isScreenshotTool(i.name)) return i;
+        const idx = seqNo.get(i.name) ?? 0;
+        seqNo.set(i.name, idx + 1);
+        if (i.images) return i;
+        const byId = byCall.get(i.callId);
+        const imgs = byId?.length ? byId : byName.filter((b) => b.name === i.name)[idx]?.urls;
+        if (!imgs?.length) return i;
+        changed = true;
+        return { ...i, images: imgs };
+      });
+      if (changed) this.notify();
+    } catch {
+      /* 补取失败忽略 */
+    }
+  }
+
   private async materializePaused(rt: SessionRuntime, sid: string): Promise<void> {
     if (!rt.lastResponseId) return;
     try {
@@ -750,7 +819,17 @@ export class GrfScope extends Emitter {
     }
   }
 
-  async send(text: string, images?: string[], opts?: { editOf?: string; sid?: string }): Promise<void> {
+  async send(
+    text: string,
+    images?: string[],
+    opts?: {
+      editOf?: string;
+      sid?: string;
+      /** 会话恢复:随本次输入一起下发的 function_call_output(解锁"暂停
+       * 等待交互"的卡死会话;由 paused 错误的自动修复路径填充) */
+      resumeCallOutputs?: { call_id: string; output: string }[];
+    },
+  ): Promise<void> {
     const sid = opts?.sid ?? this.activeSessionId;
     if (!sid) return;
     const rt = this.ensureRuntime(sid);
@@ -760,11 +839,14 @@ export class GrfScope extends Emitter {
       return;
     }
     const trimmed = text.trim();
-    if (!trimmed && !images?.length) return;
+    // 恢复请求:只含 function_call_output、不带用户消息(gh server 对暂停
+    // 会话只接受纯 resume 输入);先解锁,原消息随后经发送队列重发。
+    const resumeOnly = !trimmed && !images?.length && !!opts?.resumeCallOutputs?.length;
+    if (!trimmed && !images?.length && !resumeOnly) return;
 
     // 暂停中的提问被新输入顶掉:卡片标记失效,避免遗留 stale 的
     // input_result(服务端会拒:回合已不在暂停态)。
-    if (rt.pendingRequests.length > 0) {
+    if (rt.pendingRequests.length > 0 && !resumeOnly) {
       for (const req of rt.pendingRequests) markRequestAnswered(rt, req.call_id, { dismiss: true });
       this.log('info', '已放弃未应答的提问,按新输入继续');
     }
@@ -810,12 +892,15 @@ export class GrfScope extends Emitter {
     };
 
     // 发送时才把用户条目放进视图(排队中的消息显示在输入框上方,不进消息流)
-    rt.items.push({
-      kind: 'user',
-      id: genId('u'),
-      text: trimmed,
-      images: images?.length ? images : undefined,
-    });
+    const localUserId = genId('u');
+    if (!resumeOnly) {
+      rt.items.push({
+        kind: 'user',
+        id: localUserId,
+        text: trimmed,
+        images: images?.length ? images : undefined,
+      });
+    }
     rt.running = true;
     rt.error = undefined;
     this.notify();
@@ -873,14 +958,34 @@ export class GrfScope extends Emitter {
       if (sidFromEvent) migrate(sidFromEvent);
       const changed = applyEvent(rt, ev);
       if (changed) this.notify();
+      // 截图类工具完成即回填图片:SSE 不带 base64,但工具结果已即时写入
+      // 服务端内存历史(conversationItems 实时可读),不用等整回合结束。
+      const toolName = ev.item?.name ?? ev.kind;
+      if (ev.type === 'grf:tool_call.completed' && toolName && isScreenshotTool(toolName)) {
+        const target = realSid;
+        setTimeout(() => void this.attachScreenshotImages(rt, target), 150);
+      }
     };
 
     try {
-      const final = await this.requestWithRetry(rt, realSid, {
-        model: this.model,
-        reasoningEffort: this.reasoningEffort,
-        input: [parts],
-        previousResponseId: previous,
+    const resumeInputs: InputItem[] = (opts?.resumeCallOutputs ?? []).map((o) => ({
+      type: 'function_call_output',
+      call_id: o.call_id,
+      output: o.output,
+    }));
+    // 恢复请求的 previous 必须是服务端当前链尾(可能比本地记录新)。
+    let previousFinal = previous;
+    if (resumeOnly) {
+      const d = await this.client.getConversation(realSid).catch(() => null);
+      if (d?.last_response_id) previousFinal = d.last_response_id;
+    }
+
+    const final = await this.requestWithRetry(rt, realSid, {
+      model: this.model,
+      reasoningEffort: this.reasoningEffort,
+      // 恢复请求只含 function_call_output(暂停会话拒绝混入用户消息)。
+      input: resumeOnly ? resumeInputs : [parts],
+        previousResponseId: previousFinal,
         grfSession: isDraft ? grfSession : undefined,
         grfHistory,
         signal: ac.signal,
@@ -900,6 +1005,35 @@ export class GrfScope extends Emitter {
       // 用户仍停在该会话:完成即视为已查看;已切走则保留未读标记。
       if (this.activeSessionId === realSid) this.markSessionSeen(realSid);
     } catch (err) {
+      // 会话卡死自愈:服务端判定"暂停等待交互"(getConversation paused=true)
+      // 但本 UI 没有任何可应答卡片 —— 典型是 App 重启丢掉了进行中客户端
+      // 工具调用的结果。两阶段修复:先发一条只含 function_call_output 的
+      // 恢复请求(服务端据此续跑暂停的回合),再经发送队列重发原消息。
+      // 每会话只自动修一次,避免把真实的新暂停(提问/审批)吞掉。
+      if (
+        err instanceof GrfApiError &&
+        /paused awaiting interaction/i.test(err.message) &&
+        !opts?.resumeCallOutputs &&
+        !this.pauseRepaired.has(realSid)
+      ) {
+        const detail = await this.client.getConversation(realSid).catch(() => null);
+        if (detail?.paused) {
+          const ids = await this.danglingToolCallIds(realSid);
+          if (ids.length) {
+            this.pauseRepaired.add(realSid);
+            this.log('warn', `会话暂停且有 ${ids.length} 个未闭合工具调用,自动补结果解锁`);
+            rt.items = rt.items.filter((i) => i.id !== localUserId);
+            this.enqueueSend(realSid, '', undefined, [
+              ...ids.map((call_id) => ({
+                call_id,
+                output: '[error] 会话恢复:该工具调用未能在上次会话中完成,已跳过。',
+              })),
+            ]);
+            this.enqueueSend(realSid, text, images);
+            return;
+          }
+        }
+      }
       const watchdog = this.watchdogHits.has(realSid) || this.watchdogHits.has(sid);
       this.watchdogHits.delete(sid);
       this.watchdogHits.delete(realSid);
@@ -912,7 +1046,7 @@ export class GrfScope extends Emitter {
         // 中途断流:请求可能已被服务端受理,按会话终态对账自愈,不盲报错。
         const recovered = await this.recoverAfterStreamBreak(realSid, rt);
         if (!recovered) {
-          rt.items.push({ kind: 'error', id: genId('e'), text: `发送失败:${errText(err)}` });
+          rt.items.push({ kind: 'error', id: genId('e'), text: `发送失败:${friendlyError(errText(err))}` });
         }
       }
       // 历史前缀被服务端拒绝(多窗口并发改写等):视图已本地截断,
@@ -932,6 +1066,7 @@ export class GrfScope extends Emitter {
       setTimeout(() => {
         void this.syncRunningState(realSid);
         this.flushSendQueue(realSid);
+        void this.attachScreenshotImages(rt, realSid);
       }, 300);
       this.notify();
     }
@@ -940,11 +1075,16 @@ export class GrfScope extends Emitter {
   // ---------- 发送队列(回合运行中的输入排队,结束后自动发出) ----------
 
   /** 入队:消息显示在输入框上方的排队区(composer 渲染),回合结束后按 FIFO 发出。 */
-  private enqueueSend(sid: string, text: string, images?: string[]): void {
+  private enqueueSend(
+    sid: string,
+    text: string,
+    images?: string[],
+    resumeCallOutputs?: { call_id: string; output: string }[],
+  ): void {
     const trimmed = text.trim();
-    if (!trimmed && !images?.length) return;
+    if (!trimmed && !images?.length && !resumeCallOutputs?.length) return;
     const q = this.sendQueues.get(sid) ?? [];
-    q.push({ text: trimmed, images });
+    q.push({ text: trimmed, images, resumeCallOutputs });
     this.sendQueues.set(sid, q);
     this.log('info', `会话运行中,消息已排队(第 ${q.length} 条),回合结束后自动发送`);
     this.notify();
@@ -972,10 +1112,10 @@ export class GrfScope extends Emitter {
     if (sid.startsWith('draft:')) return; // 草稿不会是运行态,防御
     const rt = this.runtimes.get(sid);
     if (!rt || this.inflightSends.has(sid) || rt.running) return;
-    const { text, images } = q.shift()!;
+    const { text, images, resumeCallOutputs } = q.shift()!;
     if (!q.length) this.sendQueues.delete(sid);
     // 发出时才进消息流视图;sid 指定目标会话,切走后仍按原会话发出
-    void this.send(text, images, { sid });
+    void this.send(text, images, { sid, resumeCallOutputs });
   }
 
   // recoverAfterStreamBreak 断流自愈:查会话终态,若服务器已推进到更新的
@@ -990,17 +1130,49 @@ export class GrfScope extends Emitter {
         return true;
       }
       if (last && last === rt.lastResponseId) {
+        // 服务器没有产生新 response(请求被拒,如会话暂停等待交互):不能
+        // 整帧重放旧快照 —— 会把历史里已有的输出再复制成新条目。只在确有
+        // 暂停的交互请求时恢复 ask/审批卡片,并返回 false 让真实错误展示。
         const snap = await this.client.retrieveResponse(last);
-        if (snap) {
-          applyResponseSnapshot(rt, snap);
-          this.notify();
-          return true;
+        if (snap?.status === 'incomplete' && snap.incomplete_details?.reason === 'grf:input_required') {
+          rt.pendingRequests = snap.incomplete_details.grf_requests ?? [];
+          let changed = false;
+          for (const req of rt.pendingRequests) changed = materializeRequest(rt, req) || changed;
+          if (changed) this.notify();
         }
+        return false;
       }
     } catch {
       /* 恢复失败走原错误展示 */
     }
     return false;
+  }
+
+  // danglingToolCallIds 镜像 gh server 的暂停判定(agent/history.go
+  // pausedCalls):只看最后一条带 tool_calls 的 assistant 消息,且只认
+  // role=tool 的结果闭合(截图类 "[tool result]" 伪 user 消息不闭合)。
+  // 返回未闭合调用的 id,供 function_call_output 补结果解锁。
+  private async danglingToolCallIds(sid: string): Promise<string[]> {
+    try {
+      const hist = await this.client.conversationItems(sid);
+      let calls: { id: string }[] = [];
+      for (let i = hist.length - 1; i >= 0; i--) {
+        const m = hist[i];
+        if (m.role === 'assistant' && m.tool_calls?.length) {
+          calls = m.tool_calls.map((tc) => ({ id: tc.id }));
+          for (let j = i + 1; j < hist.length; j++) {
+            const r = hist[j];
+            if (r.role === 'tool' && r.tool_call_id) {
+              calls = calls.filter((c) => c.id !== r.tool_call_id);
+            }
+          }
+          break;
+        }
+      }
+      return calls.map((c) => c.id);
+    } catch {
+      return [];
+    }
   }
 
   async answerAsk(callId: string, answers: Record<string, unknown>): Promise<void> {
@@ -1076,6 +1248,7 @@ export class GrfScope extends Emitter {
       setTimeout(() => {
         void this.syncRunningState(sid);
         this.flushSendQueue(sid);
+        void this.attachScreenshotImages(rt, sid);
       }, 300);
       this.notify();
     }
@@ -1085,7 +1258,20 @@ export class GrfScope extends Emitter {
     const sid = this.activeSessionId;
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
-    const respId = rt.lastResponseId;
+    // 回合进行中 lastResponseId 还停留在上一回合(当前回合的 id 要等回合
+    // 结束才写入),直接用它取消的是已结束的旧 response——表现为点停止
+    // 没反应。运行中优先用当前流的 response id(curRespId,SSE 事件随到
+    // 随记);流刚建立还没有 id 时,先掐断本地流让 UI 收口,等下一次
+    // tick 探测到服务器终态再对账。
+    let respId = rt.lastResponseId;
+    if (this.inflightSends.has(sid)) {
+      respId = rt.curRespId ?? rt.lastResponseId;
+      if (!respId) {
+        this.log('info', '回合尚未建立,已中断本地事件流');
+        this.activeAborts.get(sid)?.abort();
+        return;
+      }
+    }
     if (!respId) return;
     try {
       await this.client.cancelResponse(respId);

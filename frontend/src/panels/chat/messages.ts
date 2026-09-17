@@ -32,8 +32,9 @@ export interface MessageViewProps {
   onApprove(e: Event): void;
 }
 
-/** 渲染单条消息(ask 待答态返回 nothing:交互控件在底部输入框内)。 */
-export function renderItem(it: ChatItem, p: MessageViewProps): TemplateResult | typeof nothing {
+/** 渲染单条消息(ask 待答态返回 nothing:交互控件在底部输入框内)。
+ * items 为整条消息列表:点击类工具要向前找最近的截图,供「查看」定位圈点。 */
+export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]): TemplateResult | typeof nothing {
   switch (it.kind) {
     case 'user': {
       // 编辑态:气泡原位变输入框,改完作为新消息重新发送
@@ -86,11 +87,25 @@ export function renderItem(it: ChatItem, p: MessageViewProps): TemplateResult | 
       `;
     case 'reasoning':
       return renderReasoning(it, p);
-    case 'tool':
+    case 'tool': {
       // ask_user_question 单独成提问卡片,工具行无信息量,不展示
-      return it.name === 'ask_user_question'
-        ? nothing
-        : html`<grf-tool-card .item=${it}></grf-tool-card>`;
+      if (it.name === 'ask_user_question') return nothing;
+      // 点击类工具:向前找最近一张截图(限定窗口,避免长会话全量扫),
+      // 供工具卡「查看」链接打开时在图上圈出点击位置;截图结果文本里的
+      // 坐标 meta(覆盖起点/scale)用于把全局坐标换算回图上像素。
+      let ctxShot: string | undefined;
+      let ctxMeta: string | undefined;
+      const idx = items ? items.indexOf(it) : -1;
+      for (let j = idx - 1; j >= 0 && j >= idx - 40; j--) {
+        const prev = items![j];
+        if (prev.kind === 'tool' && prev.images?.length) {
+          ctxShot = prev.images[prev.images.length - 1];
+          ctxMeta = prev.output;
+          break;
+        }
+      }
+      return html`<grf-tool-card .item=${it} .ctxShot=${ctxShot} .ctxMeta=${ctxMeta}></grf-tool-card>`;
+    }
     case 'notice':
       return html`
         <div class="notice ${it.noticeKind}">

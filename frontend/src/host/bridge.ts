@@ -486,6 +486,89 @@ export function onTermEvent(id: string, kind: 'data' | 'exit', cb: (payload: str
   };
 }
 
+// ---------- 浏览器(BrowserManager service,仅桌面) ----------
+// 内嵌浏览器面板的原生 webview(同 g-term 的实现:原生视图直接嵌在
+// 主窗口内,前端只负责导航与上报面板 rect)。不支持的平台创建失败,
+// 前端回退 iframe。
+
+/** 导航(必要时创建原生视图);空 url 仅确保视图存在。 */
+export async function browserNavigate(url: string): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.BrowserManager.Navigate`, url);
+  } catch {
+    /* 静默:面板回退 iframe */
+  }
+}
+
+/** 展示/隐藏原生内容(随面板激活状态)。 */
+export async function browserShow(): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.BrowserManager.Show`);
+  } catch {
+    /* 静默 */
+  }
+}
+
+export async function browserHide(): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.BrowserManager.Hide`);
+  } catch {
+    /* 静默 */
+  }
+}
+
+/** 上报浏览器面板 rect(视口相对 CSS 像素,getBoundingClientRect)。 */
+export async function browserSetRect(x: number, y: number, w: number, h: number): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.BrowserManager.SetRect`, x, y, w, h);
+  } catch {
+    /* 静默 */
+  }
+}
+
+/** 上报原生 webview 底色(CSS 颜色串,如 #13151b / rgb(...)):边缘发丝缝
+ * 露出这个颜色而不是 WebKit 默认白。 */
+export async function browserSetBackground(color: string): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.BrowserManager.SetBackground`, color);
+  } catch {
+    /* 静默 */
+  }
+}
+
+/** 后退/前进/刷新原生 webview 自身的导航历史。 */
+export async function browserBack(): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.BrowserManager.Back`);
+  } catch {
+    /* 静默 */
+  }
+}
+
+export async function browserForward(): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.BrowserManager.Forward`);
+  } catch {
+    /* 静默 */
+  }
+}
+
+export async function browserReload(): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.BrowserManager.Reload`);
+  } catch {
+    /* 静默 */
+  }
+}
+
 // ---------- git(Desktop service,审查面板用;仅桌面) ----------
 
 export interface GitEntryDTO {
