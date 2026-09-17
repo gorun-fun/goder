@@ -18,14 +18,16 @@
 #             而本程序再发版时追加 .postN(推算在 scripts/version.sh,与本地
 #             build.sh 同源;build 阶段写入 bin/VERSION 供 publish 读取)。
 #
-# 编译镜像固定:
-#   node:24-alpine3.24  前端(vite)
-#   golang:1.26-trixie  后端(Debian trixie/glibc)
-#   darwin 产物为 zig cc + macOS SDK 交叉(wails darwin 端是 Objective-C CGO,
-#   Linux 上没有 clang/macOS 工具链只能走 zig),ldid 补 adhoc 签名 —— 等价
-#   本地 build.sh 里 codesign -f -s - 的作用(不签名的 arm64 macho 在
-#   Apple Silicon 上会被内核直接 SIGKILL)。zig/SDK/ldid 缓存在 .ci-cache/,
-#   首次约 500MB 下载,之后跨构建复用;GitHub 直连慢时可自行换镜像源。
+# 编译镜像:
+#   node:24-alpine3.24       前端(vite)
+#   goder-builder:1.26       后端(基于 golang:1.26-trixie 的专用镜像,
+#     Dockerfile 在 ci/Dockerfile,runner 宿主机构建、同机 if-not-present 拉取):
+#     内含 GTK/WebKitGTK dev、linux arm64 交叉 gcc + 预解包 sysroot(/opt/xs)、
+#     darwin 交叉工具链 zig+macOS SDK+ldid 与 zcc 包装器(/opt/mc)。
+#     darwin 产物为 zig cc 交叉(wails darwin 端是 Objective-C CGO,Linux 上
+#     没有 clang/macOS 工具链只能走 zig),ldid 补 adhoc 签名 —— 等价本地
+#     build.sh 里 codesign -f -s - 的作用(不签名的 arm64 macho 在 Apple
+#     Silicon 上会被内核直接 SIGKILL)。改依赖后重构建镜像并 bump tag。
 #
 # 与本地 build.sh 的差异:CI 的 Linux runner 上没有 qlmanage/sips/iconutil,
 # 图标不能用 frontend/public/icon.svg 现场生成,用仓库内预生成的
@@ -79,34 +81,31 @@ build-frontend:
   rules:
     - if: '$CI_COMMIT_TAG'
 
-# --------- trixie go:下载 gh 最新版 + 交叉编译 wails3 darwin 双架构 ----------
+# --------- goder-builder 镜像:下载 gh 最新版 + 三平台双架构交叉编译 ----------
 build:
   stage: build
+  # 专用编译镜像(构建方法见 ci/Dockerfile 头注释,在 runner 宿主机构建;
+  # 与 runner 同机 + if-not-present 拉取,无需 registry):内含 GTK/WebKitGTK
+  # dev、linux arm64 交叉 gcc + 预解包 sysroot(/opt/xs/arm64)、darwin 交叉
+  # 工具链 zig+macOS SDK+ldid 与 zcc 包装器(/opt/mc)。改动依赖后重构建
+  # 镜像并 bump 此处 tag。
+  image: goder-builder:1.26
   tags:
     - home
   cache:
     # 固定 key:缓存跨版本 tag 累积复用;Go 版本升级后需换 key 迫使重建,
-    # 防旧缓存与新工具链混用。.ci-cache/ 持有 zig + macOS SDK + ldid
+    # 防旧缓存与新工具链混用
     key: goder-go-build-1.26
     paths:
       - .gocache/
       - .gomodcache/
-      - .ci-cache/
   before_script:
-    # aliyun 源加速;CGO 编译 wails linux 端需要 gcc 与 GTK4/WebKitGTK 6.0 头文件
-    # (go vet ./... 按 host 平台检查);curl/xz-utils 供 darwin 工具链下载解压,
-    # zip 供产物打包。交叉 gcc 供 linux foreign-arch 构建(其 sysroot 见 script)。
+    # 交叉方向按 host 架构推导;arm64 host 无预烤 sysroot 时 script 内现建
     - |
-      sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
-      CROSS_DEB=$(case "$(uname -m)" in aarch64) echo amd64;; *) echo arm64;; esac)
-      case "$CROSS_DEB" in
-        arm64) CROSS_TRIPLE=aarch64-linux-gnu; CROSS_GCC="gcc-aarch64-linux-gnu libc6-dev-arm64-cross" ;;
-        amd64) CROSS_TRIPLE=x86-64-linux-gnu;  CROSS_GCC="gcc-x86-64-linux-gnu libc6-dev-amd64-cross" ;;
+      case "$(uname -m)" in
+        aarch64) CROSS_DEB=amd64; CROSS_TRIPLE=x86_64-linux-gnu ;;
+        *)       CROSS_DEB=arm64; CROSS_TRIPLE=aarch64-linux-gnu ;;
       esac
-      dpkg --add-architecture $CROSS_DEB
-      apt-get update -qq
-      apt-get install -y -qq --no-install-recommends build-essential pkg-config \
-        libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip $CROSS_GCC >/dev/null
   script:
     - go vet ./...
     # 版本号跟随 grf-harness 最新发布 tag(gh 不变而本程序再发版追加 .postN)
@@ -132,19 +131,21 @@ build:
       curl -fsSL -o bin/gh-windows-amd64.exe ${GH_DL_BASE}/windows/${GH_VERSION}/gh.exe
       curl -fsSL -o bin/gh-windows-arm64.exe ${GH_DL_BASE}/windows-arm64/${GH_VERSION}/gh.exe
       chmod +x bin/gh-*
-    # ---- linux 双架构:原生 CGO + 交叉(独立 sysroot) ----
+    # ---- linux 双架构:原生 CGO + 交叉(sysroot) ----
     # | 交叉侧:foreign-arch 的 GTK/WebKitGTK dev 包与原生 -dev 自冲突,不能
-    # | apt 安装;用独立 apt 状态目录(APT::Architecture=交叉 arch)解析出整套
-    # | 依赖闭包 URL,下载 .deb 解包到 /xs 作为 sysroot。pkg-config 以
-    # | SYSROOT_DIR 前缀出 -I/-L;ld 对 .so 的间接依赖(DT_NEEDED)不搜 -L
-    # | 目录,需 CGO_LDFLAGS 补 -rpath-link 指向 sysroot 与交叉工具链库目录;
-    # | 运行库仍用目标机系统库。(方案已在 Ubuntu 测试机 Docker 中验证)
+    # | apt 安装。镜像已预解包 arm64 闭包 sysroot(/opt/xs/arm64,amd64 host);
+    # | 其余情况(arm64 host)现场解析闭包下载解包到 .ci-cache。
+    # | pkg-config 以 SYSROOT_DIR 前缀出 -I/-L;ld 对 .so 的间接依赖
+    # | (DT_NEEDED)不搜 -L 目录,需 CGO_LDFLAGS 补 -rpath-link 指向 sysroot
+    # | 与交叉工具链库目录;运行库仍用目标机系统库。
     - |
       CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${NATIVE_ARCH} .
-      XS="$CI_PROJECT_DIR/.ci-cache/xs2/${CROSS_DEB}"
+      XS="/opt/xs/${CROSS_DEB}"
       if [ ! -d "$XS/usr/lib/${CROSS_TRIPLE}/pkgconfig" ]; then
+        XS="$CI_PROJECT_DIR/.ci-cache/xs2/${CROSS_DEB}"
         rm -rf "$XS" /xsapt && mkdir -p "$XS" /xsapt/lists/partial /xsapt/cache/archives/partial /xsapt/dpkg
         : > /xsapt/dpkg/status
+        sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources || true
         XOPTS="-o Dir::State=/xsapt -o Dir::Cache=/xsapt/cache -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/debian.sources -o Dir::Etc::sourceparts=/dev/null -o Dir::State::status=/xsapt/dpkg/status -o APT::Architecture=${CROSS_DEB} -o APT::Architectures=${CROSS_DEB}"
         apt-get $XOPTS update -qq
         mkdir -p /xsapt/debs && cd /xsapt/debs
@@ -189,40 +190,14 @@ build:
         (cd .winstage && zip -qry ../bin/goder-windows-${ARCH}.zip goder.exe gh.exe)
       done
       rm -rf .winstage
-    # ---- darwin 交叉(zig cc + macOS SDK),工具链只下载一次存 .ci-cache/ ----
-    - |
-      mkdir -p .ci-cache/bin
-      case "$(uname -m)" in aarch64) ZA=aarch64 ;; *) ZA=x86_64 ;; esac
-      if [ ! -x .ci-cache/zig/zig ]; then
-        curl -fSL "https://ziglang.org/download/0.14.0/zig-linux-${ZA}-0.14.0.tar.xz" -o /tmp/zig.tar.xz
-        mkdir -p /tmp/zt && tar -xJ -f /tmp/zig.tar.xz -C /tmp/zt
-        mv /tmp/zt/zig-linux-${ZA}-0.14.0 .ci-cache/zig && rm -rf /tmp/zt /tmp/zig.tar.xz
-      fi
-      if [ ! -d .ci-cache/sdk ]; then
-        mkdir -p /tmp/st
-        curl -fSL "https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz" | tar -xJ -C /tmp/st
-        mv /tmp/st/MacOSX14.5.sdk .ci-cache/sdk && rm -rf /tmp/st
-      fi
-      if [ ! -x .ci-cache/bin/ldid ]; then
-        case "$(uname -m)" in aarch64) LA=arm64 ;; *) LA=x86_64 ;; esac
-        curl -fSL "https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_${LA}" -o .ci-cache/bin/ldid \
-          && chmod +x .ci-cache/bin/ldid || echo "WARN ldid 下载失败,产物可能未签名"
-      fi
-      # zig cc 包装器:剥掉 go/cgo 注入的 -target/-mmacosx-version-min,
-      # 指向 SDK sysroot(arm64 与 amd64 仅 -target 不同)
-      for ARCH in arm64 amd64; do
-        case "$ARCH" in arm64) ZT=aarch64 ;; *) ZT=x86_64 ;; esac
-        printf '#!/bin/sh\nARGS=""\nSKIP_NEXT=0\nfor arg in "$@"; do\n    if [ $SKIP_NEXT -eq 1 ]; then SKIP_NEXT=0; continue; fi\n    case "$arg" in\n        -target) SKIP_NEXT=1 ;;\n        -mmacosx-version-min=*) ;;\n        *) ARGS="$ARGS $arg" ;;\n    esac\ndone\nexec "%s" cc -fno-sanitize=all -target "%s-macos-none" -isysroot "%s" -I"%s/usr/include" -L"%s/usr/lib" -F"%s/System/Library/Frameworks" -w $ARGS\n' \
-          "$PWD/.ci-cache/zig/zig" "$ZT" "$PWD/.ci-cache/sdk" "$PWD/.ci-cache/sdk" "$PWD/.ci-cache/sdk" "$PWD/.ci-cache/sdk" > .ci-cache/bin/zcc-darwin-${ARCH}
-        chmod +x .ci-cache/bin/zcc-darwin-${ARCH}
-      done
-    - CC="$PWD/.ci-cache/bin/zcc-darwin-arm64" GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-darwin-arm64 .
-    - CC="$PWD/.ci-cache/bin/zcc-darwin-amd64" GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-darwin-amd64 .
+    # ---- darwin 交叉:zig cc + macOS SDK + ldid 均已预置镜像 /opt/mc ----
+    - CC=/opt/mc/bin/zcc-darwin-arm64 GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-darwin-arm64 .
+    - CC=/opt/mc/bin/zcc-darwin-amd64 GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-darwin-amd64 .
     # adhoc 重签(链接器签名在文件复制后可能失效;gh 下载件同样补签一次)
-    - '.ci-cache/bin/ldid -S bin/goder-darwin-arm64 2>/dev/null || echo "WARN arm64 adhoc 签名未执行"'
-    - '.ci-cache/bin/ldid -S bin/goder-darwin-amd64 2>/dev/null || echo "WARN amd64 adhoc 签名未执行"'
-    - '.ci-cache/bin/ldid -S bin/gh-darwin-arm64 2>/dev/null || true'
-    - '.ci-cache/bin/ldid -S bin/gh-darwin-amd64 2>/dev/null || true'
+    - '/opt/mc/bin/ldid -S bin/goder-darwin-arm64 2>/dev/null || echo "WARN arm64 adhoc 签名未执行"'
+    - '/opt/mc/bin/ldid -S bin/goder-darwin-amd64 2>/dev/null || echo "WARN amd64 adhoc 签名未执行"'
+    - '/opt/mc/bin/ldid -S bin/gh-darwin-arm64 2>/dev/null || true'
+    - '/opt/mc/bin/ldid -S bin/gh-darwin-amd64 2>/dev/null || true'
     # ---- 组装 .app 并 zip:plist 版本号用 version.sh 推算值;gh 捆绑进 MacOS/ ----
     - |
       chmod +x bin/*
