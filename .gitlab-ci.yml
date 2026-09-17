@@ -95,19 +95,18 @@ build:
   before_script:
     # aliyun 源加速;CGO 编译 wails linux 端需要 gcc 与 GTK4/WebKitGTK 6.0 头文件
     # (go vet ./... 按 host 平台检查);curl/xz-utils 供 darwin 工具链下载解压,
-    # zip 供产物打包。Linux 交叉架构(runnner 非原生那一侧)走 Debian multiarch:
-    # 加foreign-arch 的 GTK/WebKitGTK dev 头文件 + 交叉 gcc。
+    # zip 供产物打包。交叉 gcc 供 linux foreign-arch 构建(其 sysroot 见 script)。
     - |
       sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
-      CROSS=$(case "$(uname -m)" in aarch64) echo amd64;; *) echo arm64;; esac)
-      dpkg --add-architecture $CROSS
-      apt-get update -qq
-      case "$CROSS" in
-        arm64) CROSS_GCC="gcc-aarch64-linux-gnu"; CROSS_LIBS="libgtk-4-dev:arm64 libwebkitgtk-6.0-dev:arm64" ;;
-        amd64) CROSS_GCC="gcc-x86-64-linux-gnu";  CROSS_LIBS="libgtk-4-dev:amd64 libwebkitgtk-6.0-dev:amd64" ;;
+      CROSS_DEB=$(case "$(uname -m)" in aarch64) echo amd64;; *) echo arm64;; esac)
+      case "$CROSS_DEB" in
+        arm64) CROSS_TRIPLE=aarch64-linux-gnu; CROSS_GCC=gcc-aarch64-linux-gnu ;;
+        amd64) CROSS_TRIPLE=x86-64-linux-gnu;  CROSS_GCC=gcc-x86-64-linux-gnu ;;
       esac
+      dpkg --add-architecture $CROSS_DEB
+      apt-get update -qq
       apt-get install -y -qq --no-install-recommends build-essential pkg-config \
-        libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip "$CROSS_GCC" $CROSS_LIBS >/dev/null
+        libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip "$CROSS_GCC" >/dev/null
   script:
     - go vet ./...
     # 版本号跟随 grf-harness 最新发布 tag(gh 不变而本程序再发版追加 .postN)
@@ -125,21 +124,36 @@ build:
       curl -fsSL -o bin/gh-darwin-amd64  ${GH_DL_BASE}/macos/${GH_VERSION}/gh
       # linux 目录名:amd64 → linux,arm64 → linux-arm64(与 gh 下载侧一致)
       case "$(uname -m)" in
-        aarch64) NATIVE_ARCH=arm64; NATIVE_DIR=linux-arm64; CROSS_ARCH=amd64; CROSS_DIR=linux; CROSS_TRIPLE=x86_64-linux-gnu ;;
-        *)       NATIVE_ARCH=amd64; NATIVE_DIR=linux;       CROSS_ARCH=arm64; CROSS_DIR=linux-arm64; CROSS_TRIPLE=aarch64-linux-gnu ;;
+        aarch64) NATIVE_ARCH=arm64; NATIVE_DIR=linux-arm64; CROSS_ARCH=amd64; CROSS_DIR=linux ;;
+        *)       NATIVE_ARCH=amd64; NATIVE_DIR=linux;       CROSS_ARCH=arm64; CROSS_DIR=linux-arm64 ;;
       esac
       curl -fsSL -o bin/gh-linux-${NATIVE_ARCH} ${GH_DL_BASE}/${NATIVE_DIR}/${GH_VERSION}/gh
       curl -fsSL -o bin/gh-linux-${CROSS_ARCH}  ${GH_DL_BASE}/${CROSS_DIR}/${GH_VERSION}/gh
       curl -fsSL -o bin/gh-windows-amd64.exe ${GH_DL_BASE}/windows/${GH_VERSION}/gh.exe
       curl -fsSL -o bin/gh-windows-arm64.exe ${GH_DL_BASE}/windows-arm64/${GH_VERSION}/gh.exe
       chmod +x bin/gh-*
-    # ---- linux 双架构:原生 CGO + Debian multiarch 交叉 ----
-    # | 交叉侧:CC 指向交叉 gcc,pkg-config 只看 foreign-arch 的 pkgconfig 目录,
-    # | 避免 host 侧同名 .pc 文件带错 cflags/libs。
+    # ---- linux 双架构:原生 CGO + 交叉(独立 sysroot) ----
+    # | 交叉侧:foreign-arch 的 GTK/WebKitGTK dev 包与原生 -dev 自冲突,不能
+    # | apt 安装;用独立 apt 状态目录(APT::Architecture=交叉 arch)解析出整套
+    # | 依赖闭包 URL,下载 .deb 解包到 /xs 作为 sysroot。pkg-config 以
+    # | SYSROOT_DIR 前缀出 -I/-L,链接交叉 gcc,运行库仍用目标机系统库。
     - |
       CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${NATIVE_ARCH} .
+      XS="$CI_PROJECT_DIR/.ci-cache/xs/${CROSS_DEB}"
+      if [ ! -d "$XS/usr/lib/${CROSS_TRIPLE}/pkgconfig" ]; then
+        rm -rf "$XS" /xsapt && mkdir -p "$XS" /xsapt/lists/partial /xsapt/cache/archives/partial /xsapt/dpkg
+        : > /xsapt/dpkg/status
+        XOPTS="-o Dir::State=/xsapt -o Dir::Cache=/xsapt/cache -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/debian.sources -o Dir::Etc::sourceparts=/dev/null -o Dir::State::status=/xsapt/dpkg/status -o APT::Architecture=${CROSS_DEB} -o APT::Architectures=${CROSS_DEB}"
+        apt-get $XOPTS update -qq
+        mkdir -p /xsapt/debs && cd /xsapt/debs
+        apt-get $XOPTS --print-uris -y --no-install-recommends install libgtk-4-dev libwebkitgtk-6.0-dev \
+          | grep -oE "'https?://[^']+'" | tr -d "'" | xargs -r -n1 curl -fsSLO
+        for d in *.deb; do dpkg -x "$d" "$XS"; done
+        cd "$CI_PROJECT_DIR"
+      fi
       CC=${CROSS_TRIPLE}-gcc \
-      PKG_CONFIG_PATH=/usr/lib/${CROSS_TRIPLE}/pkgconfig:/usr/share/pkgconfig \
+      PKG_CONFIG_LIBDIR=$XS/usr/lib/${CROSS_TRIPLE}/pkgconfig:$XS/usr/share/pkgconfig \
+      PKG_CONFIG_SYSROOT_DIR=$XS \
       CGO_ENABLED=1 GOOS=linux GOARCH=${CROSS_ARCH} \
         go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${CROSS_ARCH} .
       for ARCH in ${NATIVE_ARCH} ${CROSS_ARCH}; do
