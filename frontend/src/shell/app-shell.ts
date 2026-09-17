@@ -207,8 +207,8 @@ export class GrfAppShell extends GrfPanel {
     });
     // 会话导航的下钻:项目文件树(session-list「查看文件」进入 / 返回退出)
     this.addEventListener('grf-open-files', (e: Event) => {
+      this.navTo('sessions'); // navTo 会清空 filesView(下钻随导航切换退出),须先切再设
       this.filesView = (e as CustomEvent).detail;
-      this.navTo('sessions');
     });
     this.addEventListener('grf-close-files', () => (this.filesView = null));
     // 右栏确保展开(file-view html 眼睛开浏览器 tab 时;已开则无变化)

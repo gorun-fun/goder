@@ -24,13 +24,15 @@ import {
   browserReload,
 } from '../../host/bridge';
 
-/** 看起来像域名的输入自动补 https://;本地绝对路径转同源文件服务 */
-function normalizeUrl(v: string): string {
+/** 看起来像域名的输入自动补 https://;本地绝对路径桌面态直接 file://
+ * (原生 webview 已升级为独立 WKWebView 子视图,不受主 webview 源隔离
+ * 限制),非桌面形态仍走同源文件服务 */
+function normalizeUrl(v: string, native: boolean): string {
   const t = v.trim();
   if (!t) return '';
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^(about|data):/i.test(t)) return t;
-  // 本地绝对路径:走桌面态同源文件服务(file:// 会被 webview 源隔离拦截)
-  if (t.startsWith('/')) return localFileUrl(t);
+  // 本地绝对路径:原生 webview 直接 file://;iframe 回退走同源文件服务
+  if (t.startsWith('/')) return native ? `file://${t}` : localFileUrl(t);
   if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/|$|\?|#)/i.test(t)) return `https://${t}`;
   return t;
 }
@@ -50,8 +52,9 @@ function absolutize(u: string): string {
   }
 }
 
-/** 地址栏显示值:本地文件服务地址还原为可读的文件路径 */
+/** 地址栏显示值:file:// 与本地文件服务地址均还原为可读的文件路径 */
 function displayUrl(u: string): string {
+  if (u.startsWith('file://')) return u.slice('file://'.length);
   if (u.startsWith('/grf-api/local-file?path=') || u.includes('/grf-api/local-file?path=')) {
     try {
       const q = u.slice(u.indexOf('?path=') + '?path='.length);
@@ -260,14 +263,14 @@ export class GrfBrowser extends GrfPanel {
   }
 
   private go(): void {
-    const u = normalizeUrl(this.input);
+    const u = normalizeUrl(this.input, this.native);
     if (!u) return;
     this.load(u);
   }
 
   /** open 外部导航入口(file-view 的 html 渲染眼睛):直接加载指定地址 */
   open(u: string): void {
-    const n = normalizeUrl(u);
+    const n = normalizeUrl(u, this.native);
     if (!n) return;
     this.load(n);
   }

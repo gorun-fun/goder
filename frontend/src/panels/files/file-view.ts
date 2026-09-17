@@ -79,14 +79,12 @@ export class GrfFileView extends GrfPanel {
     return this.rel || this.name || this.path.split('/').pop() || this.path;
   }
 
-  // openHtmlPreview html 文件的「眼睛」:桌面态走本地文件服务
-  // /grf-api/local-file(按真实路径渲染,相对资源/刷新均可;data URL 丢路径
-  // 上下文),非桌面形态回退 data URL。
+  // openHtmlPreview html 文件的「眼睛」:桌面态直接下发真实路径(原生
+  // webview 按 file:// 加载,相对资源/刷新均按真实路径解析),非桌面形态
+  // 回退 data URL。
   private openHtmlPreview(): void {
     if (!this.text) return;
-    const url = inWails()
-      ? `/grf-api/local-file?path=${encodeURIComponent(this.path)}`
-      : `data:text/html;charset=utf-8,${encodeURIComponent(this.text)}`;
+    const url = inWails() ? this.path : `data:text/html;charset=utf-8,${encodeURIComponent(this.text)}`;
     this.dispatchEvent(new CustomEvent('grf-open-browser-url', { detail: { url }, bubbles: true, composed: true }));
   }
 

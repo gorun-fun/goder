@@ -35,6 +35,13 @@ export class GrfSettingsPage extends GrfPanel {
   private tdrag: TitleDrag | null = null;
   /** 模型分区:当前选中的供应商名(右侧展示其详情) */
   private selProv: string | null = null;
+
+  /** 当前生效的选中供应商:未选中或已失效时回退到第一个(默认展开)。 */
+  private get activeProvName(): string | null {
+    const list = settingsStore.modelCfg?.providers ?? [];
+    if (list.length && !list.some((x) => x.name === this.selProv)) return list[0].name;
+    return this.selProv;
+  }
   /** 自动检测进行中 / 结果提示 */
   @state() private detecting = false;
   private detectMsg = '';
@@ -269,6 +276,10 @@ export class GrfSettingsPage extends GrfPanel {
         padding: 5px;
         display: grid;
         gap: 2px;
+        align-content: start;
+        /* 供应商过多时限高滚动,"添加供应商"按钮随列表滚动 */
+        max-height: 420px;
+        overflow-y: auto;
       }
       .prov-item {
         display: flex;
@@ -395,10 +406,13 @@ export class GrfSettingsPage extends GrfPanel {
         border-radius: 999px;
         padding: 1px 7px;
       }
-      /* 模型行:可编辑输入框 + 设默认 + 删除 */
+      /* 模型行:可编辑输入框 + 设默认 + 删除;过多时限高滚动 */
       .mlist {
         display: grid;
         gap: 4px;
+        align-content: start;
+        max-height: 320px;
+        overflow-y: auto;
       }
       .mrow {
         display: flex;
@@ -1384,7 +1398,7 @@ export class GrfSettingsPage extends GrfPanel {
         const n = (p.models ?? []).length;
         return html`
           <div
-            class="prov-item ${this.selProv === p.name ? 'on' : ''}"
+            class="prov-item ${this.activeProvName === p.name ? 'on' : ''}"
             title=${p.name}
             @click=${() => {
               this.selProv = p.name;
@@ -1405,7 +1419,7 @@ export class GrfSettingsPage extends GrfPanel {
   /** 右栏:选中供应商的详情(连接信息 + 模型列表)。 */
   private renderProvDetail(readOnly: boolean) {
     const list = settingsStore.modelCfg?.providers ?? [];
-    const p = list.find((x) => x.name === this.selProv);
+    const p = list.find((x) => x.name === this.activeProvName);
     if (!p) {
       return html`<div class="hint">${list.length ? '从左侧选择一个供应商查看详情。' : '还没有供应商,点左下"添加供应商"新增一个。'}</div>`;
     }
@@ -1515,7 +1529,7 @@ export class GrfSettingsPage extends GrfPanel {
             ? nothing
             : html`
                 <div class="prov-actions">
-                  ${this.detectMsg && this.selProv === p.name ? html`<span class="hint">${this.detectMsg}</span>` : nothing}
+                  ${this.detectMsg && this.activeProvName === p.name ? html`<span class="hint">${this.detectMsg}</span>` : nothing}
                   <button ?disabled=${this.detecting} @click=${() => void this.detectProvModels(p.name)}>
                     ${this.detecting ? '检测中…' : `${'自动检测'}`}
                   </button>

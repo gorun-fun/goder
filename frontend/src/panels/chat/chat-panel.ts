@@ -1146,7 +1146,9 @@ export class GrfChat extends GrfPanel {
     if (this.dragging === 'bottom') {
       this.bottomHeight = Math.min(Math.max(rect.bottom - e.clientY, 90), rect.height * 0.7);
     } else {
-      this.sideWidth = Math.min(Math.max(rect.right - e.clientX, 260), Math.min(760, rect.width * 0.65));
+      // 右栏拖宽:下限 260(右栏自身可用),上限仅保留聊天列最小宽度 300
+      // (不再设固定最大宽度)
+      this.sideWidth = Math.min(Math.max(rect.right - e.clientX, 260), Math.max(rect.width - 300, 260));
     }
   };
 

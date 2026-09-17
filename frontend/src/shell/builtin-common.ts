@@ -8,9 +8,7 @@ import { inWails } from '../host/bridge';
 import '../panels/sessions/session-list';
 import '../panels/settings/settings-nav';
 import '../panels/settings/settings-page';
-import '../panels/inspector/session-detail';
 import '../panels/inspector/browser';
-import '../panels/console/console';
 
 /** 会话列表导航设置分区的状态类型(shell 经 grf-nav-state 持有)。 */
 export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills';
@@ -59,27 +57,13 @@ export function registerBuiltinCommon(): void {
   });
 
   // ---------- 右栏 tab ----------
-  registry.side.add({
-    id: 'detail',
-    label: '详情',
-    icon: icon.info,
-    width: 300,
-    render: (ctx) => html`<grf-session-detail scope=${ctx.scope}></grf-session-detail>`,
-  });
-
+  // (详情/事件台面板仍保留:嵌入库 entries/embed.ts 单独导出,三方可自行
+  // 经 registry.side.add 挂回右栏。)
   registry.side.add({
     id: 'browser',
     label: '浏览器',
     icon: icon.globe,
     width: 560,
     render: (ctx) => html`<grf-browser scope=${ctx.scope}></grf-browser>`,
-  });
-
-  registry.side.add({
-    id: 'console',
-    label: '事件台',
-    icon: icon.activity,
-    width: 460,
-    render: (ctx) => html`<grf-console scope=${ctx.scope}></grf-console>`,
   });
 }

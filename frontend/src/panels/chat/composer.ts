@@ -134,6 +134,8 @@ export class GrfComposer extends LitElement {
         display: grid;
         gap: 6px;
         transition: border-color 0.15s;
+        /* 容器查询锚点:按输入框实际宽度增减工具栏项(见下方 @container) */
+        container-type: inline-size;
       }
       .wrap:focus-within {
         border-color: var(--grf-border-hover);
@@ -179,6 +181,37 @@ export class GrfComposer extends LitElement {
         display: flex;
         align-items: center;
         gap: 6px;
+        min-width: 0;
+      }
+      /* 宽度不足时按优先级隐藏工具栏项:显示优先级 思考强度 > 用量圆环 >
+       * 添加附件 > 访问策略 > 模型,低者优先隐藏;发送/停止按钮始终显示。
+       * 按钮自身可收缩截断(.bar-btn flex 0 1 auto),这些阈值是收缩到
+       * 不可读后的兜底 —— 未发生重叠时不隐藏。
+       * 选择器限定 .bar-btn/按钮本身 —— 弹出菜单(.pop)同名类不受影响 */
+      @container (max-width: 420px) {
+        .bar .bar-btn.model-ctl {
+          display: none;
+        }
+      }
+      @container (max-width: 340px) {
+        .bar .bar-btn.policy-ctl {
+          display: none;
+        }
+      }
+      @container (max-width: 300px) {
+        .bar button.attach {
+          display: none;
+        }
+      }
+      @container (max-width: 270px) {
+        .bar .ctx {
+          display: none;
+        }
+      }
+      @container (max-width: 220px) {
+        .bar .bar-btn.effort-ctl {
+          display: none;
+        }
       }
       .hint {
         flex: 1;
@@ -310,7 +343,8 @@ export class GrfComposer extends LitElement {
         line-height: 1;
         padding: 5px 8px;
         cursor: pointer;
-        flex: none;
+        flex: 0 1 auto; /* 允许收缩(.cur 省略号截断),不够放才按优先级隐藏 */
+        min-width: 0;
         max-width: 180px;
       }
       .bar-btn:hover,
@@ -326,6 +360,7 @@ export class GrfComposer extends LitElement {
         transform: translateY(0.5px);
       }
       .bar-btn .cur {
+        min-width: 0; /* 作为 flex 子项允许收缩,配合省略号 */
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
