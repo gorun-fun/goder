@@ -13,3 +13,4 @@ build/bin/
 .playwright-cli/
 .zcode/
 downloads/
+.workbuddy/
