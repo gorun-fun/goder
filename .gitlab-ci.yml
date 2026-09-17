@@ -1,5 +1,9 @@
 # ============================================================================
-# goder 持续集成 / 持续交付(Wails v3 桌面 App,macOS .app 分发)
+# goder 持续集成 / 持续交付(Wails v3 桌面 App;macOS .app + Linux 原生 zip)
+# 产物:macOS darwin 双架构交叉编译(.app 包)+ Linux runner 原生架构 CGO 构建
+#      (gtk4/webkitgtk,zip 含 goder/gh 双二进制)。Windows 暂缺:
+#      internal/ghserver/proc.go 使用 Unix 专属 syscall(Setpgid/Kill),
+#      Windows 编译不过,待进程管理实现 Job 对象等价物后再加目标。
 # 触发方式:推送 tag(git tag v0.1.0 && git push origin v0.1.0)
 #          仅 tag 触发;普通分支推送不创建任何 job(runner 为低性能单并发机,
 #          不浪费槽位)
@@ -108,7 +112,19 @@ build:
       mkdir -p bin
       curl -fsSL -o bin/gh-darwin-arm64 ${GH_DL_BASE}/macos-arm64/${GH_VERSION}/gh
       curl -fsSL -o bin/gh-darwin-amd64  ${GH_DL_BASE}/macos/${GH_VERSION}/gh
-      chmod +x bin/gh-darwin-*
+      # linux:runner 原生架构(gh 下载目录 macos 同款命名:amd64 → linux)
+      case "$(uname -m)" in
+        aarch64) LINUX_ARCH=arm64;  LINUX_DIR=linux-arm64 ;;
+        *)       LINUX_ARCH=amd64;  LINUX_DIR=linux ;;
+      esac
+      curl -fsSL -o bin/gh-linux-${LINUX_ARCH} ${GH_DL_BASE}/${LINUX_DIR}/${GH_VERSION}/gh
+      chmod +x bin/gh-darwin-* bin/gh-linux-*
+    # ---- linux:runner 原生架构 CGO 构建(gtk4/webkitgtk 头文件已装) ----
+    - |
+      CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${LINUX_ARCH} .
+      mkdir -p .linstage && cp bin/goder-linux-${LINUX_ARCH} bin/gh-linux-${LINUX_ARCH} .linstage/
+      (cd .linstage && zip -qry ../bin/goder-linux-${LINUX_ARCH}.zip goder gh)
+      rm -rf .linstage
     # ---- darwin 交叉(zig cc + macOS SDK),工具链只下载一次存 .ci-cache/ ----
     - |
       mkdir -p .ci-cache/bin
@@ -157,8 +173,11 @@ build:
         cp bin/gh-darwin-${ARCH} .appstage/goder.app/Contents/MacOS/gh
         chmod +x .appstage/goder.app/Contents/MacOS/*
         (cd .appstage && zip -qry ../bin/goder-macos-${ARCH}.zip goder.app)
+        echo "macos-${ARCH} goder-macos-${ARCH}.zip" >> bin/PUBLISH_MANIFEST
       done
       rm -rf .appstage
+      # linux 产物目录名与 gh 下载侧一致(amd64 → linux,arm64 → linux-arm64)
+      echo "${LINUX_DIR} goder-linux-${LINUX_ARCH}.zip" >> bin/PUBLISH_MANIFEST
       ls -lh bin/
   artifacts:
     paths: [bin/]
@@ -187,13 +206,13 @@ publish:
     # 版本号在 build 阶段经 scripts/version.sh 推算(跟随 grf-harness,
     # gh 不变时 .postN 递增),经 bin/VERSION 产物传过来
     - VERSION=$(cat bin/VERSION)
+    # 产物清单由 build 阶段写入 bin/PUBLISH_MANIFEST(每行"目录 zip 名"),
+    # 目录名与 gh 下载侧平台目录一致:macos-arm64 / macos / linux(-arm64)
     - |
-      for spec in \
-        "macos-arm64 goder-macos-arm64.zip" \
-        "macos goder-macos-amd64.zip"; do
-        set -- $spec
-        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_DIR}/$1/${VERSION}"
-        scp -p bin/$2 ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/$1/${VERSION}/
-      done
+      while read -r DIR ZIP; do
+        [ -n "$DIR" ] || continue
+        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_DIR}/${DIR}/${VERSION}"
+        scp -p bin/$ZIP ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/${DIR}/${VERSION}/
+      done < bin/PUBLISH_MANIFEST
   rules:
     - if: '$CI_COMMIT_TAG'
