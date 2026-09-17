@@ -1,9 +1,10 @@
 # ============================================================================
-# goder 持续集成 / 持续交付(Wails v3 桌面 App;macOS .app + Linux 原生 zip)
-# 产物:macOS darwin 双架构交叉编译(.app 包)+ Linux runner 原生架构 CGO 构建
-#      (gtk4/webkitgtk,zip 含 goder/gh 双二进制)。Windows 暂缺:
-#      internal/ghserver/proc.go 使用 Unix 专属 syscall(Setpgid/Kill),
-#      Windows 编译不过,待进程管理实现 Job 对象等价物后再加目标。
+# goder 持续集成 / 持续交付(Wails v3 桌面 App;三平台 × 双架构)
+# 产物:macOS .app(darwin 双架构 zig cc 交叉 + ldid adhoc 签名)、
+#      Linux zip(linux 原生架构 CGO + Debian multiarch 交叉另一架构,
+#      zip 含 goder/gh 双二进制,运行需 GTK4/WebKitGTK)、
+#      Windows zip(wails v3 windows 前端纯 syscall 无 CGO,直接交叉;
+#      zip 含 goder.exe/gh.exe)。产物目录名与 gh 下载侧平台目录一致。
 # 触发方式:推送 tag(git tag v0.1.0 && git push origin v0.1.0)
 #          仅 tag 触发;普通分支推送不创建任何 job(runner 为低性能单并发机,
 #          不浪费槽位)
@@ -94,9 +95,19 @@ build:
   before_script:
     # aliyun 源加速;CGO 编译 wails linux 端需要 gcc 与 GTK4/WebKitGTK 6.0 头文件
     # (go vet ./... 按 host 平台检查);curl/xz-utils 供 darwin 工具链下载解压,
-    # zip 供产物打包
-    - sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip >/dev/null
+    # zip 供产物打包。Linux 交叉架构(runnner 非原生那一侧)走 Debian multiarch:
+    # 加foreign-arch 的 GTK/WebKitGTK dev 头文件 + 交叉 gcc。
+    - |
+      sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+      CROSS=$(case "$(uname -m)" in aarch64) echo amd64;; *) echo arm64;; esac)
+      dpkg --add-architecture $CROSS
+      apt-get update -qq
+      case "$CROSS" in
+        arm64) CROSS_GCC="gcc-aarch64-linux-gnu"; CROSS_LIBS="libgtk-4-dev:arm64 libwebkitgtk-6.0-dev:arm64" ;;
+        amd64) CROSS_GCC="gcc-x86-64-linux-gnu";  CROSS_LIBS="libgtk-4-dev:amd64 libwebkitgtk-6.0-dev:amd64" ;;
+      esac
+      apt-get install -y -qq --no-install-recommends build-essential pkg-config \
+        libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip "$CROSS_GCC" $CROSS_LIBS >/dev/null
   script:
     - go vet ./...
     # 版本号跟随 grf-harness 最新发布 tag(gh 不变而本程序再发版追加 .postN)
@@ -112,19 +123,41 @@ build:
       mkdir -p bin
       curl -fsSL -o bin/gh-darwin-arm64 ${GH_DL_BASE}/macos-arm64/${GH_VERSION}/gh
       curl -fsSL -o bin/gh-darwin-amd64  ${GH_DL_BASE}/macos/${GH_VERSION}/gh
-      # linux:runner 原生架构(gh 下载目录 macos 同款命名:amd64 → linux)
+      # linux 目录名:amd64 → linux,arm64 → linux-arm64(与 gh 下载侧一致)
       case "$(uname -m)" in
-        aarch64) LINUX_ARCH=arm64;  LINUX_DIR=linux-arm64 ;;
-        *)       LINUX_ARCH=amd64;  LINUX_DIR=linux ;;
+        aarch64) NATIVE_ARCH=arm64; NATIVE_DIR=linux-arm64; CROSS_ARCH=amd64; CROSS_DIR=linux; CROSS_TRIPLE=x86_64-linux-gnu ;;
+        *)       NATIVE_ARCH=amd64; NATIVE_DIR=linux;       CROSS_ARCH=arm64; CROSS_DIR=linux-arm64; CROSS_TRIPLE=aarch64-linux-gnu ;;
       esac
-      curl -fsSL -o bin/gh-linux-${LINUX_ARCH} ${GH_DL_BASE}/${LINUX_DIR}/${GH_VERSION}/gh
-      chmod +x bin/gh-darwin-* bin/gh-linux-*
-    # ---- linux:runner 原生架构 CGO 构建(gtk4/webkitgtk 头文件已装) ----
+      curl -fsSL -o bin/gh-linux-${NATIVE_ARCH} ${GH_DL_BASE}/${NATIVE_DIR}/${GH_VERSION}/gh
+      curl -fsSL -o bin/gh-linux-${CROSS_ARCH}  ${GH_DL_BASE}/${CROSS_DIR}/${GH_VERSION}/gh
+      curl -fsSL -o bin/gh-windows-amd64.exe ${GH_DL_BASE}/windows/${GH_VERSION}/gh.exe
+      curl -fsSL -o bin/gh-windows-arm64.exe ${GH_DL_BASE}/windows-arm64/${GH_VERSION}/gh.exe
+      chmod +x bin/gh-*
+    # ---- linux 双架构:原生 CGO + Debian multiarch 交叉 ----
+    # | 交叉侧:CC 指向交叉 gcc,pkg-config 只看 foreign-arch 的 pkgconfig 目录,
+    # | 避免 host 侧同名 .pc 文件带错 cflags/libs。
     - |
-      CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${LINUX_ARCH} .
-      mkdir -p .linstage && cp bin/goder-linux-${LINUX_ARCH} bin/gh-linux-${LINUX_ARCH} .linstage/
-      (cd .linstage && zip -qry ../bin/goder-linux-${LINUX_ARCH}.zip goder gh)
+      CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${NATIVE_ARCH} .
+      CC=${CROSS_TRIPLE}-gcc \
+      PKG_CONFIG_PATH=/usr/lib/${CROSS_TRIPLE}/pkgconfig:/usr/share/pkgconfig \
+      CGO_ENABLED=1 GOOS=linux GOARCH=${CROSS_ARCH} \
+        go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${CROSS_ARCH} .
+      for ARCH in ${NATIVE_ARCH} ${CROSS_ARCH}; do
+        rm -rf .linstage && mkdir .linstage
+        cp bin/goder-linux-${ARCH} bin/gh-linux-${ARCH} .linstage/
+        (cd .linstage && zip -qry ../bin/goder-linux-${ARCH}.zip goder gh)
+      done
       rm -rf .linstage
+    # ---- windows 双架构:wails v3 windows 前端为纯 syscall,无 CGO,直接交叉 ----
+    - |
+      for ARCH in amd64 arm64; do
+        CGO_ENABLED=0 GOOS=windows GOARCH=${ARCH} \
+          go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-windows-${ARCH}.exe .
+        rm -rf .winstage && mkdir .winstage
+        cp bin/goder-windows-${ARCH}.exe bin/gh-windows-${ARCH}.exe .winstage/
+        (cd .winstage && zip -qry ../bin/goder-windows-${ARCH}.zip goder.exe gh.exe)
+      done
+      rm -rf .winstage
     # ---- darwin 交叉(zig cc + macOS SDK),工具链只下载一次存 .ci-cache/ ----
     - |
       mkdir -p .ci-cache/bin
@@ -176,8 +209,11 @@ build:
         echo "macos-${ARCH} goder-macos-${ARCH}.zip" >> bin/PUBLISH_MANIFEST
       done
       rm -rf .appstage
-      # linux 产物目录名与 gh 下载侧一致(amd64 → linux,arm64 → linux-arm64)
-      echo "${LINUX_DIR} goder-linux-${LINUX_ARCH}.zip" >> bin/PUBLISH_MANIFEST
+      # linux/windows 产物目录名与 gh 下载侧一致
+      echo "${NATIVE_DIR} goder-linux-${NATIVE_ARCH}.zip" >> bin/PUBLISH_MANIFEST
+      echo "${CROSS_DIR} goder-linux-${CROSS_ARCH}.zip" >> bin/PUBLISH_MANIFEST
+      echo "windows goder-windows-amd64.zip" >> bin/PUBLISH_MANIFEST
+      echo "windows-arm64 goder-windows-arm64.zip" >> bin/PUBLISH_MANIFEST
       ls -lh bin/
   artifacts:
     paths: [bin/]

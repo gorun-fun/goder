@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -102,7 +101,7 @@ func (p *Proc) Start() Status {
 	cmd := exec.Command(p.cfg.GhBin, "server", "-addr", p.cfg.Addr, "-data", p.cfg.DataDir)
 	cmd.Stdout = lf
 	cmd.Stderr = lf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // 独立进程组,可整组回收
+	cmd.SysProcAttr = childProcAttr() // 平台差异见 proc_unix.go / proc_windows.go
 	if err := cmd.Start(); err != nil {
 		lf.Close()
 		p.lastErr = err.Error()
@@ -130,34 +129,10 @@ func (p *Proc) Start() Status {
 	return p.statusLocked()
 }
 
-// startWatchdog 给 gh 挂父进程退出看门狗:sh 阻塞读管道,宿主进程退出
-// (正常退出/崩溃/被强杀,fd 全部关闭)触发 EOF,按进程组回收 gh。
+// startWatchdog 给 gh 挂父进程退出看门狗:宿主进程退出(正常退出/崩溃/
+// 被强杀)时按 pid/进程组回收 gh,保证不留孤儿。平台实现见
+// proc_unix.go(sh 管道 EOF)与 proc_windows.go(暂缺,依赖收养兜底)。
 // 优雅 Stop 时由 cleanupLocked 主动关闭管道并清掉看门狗。
-func (p *Proc) startWatchdog(pid int, group bool) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		return
-	}
-	target := fmt.Sprintf("-%d", pid) // 进程组(负 pid)
-	if !group {
-		target = fmt.Sprintf("%d", pid) // 收养实例:仅 pid,避免误伤其进程组邻居
-	}
-	script := fmt.Sprintf(
-		"read x || true; kill -TERM %s 2>/dev/null; sleep 1; kill -KILL %s 2>/dev/null; exit 0",
-		target, target)
-	watch := exec.Command("/bin/sh", "-c", script)
-	watch.Stdin = r
-	// 独立进程组:不随 gh 或宿主的进程组回收牵连。
-	watch.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := watch.Start(); err != nil {
-		r.Close()
-		w.Close()
-		return
-	}
-	r.Close() // 读端已交给 sh,宿主侧只保留写端
-	p.watch = watch
-	p.watchW = w
-}
 
 // Stop 终止托管实例(收养实例仅清理本地状态)。
 func (p *Proc) Stop() Status {
@@ -254,22 +229,13 @@ func (p *Proc) killGroupLocked() {
 	adopted := p.adoptedPid
 	p.adoptedPid = 0
 	if adopted != 0 && alive(adopted) {
-		_ = syscall.Kill(adopted, syscall.SIGTERM)
-		if waitExit(adopted, 3*time.Second) {
-			_ = syscall.Kill(adopted, syscall.SIGKILL)
-		}
+		killProcTree(adopted, false)
 	}
 	if p.pid == 0 {
 		return
 	}
 	if alive(p.pid) {
-		_ = syscall.Kill(-p.pid, syscall.SIGTERM)
-		// 给 gh server 足够的优雅退出时间:SIGTERM 后要把运行中的会话
-		// 落盘(未完成回合的持久化),过早 SIGKILL 会截断写盘、重开 App
-		// 后会话内容丢失。3 秒内未退出再强杀,不让退出流程无限挂起。
-		if waitExit(p.pid, 3*time.Second) {
-			_ = syscall.Kill(-p.pid, syscall.SIGKILL)
-		}
+		killProcTree(p.pid, true)
 	}
 }
 
@@ -356,10 +322,4 @@ func listenerPID(addr string) int {
 	return n
 }
 
-func alive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return p.Signal(syscall.Signal(0)) == nil
-}
+// alive 的平台实现见 proc_unix.go / proc_windows.go。
