@@ -17,6 +17,9 @@ export interface ShellState {
   leftOn: boolean;
   /** macOS 桌面态:头部需为窗口红绿灯保留悬浮位 */
   desktopLights: boolean;
+  /** Windows 桌面态:窗口无边框、最小化/最大化/关闭由壳右上角自绘,
+   * 头部右侧需为它留出空间(见各面板的 header.win) */
+  desktopWinControls: boolean;
   /** 切换左栏展开/收起 */
   toggleLeft(): void;
 }

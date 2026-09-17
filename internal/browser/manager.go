@@ -1,10 +1,18 @@
 // Package browser 持有内嵌浏览器面板的原生 webview。
 //
 // 浏览器面板只有一块原生内容,直接显示在主窗口内部(任何平台都不开
-// 独立 OS 窗口):macOS 上本包自建 WKWebView(共享固定身份的
-// WKWebsiteDataStore —— 登录态跨重启持久、所有会话共享),作为主窗口
-// contentView 的隐藏子视图嵌入;导航走原生 WebKit 调用。不支持内嵌的
-// 平台创建失败,面板保持纯前端(iframe 回退)。
+// 独立 OS 窗口),但各平台的机制不同:
+//
+//   - macOS:本包自建 WKWebView(共享固定身份的 WKWebsiteDataStore ——
+//     登录态跨重启持久、所有会话共享),作为主窗口 contentView 的隐藏
+//     子视图嵌入;导航走原生 WebKit 调用。
+//   - Windows:内容是一座 Wails 窗口(WebView2,SetURL/Reload/ExecJS
+//     仍由它提供),其 HWND 重父级进主窗口做 WS_CHILD 子窗口(g-term 同
+//     款做法);导航/显隐/销毁都必须走该窗口 —— Wails 要同步 WebView2
+//     控制器的可见性。WebView2 自己持久化 cookie。
+//
+// 不支持内嵌的平台创建失败,面板保持纯前端(iframe 回退;前端先经
+// Available 判断,失败时 Navigate 返回 false 也会回退)。
 //
 // 内容始终属于同一个真实窗口:随窗口移动/缩放/全屏自动跟随,无需
 // 层叠修复;几何完全来自前端的 rect 上报(SetRect)。
@@ -21,9 +29,14 @@ import (
 
 type rect struct{ x, y, w, h int }
 
-// view 是内嵌的原生 webview;nil 表示尚未创建(或平台不支持)。
+// view 是内嵌的原生内容;nil 表示尚未创建(或平台不支持)。
 type view struct {
-	v unsafe.Pointer
+	// h 原生句柄:自有视图平台(macOS)为 WKWebView*;Windows 为重父级后
+	// 的子窗口 HWND(其内容由 win 承载)。
+	h unsafe.Pointer
+	// win Windows 上的托管窗口:内容(WebView2)归它所有,导航/显隐/销毁
+	// 都必须经它;其余平台为 nil。
+	win *application.WebviewWindow
 	// visible 镜像面板的前端可见状态;只有可见时才展示原生内容。
 	visible bool
 	// navigated:至少加载过一次 URL。此前没有可展示的原生内容,
@@ -52,6 +65,10 @@ func NewManager(log *slog.Logger, app *application.App) *Manager {
 	return &Manager{log: log, app: app}
 }
 
+// Supported 报告本平台能否内嵌原生 webview(false 时前端面板用 iframe
+// 回退,不必等创建失败)。
+func Supported() bool { return supported }
+
 // resolve 缓存主窗口。调用方须持有 m.mu。
 func (m *Manager) resolve() bool {
 	if m.mainWin != nil {
@@ -77,40 +94,42 @@ func (m *Manager) ensureView() *view {
 	if m.v != nil {
 		return m.v
 	}
-		if p := m.mainWin.NativeWindow(); p != nil {
-			if v := createBrowserView(p); v != nil {
-				m.v = &view{v: v}
-				if m.bg != "" {
-					setViewBackground(v, m.bg)
-				}
-				return m.v
+	if p := m.mainWin.NativeWindow(); p != nil {
+		if v := createBrowserView(m.app, p); v != nil {
+			m.v = v
+			if m.bg != "" {
+				setViewBackground(v, m.bg)
 			}
+			return m.v
 		}
+	}
 	m.log.Error("[browser] 原生 webview 创建失败,面板回退 iframe")
 	return nil
 }
 
 // Navigate 打开(必要时先创建内容)或导航到 url。可见性由 Show/Hide
-// 拥有:仅导航不会展示内容。
-func (m *Manager) Navigate(url string) {
+// 拥有:仅导航不会展示内容。返回是否有原生内容可用(false = 平台不
+// 支持内嵌,前端据此回退 iframe)。
+func (m *Manager) Navigate(url string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.resolve() {
 		m.log.Warn("[browser] 主窗口未就绪,导航被丢弃")
-		return
+		return false
 	}
 	v := m.ensureView()
 	if v == nil {
-		return
+		return false
 	}
 	if url != "" {
-		viewLoadURL(v.v, url)
+		viewLoadURL(v, url)
 		v.navigated = true
 	}
 	m.repositionLocked()
 	if v.visible && m.hasRc {
-		setChildViewHidden(v.v, false)
+		setViewVisible(v, true)
 	}
+	return true
 }
 
 // Show 展示内嵌内容(面板激活时调用)。内容按需创建,Show 抢在
@@ -131,7 +150,7 @@ func (m *Manager) Show() {
 	}
 	// 先布局再展示,避免闪出旧帧。
 	m.repositionLocked()
-	setChildViewHidden(v.v, false)
+	setViewVisible(v, true)
 }
 
 // Hide 隐藏内嵌内容(离开浏览器面板时调用)。nil 安全。
@@ -142,7 +161,7 @@ func (m *Manager) Hide() {
 		return
 	}
 	m.v.visible = false
-	setChildViewHidden(m.v.v, true)
+	setViewVisible(m.v, false)
 }
 
 // SetRect 上报浏览器面板的 rect(视口相对 CSS 像素,即
@@ -157,11 +176,12 @@ func (m *Manager) SetRect(x, y, w, h int) {
 		return
 	}
 	m.repositionLocked()
-	setChildViewHidden(m.v.v, false)
+	setViewVisible(m.v, true)
 }
 
-// SetBackground 设置原生视图底色(css:前端主题卡片色)。WebKit 默认
-// 白底,深色主题下视图边缘不足 1px 的发丝缝会露白;置为主题色后不可见。
+// SetBackground 设置原生视图底色(css:前端主题卡片色)。WebKit/WebView2
+// 默认白底,深色主题下视图边缘不足 1px 的发丝缝会露白;置为主题色后
+// 不可见。
 func (m *Manager) SetBackground(css string) {
 	if css == "" {
 		return
@@ -170,16 +190,16 @@ func (m *Manager) SetBackground(css string) {
 	defer m.mu.Unlock()
 	m.bg = css
 	if m.v != nil {
-		setViewBackground(m.v.v, css)
+		setViewBackground(m.v, css)
 	}
 }
 
-// Back / Forward / Reload 驱动视图自身的导航历史(原生调用)。
+// Back / Forward / Reload 驱动视图自身的导航历史。
 func (m *Manager) Back() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.v != nil {
-		viewGoBack(m.v.v)
+		viewGoBack(m.v)
 	}
 }
 
@@ -187,7 +207,7 @@ func (m *Manager) Forward() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.v != nil {
-		viewGoForward(m.v.v)
+		viewGoForward(m.v)
 	}
 }
 
@@ -195,7 +215,7 @@ func (m *Manager) Reload() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.v != nil {
-		viewReload(m.v.v)
+		viewReload(m.v)
 	}
 }
 
@@ -208,7 +228,7 @@ func (m *Manager) Close() {
 	if m.v == nil {
 		return
 	}
-	detachChildView(m.v.v)
+	closeView(m.v)
 	m.v = nil
 }
 
@@ -217,5 +237,5 @@ func (m *Manager) repositionLocked() {
 	if m.v == nil || m.mainWin == nil || !m.hasRc {
 		return
 	}
-	layoutChildView(m.mainWin.NativeWindow(), m.v.v, m.rc.x, m.rc.y, m.rc.w, m.rc.h)
+	layoutChildView(m.mainWin.NativeWindow(), m.v, m.rc.x, m.rc.y, m.rc.w, m.rc.h)
 }

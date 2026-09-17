@@ -52,6 +52,7 @@ export function registerBuiltinCommon(): void {
         .leftToggle=${ctx.shell?.leftOn === false}
         .leftOn=${ctx.shell?.leftOn ?? true}
         .leftLights=${ctx.shell?.desktopLights ?? false}
+        .winControls=${ctx.shell?.desktopWinControls ?? false}
         @grf-toggle-sessions=${() => ctx.shell?.toggleLeft()}
       ></grf-settings-page>`,
   });

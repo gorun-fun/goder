@@ -164,129 +164,94 @@ static void grf_detachView(void* view) {
 import "C"
 
 import (
-	"fmt"
-	"strings"
 	"unsafe"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// supported:macOS 走本包自建的 WKWebView 子视图。
+const supported = true
 
 func allowFirstMouseWebviews() {
 	C.grf_allowFirstMouseWebviews()
 }
 
 // createBrowserView 创建共享持久 data store 的 WKWebView,隐藏嵌入
-// 主窗口 contentView;失败返回 nil。
-func createBrowserView(mainWin unsafe.Pointer) unsafe.Pointer {
+// 主窗口 contentView;失败返回 nil。app 未使用(macOS 无需托管窗口)。
+func createBrowserView(_ *application.App, mainWin unsafe.Pointer) *view {
 	if mainWin == nil {
 		return nil
 	}
-	return C.grf_createBrowserView(mainWin)
+	p := C.grf_createBrowserView(mainWin)
+	if p == nil {
+		return nil
+	}
+	return &view{h: p}
 }
 
 // viewLoadURL 在视图中加载绝对 URL。
-func viewLoadURL(view unsafe.Pointer, url string) {
-	if view == nil || url == "" {
+func viewLoadURL(v *view, url string) {
+	if v == nil || v.h == nil || url == "" {
 		return
 	}
 	c := C.CString(url)
 	defer C.free(unsafe.Pointer(c))
-	C.grf_viewLoadURL(view, c)
+	C.grf_viewLoadURL(v.h, c)
 }
 
 // viewGoBack / viewGoForward 步进视图自身导航历史;viewReload 刷新。
-func viewGoBack(view unsafe.Pointer) {
-	if view != nil {
-		C.grf_viewGoBack(view)
+func viewGoBack(v *view) {
+	if v != nil && v.h != nil {
+		C.grf_viewGoBack(v.h)
 	}
 }
 
-func viewGoForward(view unsafe.Pointer) {
-	if view != nil {
-		C.grf_viewGoForward(view)
+func viewGoForward(v *view) {
+	if v != nil && v.h != nil {
+		C.grf_viewGoForward(v.h)
 	}
 }
 
-func viewReload(view unsafe.Pointer) {
-	if view != nil {
-		C.grf_viewReload(view)
+func viewReload(v *view) {
+	if v != nil && v.h != nil {
+		C.grf_viewReload(v.h)
 	}
 }
 
 // layoutChildView 把内嵌子视图布局到面板 rect(视口相对 CSS 像素,
 // 左上原点;y 在内部翻转)。
-func layoutChildView(mainWin, view unsafe.Pointer, x, y, w, h int) {
-	if mainWin == nil || view == nil {
+func layoutChildView(mainWin unsafe.Pointer, v *view, x, y, w, h int) {
+	if mainWin == nil || v == nil || v.h == nil {
 		return
 	}
-	C.grf_layoutView(mainWin, view, C.int(x), C.int(y), C.int(w), C.int(h))
+	C.grf_layoutView(mainWin, v.h, C.int(x), C.int(y), C.int(w), C.int(h))
 }
 
-// setChildViewHidden 显示/隐藏内嵌子视图。
-func setChildViewHidden(view unsafe.Pointer, hidden bool) {
-	if view == nil {
+// setViewVisible 显示/隐藏内嵌子视图。
+func setViewVisible(v *view, visible bool) {
+	if v == nil || v.h == nil {
 		return
 	}
-	C.grf_setViewHidden(view, C.bool(hidden))
+	C.grf_setViewHidden(v.h, C.bool(!visible))
 }
 
-// setViewBackground 解析 CSS 颜色串(#rgb/#rrggbb/rgb()/rgba())并设置
-// 视图底色。解析失败不设置(保持默认)。
-func setViewBackground(view unsafe.Pointer, css string) {
-	if view == nil {
+// setViewBackground 设置视图底色,消除边缘发丝缝露出的 WebKit 默认白。
+func setViewBackground(v *view, css string) {
+	if v == nil || v.h == nil {
 		return
 	}
 	r, g, b, a, ok := parseCSSColor(css)
 	if !ok {
 		return
 	}
-	C.grf_setViewBackground(view, C.double(r), C.double(g), C.double(b), C.double(a))
+	C.grf_setViewBackground(v.h, C.double(r), C.double(g), C.double(b), C.double(a))
 }
 
-// parseCSSColor 解析前端可能上报的 CSS 颜色格式。
-func parseCSSColor(css string) (r, g, b, a float64, ok bool) {
-	css = strings.TrimSpace(strings.ToLower(css))
-	switch {
-	case strings.HasPrefix(css, "#"):
-		h := css[1:]
-		if len(h) == 3 {
-			var rr, gg, bb byte
-			if _, err := fmt.Sscanf(h, "%1x%1x%1x", &rr, &gg, &bb); err != nil {
-				return 0, 0, 0, 0, false
-			}
-			r, g, b = float64(rr*17)/255, float64(gg*17)/255, float64(bb*17)/255
-			return r, g, b, 1, true
-		}
-		if len(h) == 6 {
-			var rr, gg, bb byte
-			if _, err := fmt.Sscanf(h, "%2x%2x%2x", &rr, &gg, &bb); err != nil {
-				return 0, 0, 0, 0, false
-			}
-			return float64(rr) / 255, float64(gg) / 255, float64(bb) / 255, 1, true
-		}
-		return 0, 0, 0, 0, false
-	case strings.HasPrefix(css, "rgb"):
-		var rr, gg, bb int
-		if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimPrefix(css, "rgba"), "rgb"), "(%d, %d, %d", &rr, &gg, &bb); err != nil {
-			return 0, 0, 0, 0, false
-		}
-		a = 1
-		if ai := strings.Index(css, ","); ai >= 0 {
-			rest := css[ai+1:]
-			if bi := strings.Index(rest, ","); bi >= 0 {
-				rest2 := rest[bi+1:]
-				if ci := strings.Index(rest2, ","); ci >= 0 {
-					fmt.Sscanf(rest2[ci+1:], "%f", &a)
-				}
-			}
-		}
-		return float64(rr) / 255, float64(gg) / 255, float64(bb) / 255, a, true
-	}
-	return 0, 0, 0, 0, false
-}
-
-// detachChildView 从主窗口移除内嵌子视图并释放嵌入时的 retain。
-func detachChildView(view unsafe.Pointer) {
-	if view == nil {
+// closeView 从主窗口移除内嵌子视图并释放嵌入时的 retain。
+func closeView(v *view) {
+	if v == nil || v.h == nil {
 		return
 	}
-	C.grf_detachView(view)
+	C.grf_detachView(v.h)
+	v.h = nil
 }

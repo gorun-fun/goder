@@ -12,6 +12,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme } from '../ui/panel';
 import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
+import { closeWindow, isWindowMaximised, isWindowsDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
 import { registry, sideTabId, type PanelContext, type SideTabInstance } from '../registry/registry';
 import '../panels/files/file-list';
@@ -53,6 +54,13 @@ export class GrfAppShell extends GrfPanel {
    * 最大化按钮之后仅放左边栏开关。 */
   private readonly nativeLights =
     inWails() && /mac/i.test(navigator.platform || navigator.userAgent);
+
+  /** Windows 桌面态:窗口整窗无边框(原生标题栏与最小化/最大化/关闭都已
+   * 移除),右上角由壳自绘 .winctl;顶排头部右侧让位(见 .win)。 */
+  private readonly nativeWinControls = isWindowsDesktop();
+
+  /** 窗口当前是否最大化(切换 .winctl 的最大化/还原图标) */
+  @state() private winMaximised = false;
 
   /** 左栏顶行即窗口标题栏:空白区拖拽移动 / 双击缩放(非桌面态静默) */
   private tdrag: TitleDrag | null = null;
@@ -178,6 +186,45 @@ export class GrfAppShell extends GrfPanel {
       .hidden {
         display: none !important;
       }
+      /* Windows 无边框窗口控制:右上角自绘最小化/最大化/关闭,与顶排同高
+       * (40px);面板头部右侧经 .win 让出等宽空间(30×3 + 间隙 + 内边距)。 */
+      .winctl {
+        position: absolute;
+        top: 0;
+        right: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        height: 40px;
+        padding-right: 4px;
+        box-sizing: border-box;
+      }
+      .winctl button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: 6px;
+        color: var(--grf-text-faint);
+        cursor: pointer;
+      }
+      .winctl button:hover {
+        background: var(--grf-bg-hover);
+        color: var(--grf-text);
+      }
+      .winctl button.close:hover {
+        background: #e81123;
+        color: #fff;
+      }
+      .winctl svg {
+        width: 13px;
+        height: 13px;
+      }
     `,
   ];
 
@@ -220,6 +267,12 @@ export class GrfAppShell extends GrfPanel {
     });
     window.addEventListener('pointermove', this.onDrag);
     window.addEventListener('pointerup', this.stopDrag);
+    // Windows 无边框态:最大化状态只有自绘按钮要知道(切换图标)。窗口尺寸
+    // 变化即查询一次,覆盖双击顶排/Win+↑/任务栏等一切非按钮路径。
+    if (this.nativeWinControls) {
+      window.addEventListener('resize', this.syncMaximised);
+      this.syncMaximised();
+    }
   }
 
   disconnectedCallback(): void {
@@ -229,7 +282,22 @@ export class GrfAppShell extends GrfPanel {
     this.regUnsub = undefined;
     window.removeEventListener('pointermove', this.onDrag);
     window.removeEventListener('pointerup', this.stopDrag);
+    window.removeEventListener('resize', this.syncMaximised);
     super.disconnectedCallback();
+  }
+
+  /** 同步"是否最大化"(自绘按钮图标);桥不可达保持原值。 */
+  private syncMaximised = (): void => {
+    if (!this.nativeWinControls) return;
+    void isWindowMaximised().then((m) => {
+      if (m !== null && m !== this.winMaximised) this.winMaximised = m;
+    });
+  };
+
+  private onWinMaxToggle(): void {
+    toggleMaximiseWindow();
+    // 原生切换是异步的:等一拍再读真实状态(不依赖任何平台事件名)。
+    window.setTimeout(this.syncMaximised, 60);
   }
 
   // ---------- 对外 API(宿主编程控制) ----------
@@ -282,6 +350,7 @@ export class GrfAppShell extends GrfPanel {
         shell: {
           leftOn: this.showSessions,
           desktopLights: this.nativeLights,
+          desktopWinControls: this.nativeWinControls,
           toggleLeft: () => (this.showSessions = !this.showSessions),
         },
       };
@@ -292,6 +361,7 @@ export class GrfAppShell extends GrfPanel {
     if (ctx.shell) {
       ctx.shell.leftOn = this.showSessions;
       ctx.shell.desktopLights = this.nativeLights;
+      ctx.shell.desktopWinControls = this.nativeWinControls;
     }
     return ctx;
   }
@@ -384,6 +454,7 @@ export class GrfAppShell extends GrfPanel {
                   .leftToggle=${hasSessions}
                   .leftOn=${this.showSessions}
                   .leftLights=${this.nativeLights}
+                  .winControls=${this.nativeWinControls}
                   @grf-toggle-bottom=${() => (this.showBottom = !this.showBottom)}
                   @grf-toggle-sidebar=${() => (this.showSidebar = !this.showSidebar)}
                   @grf-toggle-sessions=${() => (this.showSessions = !this.showSessions)}
@@ -394,6 +465,19 @@ export class GrfAppShell extends GrfPanel {
               : nothing}
         </div>
       </div>
+      ${this.nativeWinControls
+        ? html`<div class="winctl">
+            <button class="min" title="最小化" @click=${() => minimiseWindow()}>${unsafeHTML(icon.winMin)}</button>
+            <button
+              class="max"
+              title=${this.winMaximised ? '还原' : '最大化'}
+              @click=${() => this.onWinMaxToggle()}
+            >
+              ${unsafeHTML(this.winMaximised ? icon.winRestore : icon.winMax)}
+            </button>
+            <button class="close" title="关闭" @click=${() => closeWindow()}>${unsafeHTML(icon.winClose)}</button>
+          </div>`
+        : nothing}
     `;
   }
 }

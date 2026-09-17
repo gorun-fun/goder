@@ -1,11 +1,13 @@
 // browser.ts — <grf-browser>:右栏内嵌浏览器(地址栏 + 页面区)。
 // 两种实现,同一组件内自动选择:
-//   - 桌面态(wails):原生 webview 子视图(同 g-term 的实现方式)——
-//     macOS 上是 Go 侧自建并嵌入主窗口 contentView 的 WKWebView,
-//     无 X-Frame-Options/COOP 限制,Cookie 登录态持久化。本组件只负责
-//     导航(bridge BrowserManager)与上报页面区 rect(视口相对 CSS
-//     像素),原生视图由 Go 侧覆盖布局。
-//   - 纯 web/嵌入态:iframe 回退,部分站点禁止内嵌属站点安全策略。
+//   - 桌面态且平台支持内嵌(wails + Go 侧 Available):原生 webview ——
+//     macOS 是自建并嵌入主窗口 contentView 的 WKWebView,Windows 是
+//     Wails 窗口 HWND 重父级成 WS_CHILD 的子窗口;两者都不受
+//     X-Frame-Options/COOP 限制。本组件只负责导航(bridge
+//     BrowserManager)与上报页面区 rect(视口相对 CSS 像素),原生
+//     视图由 Go 侧覆盖布局。
+//   - 余下情况(Linux 等无原生内嵌、纯 web/嵌入态、原生创建失败):
+//     iframe 回退,部分站点禁止内嵌属站点安全策略。
 // 上次访问地址按 scope 记忆在 localStorage。
 import { css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
@@ -14,6 +16,7 @@ import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import {
   inWails,
+  browserAvailable,
   browserNavigate,
   browserShow,
   browserHide,
@@ -75,7 +78,8 @@ export class GrfBrowser extends GrfPanel {
   /** 实际赋给 iframe 的 src(仅 iframe 模式;刷新时先置空再还原以强制重载) */
   @state() private frameSrc = '';
   private reloadTimer = 0;
-  /** 桌面原生模式标记(connected 时定死:组件生命周期内形态不变) */
+  /** 原生模式标记:桌面态先乐观置位,平台不支持(Go 侧 Available=false)
+   * 或原生内容创建失败时降级 iframe(见 fallbackToFrame)。 */
   private native = false;
   private ro?: ResizeObserver;
   private rectFrame = 0;
@@ -163,8 +167,6 @@ export class GrfBrowser extends GrfPanel {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.native = inWails();
-    if (this.native) this.classList.add('native');
     try {
       const saved = localStorage.getItem(this.storeKey());
       if (saved) {
@@ -175,22 +177,48 @@ export class GrfBrowser extends GrfPanel {
     } catch {
       /* 忽略 */
     }
-    if (this.native) {
-      // 原生模式:面板激活 → 展示原生视图并开始跟踪 rect。tab 关闭重开
-      // (元素复用、重新插入 DOM)时 connectedCallback 会再次触发,
-      // rect 跟随也要重建 —— 不能只依赖 firstUpdated(它只触发一次)。
-      void browserShow();
-      if (this.url) void browserNavigate(absolutize(this.url));
-      window.addEventListener('resize', this.onWinChange);
-      window.addEventListener('scroll', this.onWinChange, true);
-      this.rectPoll = window.setInterval(() => this.scheduleRect(), 500);
-      const page = this.renderRoot.querySelector('.page');
-      if (page) {
-        this.ro = new ResizeObserver(() => this.scheduleRect());
-        this.ro.observe(page);
-      }
-      this.scheduleRect();
+    void this.resolveMode();
+  }
+
+  /** 决定渲染模式:桌面态先乐观走原生(与旧行为一致,避免 iframe 闪一下),
+   * 平台不支持内嵌(Linux 等)再降级 iframe。 */
+  private async resolveMode(): Promise<void> {
+    if (!inWails()) return;
+    this.native = true;
+    this.classList.add('native');
+    this.attachNative();
+    if (!(await browserAvailable()) && this.isConnected) this.fallbackToFrame();
+  }
+
+  /** 原生模式接线:面板激活 → 展示原生视图并开始跟踪 rect。tab 关闭重开
+   * (元素复用、重新插入 DOM)时 connectedCallback 会再次触发,rect 跟随
+   * 也要重建 —— 不能只依赖 firstUpdated(它只触发一次)。 */
+  private attachNative(): void {
+    void browserShow();
+    if (this.url) void browserNavigate(absolutize(this.url));
+    window.addEventListener('resize', this.onWinChange);
+    window.addEventListener('scroll', this.onWinChange, true);
+    this.rectPoll = window.setInterval(() => this.scheduleRect(), 500);
+    const page = this.renderRoot.querySelector('.page');
+    if (page) {
+      this.ro = new ResizeObserver(() => this.scheduleRect());
+      this.ro.observe(page);
     }
+    this.scheduleRect();
+  }
+
+  /** 原生内容在运行期创建失败(如缺 WebView2 运行时):降级 iframe,
+   * 不让面板停在空白态。 */
+  private fallbackToFrame(): void {
+    if (!this.native) return;
+    this.native = false;
+    this.classList.remove('native');
+    this.frameSrc = this.url;
+    window.clearInterval(this.rectPoll);
+    this.rectPoll = 0;
+    this.ro?.disconnect();
+    this.ro = undefined;
+    this.requestUpdate();
   }
 
   protected firstUpdated(): void {
@@ -284,8 +312,14 @@ export class GrfBrowser extends GrfPanel {
       /* 忽略 */
     }
     if (this.native) {
-      void browserNavigate(absolutize(u));
-      this.scheduleRect();
+      void browserNavigate(absolutize(u)).then((ok) => {
+        // 原生内容建不出来(平台/运行时缺失):就地降级 iframe
+        if (!ok) {
+          this.fallbackToFrame();
+          return;
+        }
+        this.scheduleRect();
+      });
     } else {
       this.frameSrc = u;
     }

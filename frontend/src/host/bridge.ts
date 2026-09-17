@@ -487,17 +487,28 @@ export function onTermEvent(id: string, kind: 'data' | 'exit', cb: (payload: str
 }
 
 // ---------- 浏览器(BrowserManager service,仅桌面) ----------
-// 内嵌浏览器面板的原生 webview(同 g-term 的实现:原生视图直接嵌在
-// 主窗口内,前端只负责导航与上报面板 rect)。不支持的平台创建失败,
-// 前端回退 iframe。
+// 内嵌浏览器面板的原生 webview(macOS:自建 WKWebView 子视图;Windows:
+// Wails 窗口 HWND 重父级成 WS_CHILD 子窗口)。不支持的平台 Available
+// 返回 false、Navigate 返回 false,前端面板用 iframe 回退。
 
-/** 导航(必要时创建原生视图);空 url 仅确保视图存在。 */
-export async function browserNavigate(url: string): Promise<void> {
-  if (!inWails()) return;
+/** 本平台能否内嵌原生 webview;非桌面态/失败返回 false(→ iframe)。 */
+export async function browserAvailable(): Promise<boolean> {
+  if (!inWails()) return false;
   try {
-    await call<void>(`${SVC}.BrowserManager.Navigate`, url);
+    return (await call<boolean>(`${SVC}.BrowserManager.Available`)) === true;
   } catch {
-    /* 静默:面板回退 iframe */
+    return false;
+  }
+}
+
+/** 导航(必要时创建原生视图);空 url 仅确保视图存在。返回是否有原生
+ * 内容可用(false = 平台不支持内嵌或创建失败,面板应回退 iframe)。 */
+export async function browserNavigate(url: string): Promise<boolean> {
+  if (!inWails()) return false;
+  try {
+    return (await call<boolean>(`${SVC}.BrowserManager.Navigate`, url)) === true;
+  } catch {
+    return false;
   }
 }
 

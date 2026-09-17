@@ -1,27 +1,34 @@
-//go:build !darwin
+//go:build !darwin && !windows
 
-// native_other.go — 暂不支持原生内嵌的平台(Linux/Windows)占位实现:
-// 所有创建返回 nil,Manager 放弃原生内容,前端浏览器面板回退 iframe。
-// (Linux/Windows 的原生内嵌可参照 g-term 项目的 internal/browser 移植:
-// GTK4 WebKitGTK 子视图 / wails 子窗口 HWND 重父级。)
+// native_other.go — 暂不支持原生内嵌的平台(Linux)占位实现:
+// supported=false、创建返回 nil,Manager 放弃原生内容,前端浏览器面板
+// 用 iframe 回退(见 internal/browser/native_linux* 的 g-term 版本可作
+// 移植参照:GTK4 里在 GtkOverlay 上叠 WebKitGTK 子视图)。
 package browser
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+// supported:该平台尚未提供原生内嵌。
+const supported = false
 
 func allowFirstMouseWebviews() {}
 
-func createBrowserView(mainWin unsafe.Pointer) unsafe.Pointer { return nil }
+func createBrowserView(_ *application.App, _ unsafe.Pointer) *view { return nil }
 
-func viewLoadURL(view unsafe.Pointer, url string) {}
+func viewLoadURL(_ *view, _ string) {}
 
-func viewGoBack(view unsafe.Pointer)    {}
-func viewGoForward(view unsafe.Pointer) {}
-func viewReload(view unsafe.Pointer)    {}
+func viewGoBack(_ *view)    {}
+func viewGoForward(_ *view) {}
+func viewReload(_ *view)    {}
 
-func layoutChildView(mainWin, view unsafe.Pointer, x, y, w, h int) {}
+func layoutChildView(_ unsafe.Pointer, _ *view, _, _, _, _ int) {}
 
-func setChildViewHidden(view unsafe.Pointer, hidden bool) {}
+func setViewVisible(_ *view, _ bool) {}
 
-func setViewBackground(view unsafe.Pointer, css string) {}
+func setViewBackground(_ *view, _ string) {}
 
-func detachChildView(view unsafe.Pointer) {}
+func closeView(_ *view) {}

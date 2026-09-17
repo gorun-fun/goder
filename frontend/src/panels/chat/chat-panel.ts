@@ -52,6 +52,8 @@ export class GrfChat extends GrfPanel {
   @property({ type: Boolean }) leftOn = true;
   /** macOS 桌面态:左栏收起时头部为红绿灯保留悬浮位 */
   @property({ type: Boolean, attribute: 'left-lights' }) leftLights = false;
+  /** Windows 桌面态:头部右上为壳自绘的窗口控制(最小化/最大化/关闭)留位 */
+  @property({ type: Boolean, attribute: 'win-controls' }) winControls = false;
 
   @state() private stickBottom = true;
   /** 聊天列过窄(右栏/窗口挤压):状态浮窗自动收成单行,避免盖住对话内容 */
@@ -142,6 +144,11 @@ export class GrfChat extends GrfPanel {
       /* macOS 左栏收起时:窗口红绿灯悬浮于卡片左上,头部左侧让位 */
       header.lights {
         padding-left: 80px;
+      }
+      /* Windows 无边框态:壳右上角自绘的窗口控制(3×30 + 间隙 + 内边距)
+       * 悬浮于卡片右上,头部右侧让位 */
+      header.win {
+        padding-right: 106px;
       }
       .cols {
         flex: 1;
@@ -1074,6 +1081,7 @@ export class GrfChat extends GrfPanel {
       shell: {
         leftOn: this.leftOn,
         desktopLights: this.leftLights,
+        desktopWinControls: this.winControls,
         toggleLeft: () => this.fire('grf-toggle-sessions'),
       },
     };
@@ -1269,6 +1277,11 @@ export class GrfChat extends GrfPanel {
     this.stickBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   }
 
+  /** 头部修饰类:macOS 红绿灯悬浮位(左栏收起时)/ Windows 窗口控制让位 */
+  private get headerClass(): string {
+    return [this.leftLights && !this.leftOn ? 'lights' : '', this.winControls ? 'win' : ''].filter(Boolean).join(' ');
+  }
+
   render() {
     const s = this.store;
     const ctx = this.refreshCtx();
@@ -1313,7 +1326,7 @@ export class GrfChat extends GrfPanel {
         ? nothing
         : html`
             <header
-              class=${this.leftLights && !this.leftOn ? 'lights' : ''}
+              class=${this.headerClass}
               @mousedown=${(e: MouseEvent) => this.tdrag?.onDown(e)}
               @dblclick=${(e: MouseEvent) => this.tdrag?.onDbl(e)}
             >

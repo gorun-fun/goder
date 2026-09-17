@@ -37,12 +37,20 @@ func (b *BrowserManager) ServiceShutdown() error {
 	return nil
 }
 
+// Available 报告本平台能否内嵌原生 webview(false = 前端面板用 iframe
+// 回退,不必等创建失败)。
+func (b *BrowserManager) Available() bool {
+	return browser.Supported()
+}
+
 // Navigate 打开(必要时创建)原生 webview 并导航到 url。空 url 仅确保
-// 内容存在,不导航。
-func (b *BrowserManager) Navigate(url string) {
-	if b.m != nil {
-		b.m.Navigate(url)
+// 内容存在,不导航。返回是否有原生内容可用(false = 平台不支持内嵌,
+// 前端据此回退 iframe)。
+func (b *BrowserManager) Navigate(url string) bool {
+	if b.m == nil {
+		return false
 	}
+	return b.m.Navigate(url)
 }
 
 // Show / Hide 展示/隐藏原生内容(随浏览器面板激活状态)。
