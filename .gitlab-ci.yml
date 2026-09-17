@@ -151,6 +151,13 @@ build:
         for d in *.deb; do dpkg -x "$d" "$XS"; done
         cd "$CI_PROJECT_DIR"
       fi
+      # libc6-dev-*-cross 的 libc.so 链接脚本写死目标机绝对路径(/lib/<triple>/
+      # libc.so.6、/lib/ld-linux-*.so),容器里没有,补符号链接到交叉工具链目录。
+      mkdir -p /lib/${CROSS_TRIPLE} /usr/lib/${CROSS_TRIPLE}
+      for f in /usr/${CROSS_TRIPLE}/lib/libc.so.6 /usr/${CROSS_TRIPLE}/lib/libc_nonshared.a; do
+        [ -e "$f" ] && ln -sf "$f" /lib/${CROSS_TRIPLE}/ && ln -sf "$f" /usr/lib/${CROSS_TRIPLE}/
+      done
+      ln -sf /usr/${CROSS_TRIPLE}/lib/ld-linux-*.so* /lib/ 2>/dev/null || true
       CC=${CROSS_TRIPLE}-gcc \
       PKG_CONFIG_LIBDIR=$XS/usr/lib/${CROSS_TRIPLE}/pkgconfig:$XS/usr/share/pkgconfig \
       PKG_CONFIG_SYSROOT_DIR=$XS \
