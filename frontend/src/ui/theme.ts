@@ -12,7 +12,11 @@ export const theme = css`
     /* 布局 */
     --grf-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-    --grf-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+    /* 等宽栈:Linux(WebKitGTK)对缺失字体会经 fontconfig 乱替换(可能落到
+     * 非等宽字体,xterm 按错误字宽排版),故把 Linux 常见等宽字体排在
+     * Apple/MS 专有名之前 —— macOS/Windows 上这些名字不存在时会被安全跳过。 */
+    --grf-mono: ui-monospace, 'DejaVu Sans Mono', 'Noto Sans Mono', 'Liberation Mono',
+      'Cascadia Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
     /* 色板(外观类令牌走 skin 挂钩,其余为固定语义色)
      * 注意:lit 的 css 模板内只能用块注释——CSS 不认 // 注释,解析器会把 //
