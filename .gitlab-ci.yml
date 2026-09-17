@@ -100,13 +100,13 @@ build:
       sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
       CROSS_DEB=$(case "$(uname -m)" in aarch64) echo amd64;; *) echo arm64;; esac)
       case "$CROSS_DEB" in
-        arm64) CROSS_TRIPLE=aarch64-linux-gnu; CROSS_GCC=gcc-aarch64-linux-gnu ;;
-        amd64) CROSS_TRIPLE=x86-64-linux-gnu;  CROSS_GCC=gcc-x86-64-linux-gnu ;;
+        arm64) CROSS_TRIPLE=aarch64-linux-gnu; CROSS_GCC="gcc-aarch64-linux-gnu libc6-dev-arm64-cross" ;;
+        amd64) CROSS_TRIPLE=x86-64-linux-gnu;  CROSS_GCC="gcc-x86-64-linux-gnu libc6-dev-amd64-cross" ;;
       esac
       dpkg --add-architecture $CROSS_DEB
       apt-get update -qq
       apt-get install -y -qq --no-install-recommends build-essential pkg-config \
-        libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip "$CROSS_GCC" >/dev/null
+        libgtk-4-dev libwebkitgtk-6.0-dev curl xz-utils zip $CROSS_GCC >/dev/null
   script:
     - go vet ./...
     # 版本号跟随 grf-harness 最新发布 tag(gh 不变而本程序再发版追加 .postN)
