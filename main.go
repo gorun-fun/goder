@@ -30,6 +30,12 @@ func main() {
 	}
 
 	rootHandler := desktop.RootHandler(application.BundledAssetFileServer(assets))
+	// 显式复用 wails 默认的 HTTP IPC transport(与不设置 Transport 时完全
+	// 同一实现),以便把它的 /wails/runtime 处理器也挂进 Windows 本地
+	// HTTP 服务器 —— 前端 runtime 的服务调用/事件走的是
+	// fetch(origin + "/wails/runtime"),页面从本地服务器加载时该端点必须
+	// 由本地服务器供应,否则一切 wails 调用(窗口控制/对话框/服务)404。
+	transport := application.NewHTTPTransport()
 	app := application.New(application.Options{
 		Name:        "Goder",
 		Description: "grf-harness 图形界面(项目会话 · 聊天 · 详情 · 事件台)",
@@ -50,6 +56,7 @@ func main() {
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
+		Transport: transport,
 	})
 
 	// 窗口装饰按平台分派(见 windowopt_*.go):mac 隐藏标题栏保留红绿灯;
@@ -66,8 +73,9 @@ func main() {
 	applyWindowDecorations(&winOpts)
 	// Windows:wails 资产管道整体缓冲响应、SSE 无流式(见
 	// localserv_windows.go);改从本地真实 HTTP 服务器加载,静态资产与
-	// /grf-api 同源。失败则回退 wails 资产服务(流式缺失但可用)。
-	if baseURL := startLocalServer(rootHandler); baseURL != "" {
+	// /grf-api 同源。本地服务器同时挂 transport 的 /wails/runtime IPC
+	// 端点(见上)。失败则回退 wails 资产服务(流式缺失但可用)。
+	if baseURL := startLocalServer(transport.Handler()(rootHandler)); baseURL != "" {
 		winOpts.URL = baseURL
 		defer stopLocalServer()
 	}

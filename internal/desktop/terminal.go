@@ -83,12 +83,15 @@ func (t *TerminalManager) StartTerm(cwd string, cols int, rows int) (TermSession
 
 	// 读循环:输出 base64 后经 wails 事件推送(前端按字节喂 xterm,
 	// 避免 UTF-8 多字节字符被 chunk 截断);EOF 后通知退出并回收。
+	// 分块 ≤4KB:wails 单事件负载超 ~8KB 会改经 /wails/eventpayload/
+	// 端点取回,Windows 本地服务器形态没有该端点,事件会被静默丢弃。
 	go func() {
 		buf := make([]byte, 64*1024)
 		for {
 			n, readErr := tty.Read(buf)
-			if n > 0 {
-				application.Get().Event.Emit("grf:term-data:"+id, base64.StdEncoding.EncodeToString(buf[:n]))
+			for off := 0; off < n; off += 4096 {
+				end := min(off+4096, n)
+				application.Get().Event.Emit("grf:term-data:"+id, base64.StdEncoding.EncodeToString(buf[off:end]))
 			}
 			if readErr != nil {
 				break
