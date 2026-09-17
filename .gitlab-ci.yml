@@ -109,7 +109,6 @@ build:
       curl -fsSL -o bin/gh-darwin-arm64 ${GH_DL_BASE}/macos-arm64/${GH_VERSION}/gh
       curl -fsSL -o bin/gh-darwin-amd64  ${GH_DL_BASE}/macos/${GH_VERSION}/gh
       chmod +x bin/gh-darwin-*
-      file bin/gh-darwin-arm64 bin/gh-darwin-amd64
     # ---- darwin 交叉(zig cc + macOS SDK),工具链只下载一次存 .ci-cache/ ----
     - |
       mkdir -p .ci-cache/bin
