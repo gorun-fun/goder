@@ -77,9 +77,27 @@ func (s *ServerManager) Start() ghserver.Status {
 		return s.statusLocked()
 	}
 	cfg, _ := (&AppConfig{}).Load()
-	// 解析顺序:显式配置 → App 包内捆绑副本 → 常见安装目录 → PATH;
+	// 解析顺序:显式配置 → App 包内捆绑副本 → 常见安装目录 → 下载管理
+	// 目录(<配置目录>/bin,Windows 首启弹框自动下载落点)→ PATH;
 	// Finder/Dock 启动的 App PATH 只有系统目录,不能只靠 LookPath。
 	bin := ghserver.ResolveGhBin(cfg.GhBinary)
+	if bin == "" {
+		if p, merr := managedGhPath(); merr == nil {
+			if st, serr := os.Stat(p); serr == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+				bin = p
+			}
+		}
+	}
+	// 仍未找到且未显式配置("gh" 是默认值,仅 PATH 查找,视为未配置):
+	// Windows 弹框检查环境并自动下载(macOS/Linux 发行包已捆绑 gh,
+	// 此路径不会触发)。
+	if bin == "" && (cfg.GhBinary == "" || cfg.GhBinary == "gh") {
+		if p, derr := ensureGhDownloadUI(); derr == nil {
+			bin = p
+		} else {
+			log.Printf("[servermanager] gh 自动下载未完成: %v", derr)
+		}
+	}
 	if bin == "" {
 		s.lastErr = "找不到 gh 二进制(未捆绑且未安装;请在偏好设置里配置路径)"
 		return s.statusLocked()

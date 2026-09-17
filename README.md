@@ -211,5 +211,8 @@ docs/                    embedding.md(三方集成)
 - web 形态的项目索引存 localStorage(按源隔离);桌面态存文件
 - 内嵌终端依赖 PTY,仅桌面态可用(Windows 暂不支持);git 审查同理仅
   桌面态。嵌入形态对应入口自动隐藏;事件台与浏览器 tab 在嵌入态可用
+- Windows 发行包(zip)只含 goder.exe:首次启动检测到未安装 gh 时弹框
+  确认并自动下载当前系统/架构的最新版到用户配置目录 `bin/` 下
+  (来源 download.gorun.fun/grf-harness);macOS .app 与 Linux zip 仍直接捆绑 gh
 - sso 身份模式的本地会话表在内存中(默认实现),网关重启需重新登录;
   `identity.SessionStore` 接口预留给持久化实现

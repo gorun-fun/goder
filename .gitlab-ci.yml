@@ -4,7 +4,8 @@
 #      Linux zip(linux 原生架构 CGO + Debian multiarch 交叉另一架构,
 #      zip 含 goder/gh 双二进制,运行需 GTK4/WebKitGTK)、
 #      Windows zip(wails v3 windows 前端纯 syscall 无 CGO,直接交叉;
-#      zip 含 goder.exe/gh.exe)。产物目录名与 gh 下载侧平台目录一致。
+#      zip 只含 goder.exe,gh 由 App 首次启动弹框自动下载)。产物目录名与
+#      gh 下载侧平台目录一致。
 # 触发方式:推送 tag(git tag v0.1.0 && git push origin v0.1.0)
 #          仅 tag 触发;普通分支推送不创建任何 job(runner 为低性能单并发机,
 #          不浪费槽位)
@@ -128,8 +129,6 @@ build:
       esac
       curl -fsSL -o bin/gh-linux-${NATIVE_ARCH} ${GH_DL_BASE}/${NATIVE_DIR}/${GH_VERSION}/gh
       curl -fsSL -o bin/gh-linux-${CROSS_ARCH}  ${GH_DL_BASE}/${CROSS_DIR}/${GH_VERSION}/gh
-      curl -fsSL -o bin/gh-windows-amd64.exe ${GH_DL_BASE}/windows/${GH_VERSION}/gh.exe
-      curl -fsSL -o bin/gh-windows-arm64.exe ${GH_DL_BASE}/windows-arm64/${GH_VERSION}/gh.exe
       chmod +x bin/gh-*
     # ---- linux 双架构:原生 CGO + 交叉(sysroot) ----
     # | 交叉侧:foreign-arch 的 GTK/WebKitGTK dev 包与原生 -dev 自冲突,不能
@@ -180,14 +179,17 @@ build:
       done
       rm -rf .linstage
     # ---- windows 双架构:wails v3 windows 前端为纯 syscall,无 CGO,直接交叉 ----
+    # 不捆绑 gh:App 启动时检测到缺失会弹框自动下载当前系统版本(见
+    # internal/desktop/ghdownload_windows.go),zip 只含 goder.exe。
+    # -H windowsgui:GUI 程序不弹控制台;图标与 manifest 由仓库根的
+    # rsrc_windows_{amd64,arm64}.syso 提供(go build 自动链接)。
     - |
       for ARCH in amd64 arm64; do
         CGO_ENABLED=0 GOOS=windows GOARCH=${ARCH} \
-          go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-windows-${ARCH}.exe .
+          go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -H windowsgui" -o bin/goder-windows-${ARCH}.exe .
         rm -rf .winstage && mkdir .winstage
         cp bin/goder-windows-${ARCH}.exe .winstage/goder.exe
-        cp bin/gh-windows-${ARCH}.exe    .winstage/gh.exe
-        (cd .winstage && zip -qry ../bin/goder-windows-${ARCH}.zip goder.exe gh.exe)
+        (cd .winstage && zip -qry ../bin/goder-windows-${ARCH}.zip goder.exe)
       done
       rm -rf .winstage
     # ---- darwin 交叉:zig cc + macOS SDK + ldid 均已预置镜像 /opt/mc ----
