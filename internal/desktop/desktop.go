@@ -235,6 +235,7 @@ func (d *Desktop) GitDiff(cwd string, path string, staged bool) (string, error) 
 func gitOutput(cwd string, args ...string) (string, error) {
 	full := append([]string{"-C", cwd, "--no-optional-locks"}, args...)
 	cmd := exec.Command("git", full...)
+	hideConsole(cmd) // Windows:git 是控制台程序,不隐藏会闪 cmd 窗口
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

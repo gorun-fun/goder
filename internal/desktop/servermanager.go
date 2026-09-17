@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 
 	"git.gorun.fun/share/goder/internal/appcfg"
 	"git.gorun.fun/share/goder/internal/ghserver"
@@ -68,15 +69,9 @@ func (s *ServerManager) Status() ghserver.Status {
 	return s.proc.Status()
 }
 
-// Start 启动 gh server(已运行/可收养则复用)。
-func (s *ServerManager) Start() ghserver.Status {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	addr, dataDir, err := s.dirs()
-	if err != nil {
-		s.lastErr = err.Error()
-		return s.statusLocked()
-	}
+// resolveGh 解析 gh 二进制路径,未显式配置且缺失时弹下载 UI(仅 Windows
+// 有 UI,其余平台静默失败)。调用方无须持锁。
+func (s *ServerManager) resolveGh() string {
 	cfg, _ := (&AppConfig{}).Load()
 	// 解析顺序:显式配置 → App 包内捆绑副本 → 常见安装目录 → 下载管理
 	// 目录(<配置目录>/bin,Windows 首启弹框自动下载落点)→ PATH;
@@ -103,6 +98,26 @@ func (s *ServerManager) Start() ghserver.Status {
 			log.Printf("[servermanager] gh 自动下载未完成: %v", derr)
 		}
 	}
+	return bin
+}
+
+// EnsureGh 环境检查门:确认 gh 可解析(Windows 缺失时同步弹下载 UI 走完
+// 才返回)。只检查/下载,不启动服务 —— gh 服务由主窗体启动后的冷启动
+// 拉起(见 main.go:Windows 在创建应用/主窗体前调用本方法)。
+func (s *ServerManager) EnsureGh() {
+	_ = s.resolveGh()
+}
+
+// Start 启动 gh server(已运行/可收养则复用)。
+func (s *ServerManager) Start() ghserver.Status {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	addr, dataDir, err := s.dirs()
+	if err != nil {
+		s.lastErr = err.Error()
+		return s.statusLocked()
+	}
+	bin := s.resolveGh()
 	if bin == "" {
 		s.lastErr = "找不到 gh 二进制(未捆绑且未安装;请在偏好设置里配置路径)"
 		return s.statusLocked()
@@ -121,7 +136,12 @@ func (s *ServerManager) Start() ghserver.Status {
 			return st
 		}
 	}
-	s.proc = ghserver.NewProc(ghserver.ProcConfig{GhBin: bin, Addr: addr, DataDir: dataDir})
+	// 就绪等待放宽到 30s(默认 8s):Windows 首启的 gh 可能刚经历下载,
+	// 首次初始化(数据目录/模型配置)偏慢,超时会被误杀 —— 表现为
+	// "gh 没有随 goder 启动、消息发不出去"。
+	s.proc = ghserver.NewProc(ghserver.ProcConfig{
+		GhBin: bin, Addr: addr, DataDir: dataDir, ReadyTimeout: 30 * time.Second,
+	})
 	st := s.proc.Start()
 	s.lastErr = st.LastError
 	return st

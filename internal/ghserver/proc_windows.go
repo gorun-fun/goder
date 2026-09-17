@@ -14,9 +14,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// childProcAttr Windows 下无进程组;整树回收交给 taskkill /T。
+// childProcAttr Windows 下无进程组;整树回收交给 taskkill /T。gh.exe 是
+// 控制台子系统程序而宿主 goder.exe 是 GUI 程序(自身无控制台):不加固
+// 定标志,Windows 会为 gh 新开一个 cmd 窗口。CREATE_NO_WINDOW + 重定向
+// stdout/stderr 后 gh 完全静默运行。
 func childProcAttr() *syscall.SysProcAttr {
-	return nil
+	return &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 }
 
 // startWatchdog Windows 暂无 /bin/sh 管道方案,不挂看门狗。宿主异常退出
@@ -25,8 +28,11 @@ func (p *Proc) startWatchdog(pid int, group bool) {}
 
 // killProcTree 回收 gh 进程树:taskkill /T 连同子进程一起结束。Windows 无
 // SIGTERM 优雅信号,直接强杀(会话落盘窗口由 gh 自身的退出处理决定)。
+// taskkill 同为控制台程序,同样要 CREATE_NO_WINDOW,否则退出时闪 cmd。
 func killProcTree(pid int, group bool) {
-	_ = exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
+	cmd.SysProcAttr = childProcAttr()
+	_ = cmd.Run()
 }
 
 func alive(pid int) bool {
