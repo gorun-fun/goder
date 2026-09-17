@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,9 +53,9 @@ type SkillDTO struct {
 
 // SkillsDTO 与前端 host/bridge.ts 的 SkillsDTO 对齐。
 type SkillsDTO struct {
-	Path     string      `json:"path"` // skills 目录绝对路径(展示用)
-	Skills   []SkillDTO  `json:"skills"`
-	Writable bool        `json:"writable"`
+	Path     string     `json:"path"` // skills 目录绝对路径(展示用)
+	Skills   []SkillDTO `json:"skills"`
+	Writable bool       `json:"writable"`
 }
 
 // AgentConfig wails 服务。
@@ -325,27 +324,6 @@ func downloadBase() string {
 	return defaultDownloadBase
 }
 
-func platformDir() (string, error) {
-	switch runtime.GOOS {
-	case "darwin":
-		if runtime.GOARCH == "arm64" {
-			return "macos-arm64", nil
-		}
-		return "macos", nil
-	case "linux":
-		if runtime.GOARCH == "arm64" {
-			return "linux-arm64", nil
-		}
-		return "linux", nil
-	case "windows":
-		if runtime.GOARCH == "arm64" {
-			return "windows-arm64", nil
-		}
-		return "windows", nil
-	}
-	return "", fmt.Errorf("当前平台 %s/%s 没有发布产物", runtime.GOOS, runtime.GOARCH)
-}
-
 var dirHrefRe = regexp.MustCompile(`<a href="([^"]+)"`)
 
 // listDlDir 解析下载服务器的 nginx 目录列表;404 返回 (nil, false)。
@@ -388,7 +366,7 @@ type RemoteReleaseDTO struct {
 
 // latestPluginsDir 取最新一个含 plugins/ 产物的版本目录;无产物返回 nil。
 func latestPluginsDir(ctx context.Context) (*RemoteReleaseDTO, error) {
-	dir, err := platformDir()
+	dir, err := ghPlatformDir()
 	if err != nil {
 		return nil, err
 	}
@@ -522,7 +500,7 @@ func (a *AgentConfig) PluginInstall(name string) error {
 	if !ok {
 		return fmt.Errorf("找不到插件 %s(可用:%s)", name, strings.Join(rel.Files, "、"))
 	}
-	dir, _ := platformDir()
+	dir, _ := ghPlatformDir()
 	url := fmt.Sprintf("%s/%s/%s/plugins/%s", downloadBase(), dir, rel.Version, file)
 	dst := filepath.Join(grfHome(), "plugins", file)
 	if err := downloadFile(ctx, url, dst); err != nil {
@@ -598,7 +576,7 @@ func (a *AgentConfig) SkillRemoteList() (RemoteReleaseDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	out := RemoteReleaseDTO{Files: []string{}}
-	dir, err := platformDir()
+	dir, err := ghPlatformDir()
 	if err != nil {
 		return out, err
 	}
@@ -652,7 +630,7 @@ func (a *AgentConfig) SkillInstall(file string) error {
 	if !found {
 		return fmt.Errorf("找不到技能 %s", file)
 	}
-	dir, _ := platformDir()
+	dir, _ := ghPlatformDir()
 	url := fmt.Sprintf("%s/%s/%s/skills/%s", downloadBase(), dir, rel.Version, file)
 	name := strings.TrimSuffix(file, ".md")
 	if err := validSkillName(name); err != nil {

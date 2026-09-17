@@ -21,13 +21,12 @@ var assets embed.FS
 func main() {
 	sm := desktop.GetServerManager()
 
-	// 环境检查门(Windows/Linux:gh 不随包分发):gh 缺失时走下载(Windows
-	// 弹原生对话框,Linux 静默),先完成(用户拒绝或失败也放行)才创建应用与
-	// 主窗体("gh 下载以后才能打开主窗体")。只做检查/下载,不启动服务 ——
-	// gh 由主窗体启动时的冷启动拉起。macOS 捆绑 gh,无需此门。
-	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
-		sm.EnsureGh()
-	}
+	// 环境检查门(三平台同一时点):gh 缺失时自动下载(Windows 弹原生
+	// 对话框,macOS/Linux 静默),先完成(用户拒绝或失败也放行)才创建应用
+	// 与主窗体("gh 下载以后才能打开主窗体")。只做检查/下载,不启动服务
+	// —— gh 由主窗体启动时的冷启动拉起。macOS .app 正常捆绑 gh,此门
+	// 立即通过;仅捆绑副本缺失时静默补齐(与 Linux 行为一致)。
+	sm.EnsureGh()
 
 	rootHandler := desktop.RootHandler(application.BundledAssetFileServer(assets))
 	// 显式复用 wails 默认的 HTTP IPC transport(与不设置 Transport 时完全
@@ -59,8 +58,6 @@ func main() {
 		Transport: transport,
 	})
 
-	// 窗口装饰按平台分派(见 windowopt_*.go):mac 隐藏标题栏保留红绿灯;
-	// windows 整窗无边框,窗口控制由前端顶栏自绘。共用部分写在这里。
 	winOpts := application.WebviewWindowOptions{
 		Name:      "main",
 		Title:     "Goder",
@@ -70,7 +67,17 @@ func main() {
 		MinWidth:  880,
 		MinHeight: 560,
 	}
-	applyWindowDecorations(&winOpts)
+	// 窗口装饰(三平台统一策略):macOS 隐藏原生标题栏、仅保留左上红绿灯
+	// (关闭/最小化/最大化),内容铺满整窗;Windows/Linux 没有这种"去标题栏
+	// 留红绿灯"的能力,只能整窗无边框,窗口控制由前端顶栏自绘(frontend 的
+	// .winctl,见 host/winctl.ts),拖动/双击缩放走标题栏消息桥,边缘缩放由
+	// wails runtime 的 drag 模块接管。Mac 字段在非 macOS 平台被 wails 忽略,
+	// 无须构建标签分文件。
+	if runtime.GOOS == "darwin" {
+		winOpts.Mac = application.MacWindow{TitleBar: application.MacTitleBarHidden}
+	} else {
+		winOpts.Frameless = true
+	}
 	// Windows:wails 资产管道整体缓冲响应、SSE 无流式(见
 	// localserv_windows.go);改从本地真实 HTTP 服务器加载,静态资产与
 	// /grf-api 同源。本地服务器同时挂 transport 的 /wails/runtime IPC

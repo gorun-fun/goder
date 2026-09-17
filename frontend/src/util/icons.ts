@@ -38,7 +38,7 @@ export const icon = {
   file: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 1.8h5l3.2 3.2v9.2H4z" stroke-linejoin="round"/><path d="M9 1.8V5h3.2" stroke-linejoin="round"/></svg>',
   activity: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 8.5h2.6l1.9-4.6 3 9.2 1.9-4.6h3.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   eye: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8z" stroke-linejoin="round"/><circle cx="8" cy="8" r="2"/></svg>',
-  // 窗口控制(Windows 无边框窗口自绘用)
+  // 窗口控制(无边框桌面平台 Windows/Linux 自绘用)
   winMin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M3.2 8h9.6" stroke-linecap="round"/></svg>',
   winMax: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="3.4" y="3.4" width="9.2" height="9.2" rx="1"/></svg>',
   winRestore: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="3" y="5.4" width="7.6" height="7.6" rx="1"/><path d="M5.6 5.4V4.2c0-.7.5-1.2 1.2-1.2h5c.7 0 1.2.5 1.2 1.2v5c0 .7-.5 1.2-1.2 1.2h-1.2" stroke-linejoin="round"/></svg>',

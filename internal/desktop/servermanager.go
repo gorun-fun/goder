@@ -92,7 +92,7 @@ func (s *ServerManager) resolveGh() string {
 	// Windows 弹框检查环境并自动下载(macOS/Linux 发行包已捆绑 gh,
 	// 此路径不会触发)。
 	if bin == "" && (cfg.GhBinary == "" || cfg.GhBinary == "gh") {
-		if p, derr := ensureGhDownloadUI(); derr == nil {
+		if p, derr := ensureGhDownload(); derr == nil {
 			bin = p
 		} else {
 			log.Printf("[servermanager] gh 自动下载未完成: %v", derr)

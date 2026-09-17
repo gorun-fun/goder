@@ -52,7 +52,8 @@ export class GrfChat extends GrfPanel {
   @property({ type: Boolean }) leftOn = true;
   /** macOS 桌面态:左栏收起时头部为红绿灯保留悬浮位 */
   @property({ type: Boolean, attribute: 'left-lights' }) leftLights = false;
-  /** Windows 桌面态:头部右上为壳自绘的窗口控制(最小化/最大化/关闭)留位 */
+  /** 无边框桌面平台(Windows/Linux):头部右上为壳自绘的窗口控制
+   * (最小化/最大化/关闭)留位 */
   @property({ type: Boolean, attribute: 'win-controls' }) winControls = false;
 
   @state() private stickBottom = true;
@@ -145,7 +146,7 @@ export class GrfChat extends GrfPanel {
       header.lights {
         padding-left: 80px;
       }
-      /* Windows 无边框态:壳右上角自绘的窗口控制(3×30 + 间隙 + 内边距)
+      /* 无边框桌面平台(Windows/Linux):壳右上角自绘的窗口控制(3×30 + 间隙
        * 悬浮于卡片右上,头部右侧让位 */
       header.win {
         padding-right: 106px;
@@ -1277,7 +1278,7 @@ export class GrfChat extends GrfPanel {
     this.stickBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   }
 
-  /** 头部修饰类:macOS 红绿灯悬浮位(左栏收起时)/ Windows 窗口控制让位 */
+  /** 头部修饰类:macOS 红绿灯悬浮位(左栏收起时)/ 无边框桌面平台窗口控制让位 */
   private get headerClass(): string {
     return [this.leftLights && !this.leftOn ? 'lights' : '', this.winControls ? 'win' : ''].filter(Boolean).join(' ');
   }

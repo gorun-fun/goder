@@ -209,10 +209,13 @@ docs/                    embedding.md(三方集成)
 - 历史(非本进程)回合的思考过程(reasoning)不在线格式里,恢复历史时
   不回放;工具卡与正文正常回放
 - web 形态的项目索引存 localStorage(按源隔离);桌面态存文件
-- 内嵌终端依赖 PTY,仅桌面态可用(Windows 暂不支持);git 审查同理仅
-  桌面态。嵌入形态对应入口自动隐藏;事件台与浏览器 tab 在嵌入态可用
-- Windows 发行包(zip)只含 goder.exe:首次启动检测到未安装 gh 时弹框
-  确认并自动下载当前系统/架构的最新版到用户配置目录 `bin/` 下
-  (来源 download.gorun.fun/grf-harness);macOS .app 与 Linux zip 仍直接捆绑 gh
+- 内嵌终端依赖 PTY,仅桌面态可用(macOS/Linux 用 pty,Windows 用
+  ConPTY);git 审查同理仅桌面态。嵌入形态对应入口自动隐藏;事件台与
+  浏览器 tab 在嵌入态可用
+- gh(grf-harness)缺失时三平台同一时点自动下载(主窗体创建前的环境
+  检查门):Windows 弹原生对话框确认并带进度条,macOS/Linux 静默下载,
+  均落用户配置目录 `bin/` 下(来源 download.gorun.fun/grf-harness)。
+  macOS .app 正常捆绑 gh(缺失才走下载兜底);Windows/Linux 发行包
+  (zip)只含 goder 本体
 - sso 身份模式的本地会话表在内存中(默认实现),网关重启需重新登录;
   `identity.SessionStore` 接口预留给持久化实现

@@ -1,9 +1,11 @@
 // ghdownload.go — gh(grf-harness)按需自动下载:核心下载逻辑(跨平台)。
-// Windows/Linux 发行包不捆绑 gh,首次启动检测到缺失时从官方下载服务器
-// (download.gorun.fun/grf-harness)拉取当前系统/架构的最新版到用户配置
-// 目录 bin/ 下,作为后续启动的解析候选。
-// 交互形态按平台:Windows 弹原生对话框(ghdownload_windows.go),
-// Linux 静默下载(ghdownload_linux.go),macOS .app 已捆绑(no-op)。
+// 发行包不捆绑 gh 的平台(Windows/Linux)首次启动检测到缺失时,从官方
+// 下载服务器(download.gorun.fun/grf-harness)拉取当前系统/架构的最新版
+// 到用户配置目录 bin/ 下,作为后续启动的解析候选;macOS .app 正常已捆绑
+// gh,仅捆绑副本缺失时静默补齐。
+// 流程三平台同构(planGhDownload:平台目录 → 最新版本 → 落点 → URL →
+// 大小),交互形态按平台:Windows 弹原生对话框(ghdownload_windows.go),
+// 其余静默只打日志(ghdownload_silent.go)。
 package desktop
 
 import (
@@ -108,6 +110,51 @@ func remoteContentSize(url string) (int64, error) {
 		return 0, fmt.Errorf("HEAD 返回 %d(长度 %d)", resp.StatusCode, resp.ContentLength)
 	}
 	return resp.ContentLength, nil
+}
+
+// ghDownloadPlan 一次自动下载所需的全部参数(平台无关)。
+type ghDownloadPlan struct {
+	dir string // 下载侧平台目录
+	ver string // 最新版本号
+	dst string // 落点(<配置目录>/bin/gh[.exe])
+	url string // 完整下载 URL
+	// 精确大小(HEAD Content-Length);sizeKnown=false 表示探测失败,
+	// 提示回退模糊描述。
+	size      int64
+	sizeKnown bool
+}
+
+// sizeDesc 下载大小的用户提示。
+func (p ghDownloadPlan) sizeDesc() string {
+	if p.sizeKnown {
+		return fmt.Sprintf("%.1f MB", float64(p.size)/(1<<20))
+	}
+	return "约几十 MB"
+}
+
+// planGhDownload 解析平台目录/最新版本/落点并组装下载 URL —— 各平台的
+// ensureGhDownload 共用入口,保证三平台落点与来源一致。
+func planGhDownload() (ghDownloadPlan, error) {
+	dir, err := ghPlatformDir()
+	if err != nil {
+		return ghDownloadPlan{}, err
+	}
+	ver, err := latestGhVersion()
+	if err != nil {
+		return ghDownloadPlan{}, fmt.Errorf("检查下载服务器失败: %w", err)
+	}
+	dst, err := managedGhPath()
+	if err != nil {
+		return ghDownloadPlan{}, err
+	}
+	p := ghDownloadPlan{
+		dir: dir, ver: ver, dst: dst,
+		url: ghDlBase + "/" + dir + "/" + ver + "/" + ghExeName(),
+	}
+	if sz, serr := remoteContentSize(p.url); serr == nil {
+		p.size, p.sizeKnown = sz, true
+	}
+	return p, nil
 }
 
 // ghDownload 一次受控下载:progress 上报百分比(0-100),cancel 置位后中止。

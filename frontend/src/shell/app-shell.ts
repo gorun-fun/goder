@@ -12,6 +12,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme } from '../ui/panel';
 import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
+import { isMacDesktop } from '../host/platform';
 import { closeWindow, isWindowMaximised, isFramelessDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
 import { registry, sideTabId, type PanelContext, type SideTabInstance } from '../registry/registry';
@@ -50,10 +51,9 @@ export class GrfAppShell extends GrfPanel {
   /** 右栏当前激活的 tab id */
   @state() private activeSideTab = '';
 
-  /** macOS 桌面态:左栏顶行左侧为红绿灯(关/最小/最大化)预留悬浮位,
-   * 最大化按钮之后仅放左边栏开关。 */
-  private readonly nativeLights =
-    inWails() && /mac/i.test(navigator.platform || navigator.userAgent);
+  /** macOS 桌面态(检测见 host/platform.ts):左栏顶行左侧为红绿灯
+   * (关/最小/最大化)预留悬浮位,最大化按钮之后仅放左边栏开关。 */
+  private readonly nativeLights = isMacDesktop();
 
   /** 无边框桌面平台(Windows/Linux):窗口整窗无边框(原生标题栏与最小化/
    * 最大化/关闭都已移除),右上角由壳自绘 .winctl;顶排头部右侧让位(见 .win)。 */
@@ -186,7 +186,7 @@ export class GrfAppShell extends GrfPanel {
       .hidden {
         display: none !important;
       }
-      /* Windows 无边框窗口控制:右上角自绘最小化/最大化/关闭,与顶排同高
+      /* 无边框桌面平台(Windows/Linux)窗口控制:右上角自绘最小化/最大化/关闭,与顶排同高
        * (40px);面板头部右侧经 .win 让出等宽空间(30×3 + 间隙 + 内边距)。 */
       .winctl {
         position: absolute;
@@ -267,7 +267,7 @@ export class GrfAppShell extends GrfPanel {
     });
     window.addEventListener('pointermove', this.onDrag);
     window.addEventListener('pointerup', this.stopDrag);
-    // Windows 无边框态:最大化状态只有自绘按钮要知道(切换图标)。窗口尺寸
+    // 无边框桌面平台:最大化状态只有自绘按钮要知道(切换图标)。窗口尺寸
     // 变化即查询一次,覆盖双击顶排/Win+↑/任务栏等一切非按钮路径。
     if (this.nativeWinControls) {
       window.addEventListener('resize', this.syncMaximised);

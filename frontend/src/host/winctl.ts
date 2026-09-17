@@ -1,18 +1,19 @@
-// winctl.ts — 无边框桌面平台(Windows/Linux)的窗口控制。
+// winctl.ts — 无边框桌面平台(macOS 以外)的自绘窗口控制。
 //
-// 这两个平台没有 macOS 那种"隐藏标题栏但保留红绿灯"的能力:窗口只能整
-// 窗无边框(main.go 的 applyWindowDecorations 置 Frameless),原生最小化/
-// 最大化/关闭按钮一并消失,改由 app-shell 右上角自绘(.winctl),这里封装
-// 对应的 wails runtime 窗口调用。macOS 用系统红绿灯,不经过本模块。
+// 这些平台没有 macOS 那种"隐藏标题栏但保留红绿灯"的能力:窗口只能整
+// 窗无边框(main.go 的窗口装饰分支置 Frameless),原生最小化/最大化/关闭
+// 按钮一并消失,改由 app-shell 右上角自绘(.winctl),这里封装对应的
+// wails runtime 窗口调用。macOS 用系统红绿灯,不经过本模块。
 //
 // runtime 是动态 import:非桌面态与嵌入产物都不会把它打进包(同 host/bridge)。
 import { inWails } from './bridge';
+import { isMacDesktop } from './platform';
 
 /** 当前是自绘窗口控制的平台(Windows/Linux 桌面态:整窗无边框)。 */
 export function isFramelessDesktop(): boolean {
   if (!inWails()) return false;
-  // macOS 排除(红绿灯);其余桌面平台按 windowopt_*.go 均为 Frameless。
-  return !/mac/i.test(navigator.platform || navigator.userAgent);
+  // macOS 排除(红绿灯);其余桌面平台按 main.go 的装饰分支均为 Frameless。
+  return !isMacDesktop();
 }
 
 interface WindowAPI {

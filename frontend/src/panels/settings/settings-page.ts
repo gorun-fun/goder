@@ -24,7 +24,8 @@ export class GrfSettingsPage extends GrfPanel {
   @property({ type: Boolean }) leftOn = true;
   /** macOS 桌面态:左栏收起时头部为红绿灯保留悬浮位 */
   @property({ type: Boolean }) leftLights = false;
-  /** Windows 桌面态:头部右上为壳自绘的窗口控制(最小化/最大化/关闭)留位 */
+  /** 无边框桌面平台(Windows/Linux):头部右上为壳自绘的窗口控制
+   * (最小化/最大化/关闭)留位 */
   @property({ type: Boolean, attribute: 'win-controls' }) winControls = false;
 
   /** 自动保存成功的瞬时提示 */
@@ -88,7 +89,7 @@ export class GrfSettingsPage extends GrfPanel {
       header.lights {
         padding-left: 80px;
       }
-      /* Windows 无边框态:壳右上角自绘的窗口控制悬浮于卡片右上,右侧让位 */
+      /* 无边框桌面平台(Windows/Linux):壳右上角自绘的窗口控制悬浮于卡片右上,右侧让位 */
       header.win {
         padding-right: 106px;
       }
