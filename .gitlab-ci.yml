@@ -172,7 +172,9 @@ build:
         go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${CROSS_ARCH} .
       for ARCH in ${NATIVE_ARCH} ${CROSS_ARCH}; do
         rm -rf .linstage && mkdir .linstage
-        cp bin/goder-linux-${ARCH} bin/gh-linux-${ARCH} .linstage/
+        # zip 内统一命名 goder/gh(与解压使用方式一致),cp 显式落目标名
+        cp bin/goder-linux-${ARCH} .linstage/goder
+        cp bin/gh-linux-${ARCH}    .linstage/gh
         (cd .linstage && zip -qry ../bin/goder-linux-${ARCH}.zip goder gh)
       done
       rm -rf .linstage
@@ -182,7 +184,8 @@ build:
         CGO_ENABLED=0 GOOS=windows GOARCH=${ARCH} \
           go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-windows-${ARCH}.exe .
         rm -rf .winstage && mkdir .winstage
-        cp bin/goder-windows-${ARCH}.exe bin/gh-windows-${ARCH}.exe .winstage/
+        cp bin/goder-windows-${ARCH}.exe .winstage/goder.exe
+        cp bin/gh-windows-${ARCH}.exe    .winstage/gh.exe
         (cd .winstage && zip -qry ../bin/goder-windows-${ARCH}.zip goder.exe gh.exe)
       done
       rm -rf .winstage
