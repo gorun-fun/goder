@@ -24,6 +24,16 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
   `git tag v<版本> && git push origin v<版本>`。
   已发版本以下载服务器目录为准(download.gorun.fun/goder);
   受保护 tag 不可移动,误发的 tag 只能另打新 tag 重触发。
+- **版本号约定**:形态 `X.Y.Z[-预发布.N][.postM]`,如
+  `0.0.1-alpha.14`、`0.0.1-alpha.14.post11`、`0.0.1-beta.1`、`0.0.1`(正式)。
+  预发布后缀递进 alpha(内测)< beta(公测)< rc(候选);同基线本程序
+  再发版追加 `.postN`(高于该基线,低于下一个 gh 基线);正式版为无后缀
+  裸版本号,压过同号全部预发布与 post。排序有三处实现、必须同一套语义:
+  桌面端自动更新 `internal/desktop/ghdownload.go` 的 `compareVersion`、
+  发版推算 `scripts/version.sh` 的 `ver_max`(awk)、CI 捆绑 gh 下载
+  (调 `sh scripts/version.sh gh`)。不要用 `sort -V` 替代:它把正式版排
+  在预发布之下且 postN 按字符串比。改比较规则时三处同改,并用矩阵用例
+  (内测/公测/候选/正式/postN/跨基线)验证。
 
 ## 结构与分层
 

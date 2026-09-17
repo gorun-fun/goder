@@ -1,7 +1,7 @@
 // builtin-desktop.ts — 桌面(wails)形态额外注册的内置条目:右栏 git
-// 审查 / 终端 / 文件预览与底栏终端。仅 entries/desktop.ts 引入(嵌入产物
-// 不含 xterm 等桌面依赖);条目自带 visible 守卫,非桌面 web 直开时自动
-// 隐藏,与嵌入形态行为一致。
+// 审查 / 终端 / 文件预览与底栏终端,以及左栏更新按钮(自动更新)。仅
+// entries/desktop.ts 引入(嵌入产物不含 xterm 等桌面依赖);条目自带
+// visible 守卫,非桌面 web 直开时自动隐藏,与嵌入形态行为一致。
 import { html } from 'lit';
 import { registry } from '../registry/registry';
 import { icon } from '../util/icons';
@@ -10,6 +10,7 @@ import { panelRegistered } from '../ui/panel';
 import '../panels/inspector/review';
 import '../panels/files/file-view';
 import '../panels/terminal/terminal';
+import '../panels/updater/update-chip';
 
 let registered = false;
 

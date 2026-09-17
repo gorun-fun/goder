@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -47,7 +46,8 @@ func managedGhPath() (string, error) {
 	return filepath.Join(dir, "bin", ghExeName()), nil
 }
 
-// ghPlatformDir 下载侧平台目录(与 CI 发布目录一致)。
+// ghPlatformDir 下载侧平台目录(与 CI 发布目录一致;gh 与 goder 两个产品
+// 的发布目录结构相同,updater 也用它拼 goder 的下载地址)。
 func ghPlatformDir() (string, error) {
 	switch runtime.GOOS + "/" + runtime.GOARCH {
 	case "darwin/arm64":
@@ -66,13 +66,19 @@ func ghPlatformDir() (string, error) {
 	return "", fmt.Errorf("无 gh 发行包的平台 %s/%s", runtime.GOOS, runtime.GOARCH)
 }
 
-// latestGhVersion 抓下载服务器目录列表页(静态 HTML),取最大版本目录。
+// latestGhVersion gh(grf-harness)下载服务器的最新版本目录。
 func latestGhVersion() (string, error) {
+	return latestDlVersion(ghDlBase)
+}
+
+// latestDlVersion 抓下载服务器目录列表页(静态 HTML),取当前平台最大
+// 版本目录(gh 与 goder 共用;目录结构 {base}/{平台}/{版本}/)。
+func latestDlVersion(base string) (string, error) {
 	dir, err := ghPlatformDir()
 	if err != nil {
 		return "", err
 	}
-	resp, err := ghClient.Get(ghDlBase + "/" + dir + "/")
+	resp, err := ghClient.Get(base + "/" + dir + "/")
 	if err != nil {
 		return "", fmt.Errorf("访问下载服务器失败: %w", err)
 	}
@@ -229,34 +235,130 @@ func (d *ghDownload) run(url, dst string) error {
 	return nil
 }
 
-// compareVersion 比较 dotted 数字版本号(sort -V 语义的简化版):
-// 逐段数值比较,段数少者视为补 0;非数字段按字符串比较兜底。
+// compareVersion 比较 dotted 版本号(sort -V 语义的修正版,兼容 semver 式
+// 预发布):按 "." 分段,缺段补 "0"(1 与 1.0 相等)。段比较规则见
+// compareVersionSeg —— 关键点:数字段带连字符预发布后缀(1-alpha)时,
+// 无后缀的裸数字段(正式版 1)排在其上;而 X 与 X.postN 这类"纯字母数字
+// 混排段"按自然序(postN 的数字后缀按数值比)。对本项目已发布的
+// 0.0.1-alpha.N[.postM] 形态,新旧规则结果完全相同;新规则额外保证:
+//   0.0.1-alpha.14 < 0.0.1-beta.1 < 0.0.1-rc.1 < 0.0.1(正式版)
+//   0.0.1-alpha.14 < 0.0.1-alpha.14.post9 < ...post11(维持不变)
 func compareVersion(a, b string) int {
 	as := strings.Split(strings.TrimPrefix(a, "v"), ".")
 	bs := strings.Split(strings.TrimPrefix(b, "v"), ".")
 	for i := 0; i < len(as) || i < len(bs); i++ {
-		av, bv := "0", "0"
+		av, bv := "0", "0" // 缺段补 "0":1 与 1.0 相等
 		if i < len(as) {
 			av = as[i]
 		}
 		if i < len(bs) {
 			bv = bs[i]
 		}
-		an, aerr := strconv.Atoi(av)
-		bn, berr := strconv.Atoi(bv)
-		switch {
-		case aerr != nil || berr != nil:
-			if c := strings.Compare(av, bv); c != 0 {
-				return c
-			}
-		case an != bn:
-			if an < bn {
-				return -1
-			}
-			return 1
+		if c := compareVersionSeg(av, bv); c != 0 {
+			return c
 		}
 	}
 	return 0
+}
+
+// compareVersionSeg 比较单个 "." 段。
+// 结构化路径:两侧都是"数字前缀[-连字符后缀]"形态(如 1、14、1-alpha)时,
+// 数字前缀按数值比;相同时无后缀(正式)大于有后缀(预发布),后缀之间
+// 自然序比(alpha < beta < rc)。其余形态(post11 等混排段)整体自然序比。
+func compareVersionSeg(x, y string) int {
+	if x == y {
+		return 0
+	}
+	xn, xs := splitNumHyphen(x)
+	yn, ys := splitNumHyphen(y)
+	if xn != "" && yn != "" {
+		if c := compareNumericStr(xn, yn); c != 0 {
+			return c
+		}
+		switch {
+		case xs == "" && ys == "":
+			return 0
+		case xs == "":
+			return 1 // 正式版段 > 预发布段
+		case ys == "":
+			return -1
+		}
+		return natCompare(xs, ys)
+	}
+	return natCompare(x, y)
+}
+
+// splitNumHyphen 拆出"数字前缀 + 连字符后缀":
+// "14" → ("14","");"1-alpha" → ("1","alpha");非该形态 → ("",原串)。
+func splitNumHyphen(s string) (num, suffix string) {
+	if isDigitRun(s) {
+		return s, ""
+	}
+	if i := strings.IndexByte(s, '-'); i > 0 && isDigitRun(s[:i]) {
+		return s[:i], s[i+1:]
+	}
+	return "", s
+}
+
+// compareNumericStr 比较两个纯数字串(去前导零后先按位数再字典序)。
+func compareNumericStr(x, y string) int {
+	x, y = strings.TrimLeft(x, "0"), strings.TrimLeft(y, "0")
+	if len(x) != len(y) {
+		if len(x) < len(y) {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(x, y)
+}
+
+// verTokenRe 自然序比较的最小词:连续数字或连续非数字。
+var verTokenRe = regexp.MustCompile(`[0-9]+|[^0-9]+`)
+
+// natCompare 自然序比较:逐词比,数字词按数值比、非数字词按字符串比;
+// 数字词排在非数字词前(post9 < post11 的数值序、0 < post0 的补位序
+// 都由此成立)。
+func natCompare(x, y string) int {
+	xt := verTokenRe.FindAllString(x, -1)
+	yt := verTokenRe.FindAllString(y, -1)
+	for i := 0; i < len(xt) || i < len(yt); i++ {
+		var xv, yv string
+		if i < len(xt) {
+			xv = xt[i]
+		}
+		if i < len(yt) {
+			yv = yt[i]
+		}
+		if xv == yv {
+			continue
+		}
+		xd, yd := isDigitRun(xv), isDigitRun(yv)
+		switch {
+		case xd && yd:
+			if c := compareNumericStr(xv, yv); c != 0 {
+				return c
+			}
+		case xd:
+			return -1
+		case yd:
+			return 1
+		default:
+			if c := strings.Compare(xv, yv); c != 0 {
+				return c
+			}
+		}
+	}
+	return 0
+}
+
+// isDigitRun 整串是否为数字(verTokenRe 的词要么全数字要么全非数字)。
+func isDigitRun(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // versionHrefRe 目录列表页中的版本目录链接(形如 href="v1.2.3/")。

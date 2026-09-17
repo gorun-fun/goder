@@ -73,32 +73,33 @@ func (s *ServerManager) Status() ghserver.Status {
 // 有 UI,其余平台静默失败)。调用方无须持锁。
 func (s *ServerManager) resolveGh() string {
 	cfg, _ := (&AppConfig{}).Load()
-	// 解析顺序:显式配置 → App 包内捆绑副本 → 常见安装目录 → 下载管理
-	// 目录(<配置目录>/bin,Windows 首启弹框自动下载落点)→ PATH;
-	// Finder/Dock 启动的 App PATH 只有系统目录,不能只靠 LookPath。
-	bin := ghserver.ResolveGhBin(cfg.GhBinary)
-	if bin == "" {
-		if p, merr := managedGhPath(); merr == nil {
-			// 可执行位只对类 Unix 有意义:Windows 的 os.Stat 对普通文件
-			// 恒报 0666(无执行位),按执行位过滤会把已下载的 gh.exe
-			// 判成不可用,导致每次启动都重新弹下载框。
-			if st, serr := os.Stat(p); serr == nil && !st.IsDir() &&
-				(runtime.GOOS == "windows" || st.Mode()&0o111 != 0) {
-				bin = p
-			}
+	// 显式配置:只认配置(含其捆绑/PATH 回退链),自动更新不接管。
+	if cfg.GhBinary != "" && cfg.GhBinary != "gh" {
+		return ghserver.ResolveGhBin(cfg.GhBinary)
+	}
+	// 未显式配置:托管下载目录(<配置目录>/bin)优先 —— gh 首启自动下载
+	// 与自动更新(updater)都落在这里,存在即接管 App 捆绑副本/常见目录/
+	// PATH 里的旧版本;首次启动无此目录,行为与原先一致。
+	if p, err := managedGhPath(); err == nil {
+		// 可执行位只对类 Unix 有意义:Windows 的 os.Stat 对普通文件
+		// 恒报 0666(无执行位),按执行位过滤会把已下载的 gh.exe
+		// 判成不可用,导致每次启动都重新弹下载框。
+		if st, serr := os.Stat(p); serr == nil && !st.IsDir() &&
+			(runtime.GOOS == "windows" || st.Mode()&0o111 != 0) {
+			return p
 		}
 	}
-	// 仍未找到且未显式配置("gh" 是默认值,仅 PATH 查找,视为未配置):
-	// Windows 弹框检查环境并自动下载(macOS/Linux 发行包已捆绑 gh,
-	// 此路径不会触发)。
-	if bin == "" && (cfg.GhBinary == "" || cfg.GhBinary == "gh") {
-		if p, derr := ensureGhDownload(); derr == nil {
-			bin = p
-		} else {
-			log.Printf("[servermanager] gh 自动下载未完成: %v", derr)
-		}
+	if bin := ghserver.ResolveGhBin(""); bin != "" {
+		return bin
 	}
-	return bin
+	// 仍未找到:Windows 弹框检查环境并自动下载(macOS/Linux 发行包已捆绑
+	// gh,此路径不会触发)。
+	if p, derr := ensureGhDownload(); derr == nil {
+		return p
+	} else {
+		log.Printf("[servermanager] gh 自动下载未完成: %v", derr)
+	}
+	return ""
 }
 
 // EnsureGh 环境检查门:确认 gh 可解析(Windows 缺失时同步弹下载 UI 走完

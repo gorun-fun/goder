@@ -15,7 +15,8 @@
 #             进 .app(不从源码构建;Linux/Windows 不捆绑,App 首启自动下载)
 #          -> 组装 Goder.app(Info.plist 模板 + 仓库内 AppIcon.icns,
 #             ldid 补 adhoc 签名)-> zip 按平台/版本目录 scp 发布到 10.8.0.5:
-#             /data/download/goder/{目标平台}/{版本号}/goder-*.zip
+#             /data/download/goder/{目标平台}/{版本号}/goder-*.zip 与
+#             notes.txt(tag 提交信息,桌面 App 自动更新的更新说明)
 #             版本号不取本仓库 tag:跟随 grf-harness 最新发布 tag;gh 不变
 #             而本程序再发版时追加 .postN(推算在 scripts/version.sh,与本地
 #             build.sh 同源;build 阶段写入 bin/VERSION 供 publish 读取)。
@@ -114,10 +115,12 @@ build:
     - VERSION=$(sh scripts/version.sh)
     - echo "Goder 版本 $VERSION"
     # ---- gh:直接下载 grf-harness 各平台最新发布版(不从源码构建) ----
-    # 目录列表页是静态 HTML,版本号目录 sort -V 取最大;两架构共用同一版本,
-    # 以 macos-arm64 的列表为准(macos/amd64 目录可能滞后半拍,先探测存在)
+    # 目录列表页是静态 HTML,版本号目录取最大;两架构共用同一版本,以
+    # macos-arm64 的列表为准(macos/amd64 目录可能滞后半拍,先探测存在)。
+    # 排序与 scripts/version.sh 同一实现(semver 式预发布 + postN 自然序,
+    # sort -V 会把正式版排在预发布之下且 postN 按字符串比,不可用)
     - |
-      GH_VERSION=$(curl -fsSL ${GH_DL_BASE}/macos-arm64/ | grep -oE 'href="[0-9][^"/]*/"' | cut -d'"' -f2 | tr -d / | sort -V | tail -1)
+      GH_VERSION=$(sh scripts/version.sh gh)
       [ -n "$GH_VERSION" ] || { echo "获取 gh 最新版本失败"; exit 1; }
       echo "捆绑 gh 版本: $GH_VERSION"
       mkdir -p bin
@@ -137,7 +140,7 @@ build:
     # | (DT_NEEDED)不搜 -L 目录,需 CGO_LDFLAGS 补 -rpath-link 指向 sysroot
     # | 与交叉工具链库目录;运行库仍用目标机系统库。
     - |
-      CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${NATIVE_ARCH} .
+      CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-linux-${NATIVE_ARCH} .
       XS="/opt/xs/${CROSS_DEB}"
       if [ ! -d "$XS/usr/lib/${CROSS_TRIPLE}/pkgconfig" ]; then
         XS="$CI_PROJECT_DIR/.ci-cache/xs2/${CROSS_DEB}"
@@ -168,7 +171,7 @@ build:
       PKG_CONFIG_SYSROOT_DIR=$XS \
       CGO_LDFLAGS="-Wl,-rpath-link,$XS/usr/lib/${CROSS_TRIPLE} -Wl,-rpath-link,/usr/${CROSS_TRIPLE}/lib" \
       CGO_ENABLED=1 GOOS=linux GOARCH=${CROSS_ARCH} \
-        go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-linux-${CROSS_ARCH} .
+        go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-linux-${CROSS_ARCH} .
       for ARCH in ${NATIVE_ARCH} ${CROSS_ARCH}; do
         rm -rf .linstage && mkdir .linstage
         # 不捆绑 gh:App 启动时检测到缺失会静默自动下载当前系统版本(见
@@ -185,15 +188,15 @@ build:
     - |
       for ARCH in amd64 arm64; do
         CGO_ENABLED=0 GOOS=windows GOARCH=${ARCH} \
-          go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -H windowsgui" -o bin/goder-windows-${ARCH}.exe .
+          go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -H windowsgui -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-windows-${ARCH}.exe .
         rm -rf .winstage && mkdir .winstage
         cp bin/goder-windows-${ARCH}.exe .winstage/goder.exe
         (cd .winstage && zip -qry ../bin/goder-windows-${ARCH}.zip goder.exe)
       done
       rm -rf .winstage
     # ---- darwin 交叉:zig cc + macOS SDK + ldid 均已预置镜像 /opt/mc ----
-    - CC=/opt/mc/bin/zcc-darwin-arm64 GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-darwin-arm64 .
-    - CC=/opt/mc/bin/zcc-darwin-amd64 GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w" -o bin/goder-darwin-amd64 .
+    - CC=/opt/mc/bin/zcc-darwin-arm64 GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-darwin-arm64 .
+    - CC=/opt/mc/bin/zcc-darwin-amd64 GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-darwin-amd64 .
     # adhoc 重签(链接器签名在文件复制后可能失效;gh 下载件同样补签一次)
     - '/opt/mc/bin/ldid -S bin/goder-darwin-arm64 2>/dev/null || echo "WARN arm64 adhoc 签名未执行"'
     - '/opt/mc/bin/ldid -S bin/goder-darwin-amd64 2>/dev/null || echo "WARN amd64 adhoc 签名未执行"'
@@ -221,6 +224,9 @@ build:
       echo "$([ "$CROSS_ARCH" = amd64 ] && echo linux || echo linux-arm64) goder-linux-${CROSS_ARCH}.zip" >> bin/PUBLISH_MANIFEST
       echo "windows goder-windows-amd64.zip" >> bin/PUBLISH_MANIFEST
       echo "windows-arm64 goder-windows-arm64.zip" >> bin/PUBLISH_MANIFEST
+      # 更新说明:tag 指向的提交信息全文,随产物发布为 notes.txt(桌面 App
+      # 自动更新弹窗读取;获取不到时前端只展示版本变化,不影响发布)
+      git log -1 --pretty=%B "${CI_COMMIT_TAG}" > bin/notes.txt || : > bin/notes.txt
       ls -lh bin/
   artifacts:
     paths: [bin/]
@@ -258,5 +264,10 @@ publish:
         ssh -n ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_DIR}/${DIR}/${VERSION}"
         scp -p bin/$ZIP ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/${DIR}/${VERSION}/
       done < bin/PUBLISH_MANIFEST
+      # 更新说明随每个平台目录一起发布(桌面 App 自动更新读取)
+      awk '{print $1}' bin/PUBLISH_MANIFEST | sort -u | while read -r DIR; do
+        [ -n "$DIR" ] || continue
+        scp -p bin/notes.txt ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/${DIR}/${VERSION}/notes.txt
+      done
   rules:
     - if: '$CI_COMMIT_TAG'

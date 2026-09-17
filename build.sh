@@ -37,7 +37,14 @@ if [ "$(uname)" = "Darwin" ]; then
   export CGO_CFLAGS="-O2 -g -mmacosx-version-min=$MACOS_MIN_VERSION"
   export CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$MACOS_MIN_VERSION"
 fi
-go build -o goder .
+# 版本号注入(自更新检查用):`build.sh app` 时按发版规则推算(与
+# Info.plist 同源),普通本地构建为 dev(自更新检查跳过)。
+VERSION="dev"
+if [ "${1:-}" = "app" ]; then
+  VERSION="$(sh scripts/version.sh 2>/dev/null)" || VERSION="0.1.0"
+fi
+echo "==> 版本: $VERSION"
+go build -ldflags "-X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o goder .
 echo "==> 二进制: ./goder"
 
 if [ "${1:-}" = "app" ]; then
@@ -87,9 +94,8 @@ if [ "${1:-}" = "app" ]; then
   else
     echo "==> 警告: 构建机未找到 gh,App 内未捆绑(分发前请安装 gh 或用 GH_BIN 指定)"
   fi
-  # 版本号跟随 grf-harness(gh)最新发布 tag;gh 不变而本程序再发版时
-  # 追加 .postN(规则与自动推算见 scripts/version.sh,CI 同源)
-  VERSION="$(sh scripts/version.sh)" || VERSION="0.1.0"
+  # 版本号已在上方按 scripts/version.sh 推算注入二进制;此处同步写入
+  # Info.plist(规则与自动推算见 scripts/version.sh,CI 同源)
   echo "==> 版本: $VERSION"
   sed -e "s/0\.1\.0/${VERSION}/g" build/darwin/Info.plist > "$APP/Contents/Info.plist"
   # 签名:优先 GRF_SIGN_IDENTITY(或本机 login 钥匙串里的 "Goder Dev" 自签

@@ -1,7 +1,7 @@
 // goder — grf-harness(gh)的 ZCode 风格图形界面。
 // 桌面形态:wails v3;同一前端亦产出可嵌入三方 web 的 web components。
 // wails 服务薄壳(AppConfig/ServerManager/Desktop/ModelConfig/
-// TerminalManager)与 /grf-api 反代在 internal/desktop。
+// TerminalManager/Updater)与 /grf-api 反代在 internal/desktop。
 package main
 
 import (
@@ -46,6 +46,7 @@ func main() {
 			application.NewService(&desktop.Desktop{}),
 			application.NewService(desktop.GetTerminalManager()),
 			application.NewService(desktop.GetBrowserManager()),
+			application.NewService(desktop.GetUpdater()),
 		},
 		Assets: application.AssetOptions{
 			Handler: rootHandler,

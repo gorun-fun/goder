@@ -9,7 +9,7 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme } from '../ui/panel';
+import { GrfPanel, theme, panelRegistered } from '../ui/panel';
 import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
 import { isMacDesktop } from '../host/platform';
@@ -232,7 +232,7 @@ export class GrfAppShell extends GrfPanel {
     super.connectedCallback();
     this.parseLayout();
     if (this.nav) this.activeNavId = this.nav;
-    this.tdrag = makeTitleDrag('button');
+    this.tdrag = makeTitleDrag('button, grf-update-chip');
     // registry 变更(三方增删条目)即时反映到装配
     this.regUnsub = registry.subscribe(() => this.requestUpdate());
     // 导航切换:设置进入(session-list 齿轮)/ 返回 / 三方 grf-nav-activate
@@ -427,6 +427,9 @@ export class GrfAppShell extends GrfPanel {
                   <span class="toggler">
                     <button class="on" title="收起侧栏" @click=${() => (this.showSessions = false)}>${unsafeHTML(icon.panelLeft)}</button>
                   </span>
+                  ${ctx.desktop && panelRegistered('grf-update-chip')
+                    ? html`<grf-update-chip></grf-update-chip>`
+                    : nothing}
                 </div>
                 ${this.filesView && this.activeNavId === 'sessions'
                   ? html`<grf-file-list

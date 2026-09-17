@@ -33,6 +33,12 @@ const SVC = 'git.gorun.fun/share/goder/internal/desktop';
 let runtime: WailsCall | null = null;
 
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
+  return callSlow<T>(12_000, method, ...args);
+}
+
+// callSlow 带(更长)超时的调用:耗时操作(更新检查要访问下载服务器、
+// 应用更新的启动确认)不能套默认 12s。
+async function callSlow<T>(ms: number, method: string, ...args: unknown[]): Promise<T> {
   // 整链路超时(含动态 import):加载初期通道可能挂起,不能让上层永久阻塞。
   return withTimeout(
     (async () => {
@@ -43,7 +49,7 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
       }
       return (await runtime.ByName(method, ...args)) as T;
     })(),
-    12_000,
+    ms,
   );
 }
 
@@ -627,6 +633,84 @@ export async function gitDiff(cwd: string, path: string, staged: boolean): Promi
   } catch {
     return null;
   }
+}
+
+// ---------- 自动更新(Updater service,仅桌面) ----------
+// goder 自身与 gh(grf-harness)的更新检查/应用;进度经 grf:update-progress
+// 事件下发(下载耗时数分钟,Apply 只做启动确认)。
+
+/** 单个组件(goder/gh)的版本对比;与 Go 侧 UpdateCompDTO 对齐。 */
+export interface UpdateCompDTO {
+  current: string;
+  latest: string;
+  update: boolean;
+}
+
+/** 一次检查的结果;与 Go 侧 UpdateInfoDTO 对齐。 */
+export interface UpdateInfoDTO {
+  goder: UpdateCompDTO;
+  gh: UpdateCompDTO;
+  /** gh 是否由本程序托管(远程模式/手动配置路径时不提供自动更新) */
+  ghManaged: boolean;
+  /** 新版本说明(尽力而为,可能为空) */
+  goderNote: string;
+  ghNote: string;
+  /** 检查完成时间(Unix 毫秒) */
+  checkedAt: number;
+}
+
+/** 更新进度事件载荷;与 Go 侧 UpdateProgressDTO 对齐。 */
+export interface UpdateProgressDTO {
+  which: 'goder' | 'gh';
+  phase: 'download' | 'install' | 'restart' | 'done' | 'error';
+  pct: number;
+  msg: string;
+}
+
+/** 检查更新(要访问下载服务器,允许较长超时);非桌面态/失败返回 null。 */
+export async function checkUpdate(): Promise<UpdateInfoDTO | null> {
+  if (!inWails()) return null;
+  try {
+    return await callSlow<UpdateInfoDTO>(60_000, `${SVC}.Updater.Check`);
+  } catch {
+    return null;
+  }
+}
+
+/** 启动更新应用(which = 'goder' | 'gh',异步执行,进度走事件);
+ * 返回错误信息或 null(仅表示"已开始")。 */
+export async function applyUpdate(which: 'goder' | 'gh'): Promise<string | null> {
+  if (!inWails()) return '仅桌面形态支持更新';
+  try {
+    await callSlow<void>(20_000, `${SVC}.Updater.Apply`, which);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** 订阅更新进度事件;返回取消订阅。非桌面态为 no-op。 */
+export function onUpdateProgress(cb: (p: UpdateProgressDTO) => void): () => void {
+  if (!inWails()) return () => {};
+  let off: (() => void) | null = null;
+  let cancelled = false;
+  void (async () => {
+    try {
+      const mod = (await import('@wailsio/runtime')) as unknown as { Events: WailsEvents };
+      if (cancelled) return;
+      off = mod.Events.On('grf:update-progress', (ev) => {
+        const raw = ev?.data;
+        const v = Array.isArray(raw) ? raw[0] : raw;
+        if (v && typeof v === 'object') cb(v as UpdateProgressDTO);
+      });
+    } catch {
+      /* 桥不可达:保持 no-op */
+    }
+  })();
+  return () => {
+    cancelled = true;
+    off?.();
+  };
 }
 
 // ---------- 桥初始化:桌面态把项目索引换成文件持久化 ----------
