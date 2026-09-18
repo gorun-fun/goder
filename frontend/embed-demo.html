@@ -90,6 +90,8 @@
       configure('demo', {
         baseUrl: qs.get('server') ?? '/grf-api',
         token: qs.get('token') ?? '',
+        // 设置页裁剪演示:隐藏「智能体」分组(浏览器形态只读引导的分区)
+        settings: { agentGroup: false },
         // 身份区注入演示:左栏底部 chip 显示宿主用户,点击弹出宿主自绘面板
         user: {
           name: '演示用户',

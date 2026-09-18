@@ -30,7 +30,7 @@ export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settin
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
-export { registry, sideTabId, setUser, getUser } from '../registry/registry';
+export { registry, sideTabId, setUser, getUser, setSettingsConfig, getSettingsConfig } from '../registry/registry';
 export type {
   PanelContext,
   ShellState,
@@ -39,9 +39,12 @@ export type {
   SideTabInstance,
   BottomTabDef,
   UserConfig,
+  SettingsConfig,
 } from '../registry/registry';
 import { setUser } from '../registry/registry';
+import { setSettingsConfig } from '../registry/registry';
 import type { UserConfig } from '../registry/registry';
+import type { SettingsConfig } from '../registry/registry';
 
 import { configureScope } from '../core/store/scope';
 import { registerBuiltinCommon } from '../shell/builtin-common';
@@ -61,7 +64,9 @@ registerBuiltinCommon();
  * 未登录处置预留(见 docs/embedding.md)。policySelector: false 供全权
  * 管理会话策略的嵌入方隐藏 composer 策略选择器(本机策略偏好也不加载)。
  * user 供自带用户体系的嵌入方注入左栏底部身份 chip 的展示名,并可给出
- * panel 让 chip 可点击、弹出嵌入方自绘的用户信息面板(见 UserConfig)。 */
+ * panel 让 chip 可点击、弹出嵌入方自绘的用户信息面板(见 UserConfig)。
+ * settings 供嵌入方裁剪设置页:agentGroup:false 隐藏「智能体」分组
+ * (Harness/插件/MCP/技能,浏览器形态本就只读引导)。 */
 export function configure(
   scope: string,
   cfg: {
@@ -71,9 +76,11 @@ export function configure(
     auth?: AuthConfig;
     policySelector?: boolean;
     user?: UserConfig;
+    settings?: SettingsConfig;
   },
 ): void {
   if (cfg.user !== undefined) setUser(scope, cfg.user);
+  if (cfg.settings !== undefined) setSettingsConfig(scope, cfg.settings);
   configureScope(scope, cfg);
 }
 

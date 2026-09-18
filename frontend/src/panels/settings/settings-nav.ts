@@ -7,9 +7,13 @@ import { customElement, property } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
+import { getSettingsConfig, onSettingsChange } from '../../registry/registry';
 import '../sessions/user-chip';
 
 export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills';
+
+/** 「智能体」分组的分区键(settings.agentGroup:false 时整组隐藏) */
+const AGENT_SECTIONS = new Set<SettingsSection>(['harness', 'plugins', 'mcp', 'skills']);
 
 @customElement('grf-settings-nav')
 export class GrfSettingsNav extends GrfPanel {
@@ -17,6 +21,9 @@ export class GrfSettingsNav extends GrfPanel {
   @property({ type: String }) section: SettingsSection = 'appearance';
   /** 与 session-list 对齐:嵌入态宿主自管身份区时可隐藏底部 */
   @property({ type: Boolean, attribute: 'no-connection' }) noConnectionFooter = false;
+
+  /** 设置页裁剪变更订阅(configure 的 settings) */
+  private offSettings?: () => void;
 
   static styles = [
     theme,
@@ -109,6 +116,30 @@ export class GrfSettingsNav extends GrfPanel {
     `,
   ];
 
+  connectedCallback(): void {
+    super.connectedCallback();
+    this.offSettings = onSettingsChange(() => this.requestUpdate());
+  }
+
+  disconnectedCallback(): void {
+    this.offSettings?.();
+    this.offSettings = undefined;
+    super.disconnectedCallback();
+  }
+
+  protected updated(): void {
+    // 智能体分组被宿主隐藏时,当前分区若落在其中则退回外观
+    // (shell 的分区状态经事件驱动,这里纠正避免中央区渲染死角)
+    if (this.agentHidden && AGENT_SECTIONS.has(this.section)) {
+      this.fire('grf-settings-section', 'appearance');
+    }
+  }
+
+  /** 宿主经 configure 的 settings.agentGroup:false 隐藏「智能体」分组 */
+  private get agentHidden(): boolean {
+    return getSettingsConfig(this.scope)?.agentGroup === false;
+  }
+
   render() {
     // 两组分区:基础(界面与模型)/ 智能体(harness 运行时扩展)
     const groups: [string, [SettingsSection, string, string][]][] = [
@@ -129,13 +160,14 @@ export class GrfSettingsNav extends GrfPanel {
         ],
       ],
     ];
+    const shown = this.agentHidden ? groups.filter(([, items]) => items.every(([k]) => !AGENT_SECTIONS.has(k))) : groups;
     return html`
       <div class="back" title="返回工作区" @click=${() => this.fire('grf-close-settings')}>
         ${unsafeHTML(icon.arrowLeft)}
         <span>返回工作区</span>
       </div>
       <div class="list">
-        ${groups.map(
+        ${shown.map(
           ([glabel, items]) => html`
             <div class="title">${glabel}</div>
             ${items.map(

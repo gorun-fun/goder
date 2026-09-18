@@ -30,6 +30,10 @@ configure('myscope', {
   },
   policySelector: false, // 可选:false 隐藏 composer 策略选择器(嵌入方
                          // 经项目 defaults 全权管理会话策略时)
+  settings: {            // 可选:设置页裁剪
+    agentGroup: false,   // false = 隐藏「智能体」分组(Harness/插件/MCP/
+                         // 技能——浏览器形态只读引导,平台不开放管理时)
+  },
   user: {                // 可选:注入左栏底部身份 chip(自带用户体系的
     name: '张三',        // 嵌入方用;未注入时显示系统用户名/「本地用户」)
     detail: 'zhangsan',  // 可选:悬浮提示补充(如 uid)
@@ -150,6 +154,14 @@ registry 是全局单例:同页所有 scope 实例共享条目定义;数据按 s
 样式进不去 —— 面板内容用内联样式,颜色可复用会继承穿透的 `--grf-*`
 变量;返回的 HTMLElement 跨开关保活。`user.panel` 的入参与右栏 tab 同
 为 `PanelContext`(无会话上下文,`sessionId` 为空)。
+
+### 设置页裁剪
+
+设置页的「智能体」分组(Harness/插件/MCP/技能)管理的是 gh 运行机的
+本地配置(`~/.grf/settings.json`),浏览器形态仅显示引导文案。平台不
+开放这些管理入口时经 `configure(scope, { settings: { agentGroup: false } })`
+整组隐藏,设置页只留基础设置(外观/模型;模型的「默认模型」在 web
+形态可用)。当前分区落在被隐藏分组时会自动退回「外观」。
 
 ## 5. 服务端接入:grf-web-serve 网关
 

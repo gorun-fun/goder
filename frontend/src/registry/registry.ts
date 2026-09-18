@@ -223,3 +223,35 @@ export function onUserChange(fn: Listener): () => void {
   userListeners.add(fn);
   return () => userListeners.delete(fn);
 }
+
+// ---------- 宿主设置页裁剪(embed.configure 的 settings 落点) ----------
+
+/** 宿主对设置页的裁剪(configure 的 settings)。「智能体」分组
+ * (Harness/插件/MCP/技能)管理的是 gh 运行机的本地配置,浏览器形态
+ * 仅显示引导文案——嵌入方平台不开放这些管理入口时可整组隐藏,
+ * 只留基础设置(外观/模型)。 */
+export interface SettingsConfig {
+  /** false = 隐藏「智能体」分组(Harness/插件/MCP/技能) */
+  agentGroup?: boolean;
+}
+
+const settingsConfigs = new Map<string, SettingsConfig>();
+const settingsListeners = new Set<Listener>();
+
+/** 配置某 scope 的设置页裁剪(undefined = 清除,恢复默认全量分区)。 */
+export function setSettingsConfig(scope: string, cfg: SettingsConfig | undefined): void {
+  if (cfg) settingsConfigs.set(scope, cfg);
+  else settingsConfigs.delete(scope);
+  for (const fn of settingsListeners) fn();
+}
+
+/** 读取某 scope 的设置页裁剪。 */
+export function getSettingsConfig(scope: string): SettingsConfig | undefined {
+  return settingsConfigs.get(scope);
+}
+
+/** 订阅设置页裁剪变更(settings-nav 等展示方刷新用)。 */
+export function onSettingsChange(fn: Listener): () => void {
+  settingsListeners.add(fn);
+  return () => settingsListeners.delete(fn);
+}
