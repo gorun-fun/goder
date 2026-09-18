@@ -1388,6 +1388,7 @@ export class GrfChat extends GrfPanel {
                       .queue=${sid ? s!.queuedSends(sid) : []}
                       .policy=${policy}
                       .policyImmediate=${policyImmediate}
+                      .policySelector=${s?.policySelector !== false}
                       .providers=${providers}
                       .model=${curFull}
                       .activeModel=${activeFull}

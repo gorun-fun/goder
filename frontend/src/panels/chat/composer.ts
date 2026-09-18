@@ -86,6 +86,8 @@ export class GrfComposer extends LitElement {
   @property({ type: String }) policy: DraftPolicy = 'off';
   /** 策略可即时生效(已有会话;false = 草稿,随首条消息生效) */
   @property({ type: Boolean }) policyImmediate = false;
+  /** false = 隐藏策略选择器(嵌入方全权管理会话策略,见 configure.policySelector) */
+  @property({ type: Boolean }) policySelector = true;
   /** 模型菜单数据:供应商 → 模型(空 = 无法枚举) */
   @property({ type: Array }) providers: ModelGroup[] = [];
   /** 当前使用的模型('' = 未知/服务端默认,按钮回落显示「默认模型」) */
@@ -613,22 +615,24 @@ export class GrfComposer extends LitElement {
                   </svg>
                 </button>
                 <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple @change=${this.onFile} />
-                <button
-                  class="bar-btn policy-ctl ${this.policyPos ? 'open' : ''}"
-                  title=${this.policyImmediate
-                    ? '本会话的文件/终端访问策略(选择后立即生效)'
-                    : '新会话的文件/终端访问策略(随首条消息生效)'}
-                  @click=${(e: MouseEvent) => this.togglePop('policy', e)}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                    <path d="M8 1.8l4.8 1.8v3.2c0 3.1-2 5.6-4.8 6.7-2.8-1.1-4.8-3.6-4.8-6.7V3.6L8 1.8z" stroke-linejoin="round" />
-                  </svg>
-                  <span class="cur">${this.policy === 'write-workspace' ? '工作区访问' : '完全访问'}</span>
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
-                  </svg>
-                </button>
-                ${this.policyPos ? this.renderPolicyPop(this.policyPos) : nothing}
+                ${this.policySelector
+                  ? html`<button
+                      class="bar-btn policy-ctl ${this.policyPos ? 'open' : ''}"
+                      title=${this.policyImmediate
+                        ? '本会话的文件/终端访问策略(选择后立即生效)'
+                        : '新会话的文件/终端访问策略(随首条消息生效)'}
+                      @click=${(e: MouseEvent) => this.togglePop('policy', e)}
+                    >
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                        <path d="M8 1.8l4.8 1.8v3.2c0 3.1-2 5.6-4.8 6.7-2.8-1.1-4.8-3.6-4.8-6.7V3.6L8 1.8z" stroke-linejoin="round" />
+                      </svg>
+                      <span class="cur">${this.policy === 'write-workspace' ? '工作区访问' : '完全访问'}</span>
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    ${this.policyPos ? this.renderPolicyPop(this.policyPos) : nothing}`
+                  : nothing}
                 <span class="hint">${this.hint()}</span>
                 ${this.usage ? this.renderCtxRing() : nothing}
                 <button

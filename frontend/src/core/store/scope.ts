@@ -57,6 +57,10 @@ export interface ConnectionConfig {
   /** 思考强度(low/high/max;空 = 服务端默认) */
   reasoningEffort?: string;
   auth?: AuthConfig;
+  /** false = 隐藏 composer 策略选择器且不加载本机 draftPolicy 偏好。
+   * 嵌入方经项目 defaults/grf:session 全权管理会话策略时置 false,
+   * 防止使用者在 UI 上放宽宿主下发的策略。 */
+  policySelector?: boolean;
 }
 
 export type ConnState = 'unknown' | 'checking' | 'ok' | 'error';
@@ -81,8 +85,13 @@ export class GrfScope extends Emitter {
   activeSessionId?: string; // 真实 sid 或 draft id
 
   /** 新会话访问策略偏好('write-workspace' | 'off';undefined = 跟随项目默认)。
-   * gh 的 policy 只随会话首条消息落定,故此值影响下一个新建的会话。 */
+   * gh 的 policy 只随会话首条消息落定,故此值影响下一个新建的会话。
+   * policySelector 禁用时恒为 undefined(策略全权归项目默认)。 */
   draftPolicy?: string;
+
+  /** 是否展示 composer 策略选择器(configure 的 policySelector;false =
+   * 嵌入方全权管理策略,UI 不提供切换入口,本机偏好也不加载)。 */
+  policySelector = true;
 
   console: ConsoleEntry[] = [];
   consolePaused = false;
@@ -110,7 +119,8 @@ export class GrfScope extends Emitter {
     this.model = cfg.model;
     this.reasoningEffort = cfg.reasoningEffort;
     this.authCfg = cfg.auth;
-    this.draftPolicy = loadPolicyLocal(name);
+    this.policySelector = cfg.policySelector !== false;
+    this.draftPolicy = this.policySelector ? loadPolicyLocal(name) : undefined;
     // 桌面态的用户主目录:未选工作区时新会话 workspace 的默认值
     // (纯 web 态为空串,workspace 保持 undefined 走服务端默认)。
     void desktopHomeDir().then((h) => (this.homeDir = h));
@@ -270,6 +280,10 @@ export class GrfScope extends Emitter {
     this.client.setConfig({ baseUrl: cfg.baseUrl ?? this.client.config.baseUrl, token: cfg.token ?? this.client.config.token });
     if (cfg.model !== undefined) this.model = cfg.model;
     if (cfg.reasoningEffort !== undefined) this.reasoningEffort = cfg.reasoningEffort;
+    if (cfg.policySelector !== undefined) {
+      this.policySelector = cfg.policySelector !== false;
+      if (!this.policySelector) this.draftPolicy = undefined;
+    }
     if (cfg.auth !== undefined) {
       this.authCfg = cfg.auth;
       this.authPrompted = false; // 换了鉴权配置后重新允许触发
@@ -1410,7 +1424,9 @@ function loadPolicyLocal(name: string): string | undefined {
 
 function saveConnLocal(name: string, cfg: ConnectionConfig): void {
   try {
-    localStorage.setItem(connKey(name), JSON.stringify(cfg));
+    // policySelector 是宿主代码的配置项(非用户偏好),随每次 configure 给出,不持久化
+    const { policySelector: _host, ...rest } = cfg;
+    localStorage.setItem(connKey(name), JSON.stringify(rest));
   } catch {
     /* 忽略 */
   }

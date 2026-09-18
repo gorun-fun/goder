@@ -55,10 +55,17 @@ registerBuiltinCommon();
 
 /** 配置一个数据域(在创建任何面板元素之前调用)。
  * 网关模式下 token 可省(服务端按登录用户注入);auth 为多用户网关的
- * 未登录处置预留(见 docs/embedding.md)。 */
+ * 未登录处置预留(见 docs/embedding.md)。policySelector: false 供全权
+ * 管理会话策略的嵌入方隐藏 composer 策略选择器(本机策略偏好也不加载)。 */
 export function configure(
   scope: string,
-  cfg: { baseUrl?: string; token?: string; model?: string; auth?: AuthConfig },
+  cfg: {
+    baseUrl?: string;
+    token?: string;
+    model?: string;
+    auth?: AuthConfig;
+    policySelector?: boolean;
+  },
 ): void {
   configureScope(scope, cfg);
 }
