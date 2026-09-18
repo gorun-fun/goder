@@ -30,7 +30,7 @@ export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settin
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
-export { registry, sideTabId } from '../registry/registry';
+export { registry, sideTabId, setUser, getUser } from '../registry/registry';
 export type {
   PanelContext,
   ShellState,
@@ -38,7 +38,10 @@ export type {
   SideTabDef,
   SideTabInstance,
   BottomTabDef,
+  UserConfig,
 } from '../registry/registry';
+import { setUser } from '../registry/registry';
+import type { UserConfig } from '../registry/registry';
 
 import { configureScope } from '../core/store/scope';
 import { registerBuiltinCommon } from '../shell/builtin-common';
@@ -56,7 +59,9 @@ registerBuiltinCommon();
 /** 配置一个数据域(在创建任何面板元素之前调用)。
  * 网关模式下 token 可省(服务端按登录用户注入);auth 为多用户网关的
  * 未登录处置预留(见 docs/embedding.md)。policySelector: false 供全权
- * 管理会话策略的嵌入方隐藏 composer 策略选择器(本机策略偏好也不加载)。 */
+ * 管理会话策略的嵌入方隐藏 composer 策略选择器(本机策略偏好也不加载)。
+ * user 供自带用户体系的嵌入方注入左栏底部身份 chip 的展示名,并可给出
+ * panel 让 chip 可点击、弹出嵌入方自绘的用户信息面板(见 UserConfig)。 */
 export function configure(
   scope: string,
   cfg: {
@@ -65,8 +70,10 @@ export function configure(
     model?: string;
     auth?: AuthConfig;
     policySelector?: boolean;
+    user?: UserConfig;
   },
 ): void {
+  if (cfg.user !== undefined) setUser(scope, cfg.user);
   configureScope(scope, cfg);
 }
 

@@ -4,7 +4,7 @@
 // 会话行不缩进,状态点与项目文件夹图标同列居中、标题与项目名左对齐;
 // 会话显示距今相对时间,悬停时时间隐去、露出删除(两段式行内确认,见
 // onDeleteClick);新建项目走原生目录选择(桌面)或内联输入(web)。底部
-// 为用户名 + 设置入口(进入设置页)。
+// 为身份 chip(grf-user-chip,支持宿主注入)+ 设置入口(进入设置页)。
 // 会话行状态指示:运行中 = 旋转小圆环;等待用户查看(回合完成未读/
 // 等待输入)= 蓝点;默认空闲不显示。
 import { css, html, nothing } from 'lit';
@@ -15,7 +15,8 @@ import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtRelative } from '../../util/fmt';
 import { UNGROUPED } from '../../core/store/scope';
-import { inWails, pickFolder, desktopUserName } from '../../host/bridge';
+import { inWails, pickFolder } from '../../host/bridge';
+import './user-chip';
 
 @customElement('grf-session-list')
 export class GrfSessionList extends GrfPanel {
@@ -25,8 +26,6 @@ export class GrfSessionList extends GrfPanel {
   /** web 态新建项目的内联输入 */
   @state() private newProject = false;
   @state() private draftName = '';
-  /** 当前系统用户名(桌面态经 Desktop 服务读取) */
-  @state() private userName = '';
   /** 两段式删除确认:已进入待确认态的会话 id */
   @state() private armedDelete?: string;
   /** 待确认态自动退出计时器 */
@@ -247,24 +246,6 @@ export class GrfSessionList extends GrfPanel {
         gap: 8px;
         user-select: none;
       }
-      .footbar .user {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .footbar .user svg {
-        width: 13px;
-        height: 13px;
-        flex: none;
-        color: var(--grf-text-faint);
-      }
       .footbar .gear {
         flex: none;
         padding: 3px 5px;
@@ -294,10 +275,6 @@ export class GrfSessionList extends GrfPanel {
   connectedCallback(): void {
     super.connectedCallback();
     this.minuteTick = window.setInterval(() => this.requestUpdate(), 60_000);
-    // 底部身份区:系统用户名(仅桌面态有值)
-    void desktopUserName().then((n) => {
-      if (n) this.userName = n;
-    });
   }
 
   disconnectedCallback(): void {
@@ -344,10 +321,7 @@ export class GrfSessionList extends GrfPanel {
         ? nothing
         : html`
             <div class="footbar">
-              <span class="user" title=${this.userName || '本地用户'}>
-                ${unsafeHTML(icon.user)}
-                <span>${this.userName || '本地用户'}</span>
-              </span>
+              <grf-user-chip scope=${this.scope}></grf-user-chip>
               <button class="gear" title="设置" @click=${() => this.fire('grf-open-settings')}>${unsafeHTML(icon.settings)}</button>
             </div>
           `}

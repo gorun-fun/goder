@@ -28,6 +28,17 @@ configure('myscope', {
     loginUrl: '/grf-api/auth/login', // 跳转登录入口
     // 或 onUnauthorized: (scope) => { … }  // 宿主自定义(设置后不再自动跳转)
   },
+  policySelector: false, // 可选:false 隐藏 composer 策略选择器(嵌入方
+                         // 经项目 defaults 全权管理会话策略时)
+  user: {                // 可选:注入左栏底部身份 chip(自带用户体系的
+    name: '张三',        // 嵌入方用;未注入时显示系统用户名/「本地用户」)
+    detail: 'zhangsan',  // 可选:悬浮提示补充(如 uid)
+    panel: (ctx) => {    // 可选:给出后 chip 可点击,在 chip 上方弹出
+      const el = document.createElement('div');
+      el.textContent = '宿主自绘的用户信息面板(如资料/退出登录)';
+      return el;
+    },
+  },
 });
 ```
 
@@ -128,6 +139,17 @@ registry.bottom.add({
 
 registry 是全局单例:同页所有 scope 实例共享条目定义;数据按 scope 隔离。
 条目的 `visible(ctx)` 可按上下文动态显隐(内置条目用它做桌面能力降级)。
+
+### 身份区注入(左栏底部用户 chip)
+
+`<grf-session-list>` / `<grf-settings-nav>` 底部的身份区统一由
+`<grf-user-chip>` 渲染。自带用户体系(SSO 等)的嵌入方经
+`configure(scope, { user })` 注入展示名;给出 `panel` 后 chip 可点击,
+在 chip 上方弹出宿主自绘的用户信息面板(资料 / 退出登录等放这里),
+点击面板外部或 Esc 关闭。面板元素在 chip 的 shadow DOM 内渲染,宿主
+样式进不去 —— 面板内容用内联样式,颜色可复用会继承穿透的 `--grf-*`
+变量;返回的 HTMLElement 跨开关保活。`user.panel` 的入参与右栏 tab 同
+为 `PanelContext`(无会话上下文,`sessionId` 为空)。
 
 ## 5. 服务端接入:grf-web-serve 网关
 

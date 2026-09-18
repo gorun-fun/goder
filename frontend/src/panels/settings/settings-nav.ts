@@ -3,11 +3,11 @@
 // MCP/技能);当前分区由宿主(app-shell)持有,经 section 属性下发,切换时
 // 冒泡 grf-settings-section 事件。底部身份区与 <grf-session-list> 一致。
 import { css, html, nothing } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { customElement, property } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
-import { desktopUserName } from '../../host/bridge';
+import '../sessions/user-chip';
 
 export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills';
 
@@ -17,8 +17,6 @@ export class GrfSettingsNav extends GrfPanel {
   @property({ type: String }) section: SettingsSection = 'appearance';
   /** 与 session-list 对齐:嵌入态宿主自管身份区时可隐藏底部 */
   @property({ type: Boolean, attribute: 'no-connection' }) noConnectionFooter = false;
-
-  @state() private userName = '';
 
   static styles = [
     theme,
@@ -108,33 +106,8 @@ export class GrfSettingsNav extends GrfPanel {
         gap: 8px;
         user-select: none;
       }
-      .footbar .user {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .footbar .user svg {
-        width: 13px;
-        height: 13px;
-        flex: none;
-        color: var(--grf-text-faint);
-      }
     `,
   ];
-
-  connectedCallback(): void {
-    super.connectedCallback();
-    void desktopUserName().then((n) => {
-      if (n) this.userName = n;
-    });
-  }
 
   render() {
     // 两组分区:基础(界面与模型)/ 智能体(harness 运行时扩展)
@@ -180,7 +153,7 @@ export class GrfSettingsNav extends GrfPanel {
         ? nothing
         : html`
             <div class="footbar">
-              <span class="user" title=${this.userName || '本地用户'}>${unsafeHTML(icon.user)}<span>${this.userName || '本地用户'}</span></span>
+              <grf-user-chip scope=${this.scope}></grf-user-chip>
             </div>
           `}
     `;

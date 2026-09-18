@@ -187,3 +187,39 @@ class GrfRegistry {
 }
 
 export const registry = new GrfRegistry();
+
+// ---------- 宿主身份注入(embed.configure 的 user 落点) ----------
+
+/** 宿主注入身份:左栏底部身份 chip 的展示信息与可选的自定义用户面板。
+ * 嵌入方自带用户体系(SSO 等)时经 configure(scope, { user }) 注入;
+ * 未注入时 chip 回落系统用户名(桌面)或「本地用户」,且不可点击。 */
+export interface UserConfig {
+  /** 展示名 */
+  name: string;
+  /** 补充信息(如 uid),拼进 chip 悬浮提示 */
+  detail?: string;
+  /** 点击 chip 弹出的宿主自绘用户面板(chip 上方弹出)。返回的
+   * HTMLElement 跨开关保活;未配置时 chip 仅展示、不可点击。 */
+  panel?: (ctx: PanelContext) => HTMLElement;
+}
+
+const userConfigs = new Map<string, UserConfig>();
+const userListeners = new Set<Listener>();
+
+/** 配置某 scope 的注入身份(undefined = 清除,回落默认身份)。 */
+export function setUser(scope: string, cfg: UserConfig | undefined): void {
+  if (cfg) userConfigs.set(scope, cfg);
+  else userConfigs.delete(scope);
+  for (const fn of userListeners) fn();
+}
+
+/** 读取某 scope 的注入身份。 */
+export function getUser(scope: string): UserConfig | undefined {
+  return userConfigs.get(scope);
+}
+
+/** 订阅注入身份变更(身份 chip 等展示方刷新用)。 */
+export function onUserChange(fn: Listener): () => void {
+  userListeners.add(fn);
+  return () => userListeners.delete(fn);
+}

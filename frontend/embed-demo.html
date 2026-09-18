@@ -90,6 +90,19 @@
       configure('demo', {
         baseUrl: qs.get('server') ?? '/grf-api',
         token: qs.get('token') ?? '',
+        // 身份区注入演示:左栏底部 chip 显示宿主用户,点击弹出宿主自绘面板
+        user: {
+          name: '演示用户',
+          detail: 'demo-uid',
+          panel: () => {
+            const el = document.createElement('div');
+            el.style.cssText = 'font-size:12.5px;line-height:1.8;color:#8b909c';
+            el.innerHTML =
+              '<div style="color:#d7dae0;font-weight:650;margin-bottom:6px">宿主用户面板</div>' +
+              '<div>经 configure 的 user.panel 注入;资料/退出登录等放在这里。</div>';
+            return el;
+          },
+        },
       });
 
       // ---- UI 定制演示:三方按需裁剪与新增 ----
