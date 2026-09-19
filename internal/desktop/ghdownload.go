@@ -224,7 +224,7 @@ func (d *ghDownload) run(url, dst string) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
+	if err := installDownload(tmp, dst); err != nil {
 		return err
 	}
 	// 类 Unix 需要 gh 可执行(创建默认 0666;servermanager 的托管路径
@@ -233,6 +233,34 @@ func (d *ghDownload) run(url, dst string) error {
 	// 完成信号:进度 UI 据此关闭对话框
 	d.pct.Store(100)
 	return nil
+}
+
+// installDownload 把下载完成的 tmp 落到 dst。直接覆盖式改名在 Windows 上
+// 会因目标 exe 被占用(刚被杀的 gh server 句柄未释放、杀毒扫描中等)报
+// Access is denied;NTFS 允许把被占用的 exe 改名挪走,只是不能覆盖 —— 故
+// 先把旧文件挪到 .old 再放新文件,并对整个交换过程做短重试兜底句柄延迟
+// 释放。.old 删除失败(仍被占用)则留待下次覆盖,不阻塞更新。
+func installDownload(tmp, dst string) error {
+	old := dst + ".old"
+	var err error
+	for i := 0; i < 20; i++ {
+		// 上一轮残留的 .old 此时若仍被占用,删除失败可忽略(随后对 dst 的
+		// 改名挪走会再失败并进入重试)。
+		_ = os.Remove(old)
+		if _, serr := os.Lstat(dst); serr == nil {
+			if rerr := os.Rename(dst, old); rerr != nil {
+				err = rerr
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+		}
+		if err = os.Rename(tmp, dst); err == nil {
+			_ = os.Remove(old)
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("落盘 %s 失败(文件被占用?): %w", dst, err)
 }
 
 // compareVersion 比较 dotted 版本号(sort -V 语义的修正版,兼容 semver 式
