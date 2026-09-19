@@ -237,16 +237,15 @@ func (d *ghDownload) run(url, dst string) error {
 
 // installDownload 把下载完成的 tmp 落到 dst。直接覆盖式改名在 Windows 上
 // 会因目标 exe 被占用(刚被杀的 gh server 句柄未释放、杀毒扫描中等)报
-// Access is denied;NTFS 允许把被占用的 exe 改名挪走,只是不能覆盖 —— 故
-// 先把旧文件挪到 .old 再放新文件,并对整个交换过程做短重试兜底句柄延迟
-// 释放。.old 删除失败(仍被占用)则留待下次覆盖,不阻塞更新。
+// Access is denied;NTFS 允许把被占用的 exe 改名挪走,但前提是目标名不
+// 存在 —— 挪到已存在的名字是"替换",替换一个仍被执行的 exe(如上次更新
+// 挪出的 .old 又被收养机制接管存活)会被永久拒绝、重试无效。故 .old 恒取
+// 不存在的唯一名,整个交换过程另做短重试兜底句柄延迟释放;残留的 .old*
+// 在成功后尽力清理(仍被占用的留待下次)。
 func installDownload(tmp, dst string) error {
-	old := dst + ".old"
+	old := uniqueOldPath(dst)
 	var err error
 	for i := 0; i < 20; i++ {
-		// 上一轮残留的 .old 此时若仍被占用,删除失败可忽略(随后对 dst 的
-		// 改名挪走会再失败并进入重试)。
-		_ = os.Remove(old)
 		if _, serr := os.Lstat(dst); serr == nil {
 			if rerr := os.Rename(dst, old); rerr != nil {
 				err = rerr
@@ -256,11 +255,44 @@ func installDownload(tmp, dst string) error {
 		}
 		if err = os.Rename(tmp, dst); err == nil {
 			_ = os.Remove(old)
+			cleanStaleOlds(dst)
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("落盘 %s 失败(文件被占用?): %w", dst, err)
+}
+
+// uniqueOldPath 取一个当前不存在的 .old 撤退名:优先固定 .old,已存在则
+// 递增后缀(.old.2/.old.3…)。已存在的 .old 可能仍被旧 gh 进程占用,
+// 正是替换式改名报 Access is denied 的来源,绝不能往它上面挪。
+func uniqueOldPath(dst string) string {
+	old := dst + ".old"
+	for i := 2; ; i++ {
+		if _, err := os.Lstat(old); os.IsNotExist(err) {
+			return old
+		}
+		old = fmt.Sprintf("%s.old.%d", dst, i)
+	}
+}
+
+// cleanStaleOlds 尽力清理 dst 同目录下历次更新挪出的 .old* 残留(仍被
+// 占用的跳过,留待下次更新再试)。只匹配同名前缀,不碰其他文件。
+func cleanStaleOlds(dst string) {
+	dir := filepath.Dir(dst)
+	prefix := filepath.Base(dst) + ".old"
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), prefix) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }
 
 // compareVersion 比较 dotted 版本号(sort -V 语义的修正版,兼容 semver 式
