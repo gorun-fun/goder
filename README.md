@@ -217,5 +217,10 @@ docs/                    embedding.md(三方集成)
   均落用户配置目录 `bin/` 下(来源 download.gorun.fun/grf-harness)。
   macOS .app 正常捆绑 gh(缺失才走下载兜底);Windows/Linux 发行包
   (zip)只含 goder 本体
+- Linux 桌面启动:GNOME 文件管理器双击裸可执行文件不执行(按内容类型
+  找「打开方式」,`application/x-executable` 无默认应用 → 弹「无法打开
+  文件」),正规入口是应用菜单/桌面图标。Linux zip 附 `install.sh`
+  (含 .desktop 模板与图标):解压后 `./install.sh` 一次,即装进
+  `~/.local/bin` 与应用概览(搜索「Goder」启动);终端运行照旧
 - sso 身份模式的本地会话表在内存中(默认实现),网关重启需重新登录;
   `identity.SessionStore` 接口预留给持久化实现

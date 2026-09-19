@@ -175,9 +175,14 @@ build:
       for ARCH in ${NATIVE_ARCH} ${CROSS_ARCH}; do
         rm -rf .linstage && mkdir .linstage
         # 不捆绑 gh:App 启动时检测到缺失会静默自动下载当前系统版本(见
-        # internal/desktop/ghdownload_linux.go),zip 只含 goder。
+        # internal/desktop/ghdownload_linux.go)。
+        # 桌面集成件:GNOME 文件管理器双击裸 ELF 不执行,而是按内容类型
+        # 找「打开方式」(application/x-executable 无默认应用 → 弹「无法
+        # 打开文件」),正规入口是应用菜单/桌面图标 —— zip 附 install.sh
+        # (解压后跑一次装进应用菜单,见 build/linux/install.sh 头注释)。
         cp bin/goder-linux-${ARCH} .linstage/goder
-        (cd .linstage && zip -qry ../bin/goder-linux-${ARCH}.zip goder)
+        cp build/linux/install.sh build/linux/goder.desktop frontend/public/icon.svg .linstage/
+        (cd .linstage && zip -qry ../bin/goder-linux-${ARCH}.zip goder install.sh goder.desktop icon.svg)
       done
       rm -rf .linstage
     # ---- windows 双架构:wails v3 windows 前端为纯 syscall,无 CGO,直接交叉 ----

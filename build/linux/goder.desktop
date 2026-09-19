@@ -1,0 +1,14 @@
+# goder.desktop — Linux 桌面启动器模板:install.sh 把 @BIN@ 替换成安装后
+# 的绝对路径写入 ~/.local/share/applications/。GNOME 文件管理器双击裸
+# 可执行文件不执行(按内容类型找「打开方式」,application/x-executable
+# 无默认应用 → 弹「无法打开文件」),应用菜单/桌面图标才是正规入口。
+[Desktop Entry]
+Type=Application
+Name=Goder
+GenericName=grf-harness GUI
+Comment=grf-harness 图形界面(项目会话 · 聊天 · 详情 · 事件台)
+Exec=@BIN@
+Icon=goder
+Terminal=false
+Categories=Development;Utility;
+StartupWMClass=goder
