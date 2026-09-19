@@ -552,7 +552,7 @@ export class GrfScope extends Emitter {
       .filter((r) => r.projectId === projectId && (r.model || r.effort !== undefined))
       .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))[0];
     if (!latest) return;
-    if (latest.model !== undefined) this.model = latest.model || undefined;
+    if (latest.model !== undefined) this.model = fullModelName(latest.model);
     if (latest.effort !== undefined) this.reasoningEffort = latest.effort || undefined;
     saveConnLocal(this.name, {
       baseUrl: this.client.config.baseUrl,
@@ -1019,8 +1019,12 @@ export class GrfScope extends Emitter {
       if (rec) {
         rec.lastResponseId = final.id;
         rec.updatedAt = new Date().toISOString();
-        // 记录本会话最后使用的模型/思考强度,新会话按同项目最近会话继承
-        rec.model = final.model ?? this.model ?? '';
+        // 记录本会话最后使用的模型/思考强度,新会话按同项目最近会话继承。
+        // 模型必须记请求时下发的全名(provider/model):服务端回报的
+        // final.model 是裸名,裸名再下发会被 gh 的 trySwitchModel 忽略、
+        // 静默回落服务端默认,继承就形同虚设。本端未选模型时记空串,
+        // 新会话继承为"未选"、继续走服务端默认,与原会话语义一致。
+        rec.model = this.model ?? '';
         rec.effort = this.reasoningEffort ?? '';
         this.persistIndex();
       }
@@ -1241,7 +1245,8 @@ export class GrfScope extends Emitter {
       const rec = this.index.sessions[sid];
       if (rec) {
         rec.lastResponseId = final.id;
-        rec.model = final.model ?? this.model ?? rec.model;
+        // 同 send():只记请求全名,不记服务端回报的裸名(见上文说明)。
+        rec.model = this.model ?? rec.model;
         rec.effort = this.reasoningEffort ?? '';
         this.persistIndex();
       }
@@ -1374,6 +1379,28 @@ export class GrfScope extends Emitter {
 function deriveTitle(text: string): string {
   const t = text.trim().replace(/\s+/g, ' ');
   return t.length > 42 ? `${t.slice(0, 42)}…` : t || '新会话';
+}
+
+// ---------- 裸模型名补全 ----------
+
+// 旧索引记录里的 model 可能是裸名(服务端回报不带 provider 前缀的历史
+// 遗留)。裸名作为请求模型下发会被 gh 的 trySwitchModel 忽略,继承时须
+// 补全成 "provider/model" 全名;补全需要供应商列表,由设置层注入解析器
+// (store 层不反向依赖 settings,避免循环依赖)。
+let resolveBareModel: ((bare: string) => string | undefined) | undefined;
+
+/** 注册裸模型名补全器(settings 层注入;按 providers 的模型表匹配)。 */
+export function setModelNameResolver(fn: (bare: string) => string | undefined): void {
+  resolveBareModel = fn;
+}
+
+/** 归一为可下发的模型全名:已是全名原样返回;裸名尝试补全,补不出返回
+ * undefined(视同未选模型,走服务端默认 —— 强于留一个显示与实际不符、
+ * 发送时被服务端静默忽略的值)。 */
+function fullModelName(m: string): string | undefined {
+  if (!m) return undefined;
+  if (m.includes('/')) return m;
+  return resolveBareModel?.(m);
 }
 
 /** 流断连自动重试上限(事件流中断/静默超时/网络错误)。 */

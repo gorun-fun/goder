@@ -47,6 +47,8 @@ export class GrfDesktop extends LitElement {
       settingsStore.initWebConn('app');
       this.ready = true;
       this.initStage = 'done';
+      // gh 侧模型配置就绪后做一次"无模型配置"守卫(读取失败/不支持则跳过)
+      void settingsStore.loadModelCfg().then(() => this.guardModelSetup());
       return;
     }
     // 桌面:先把连接无阻塞切到同源代理(wails 调用通道加载初期可能挂起,
@@ -88,11 +90,28 @@ export class GrfDesktop extends LitElement {
         await new Promise((r2) => setTimeout(r2, 1000));
       }
       // 桥就绪后:项目索引切文件持久化、读配置、确保托管 server 运行、
-      // 应用默认模型;懒做不阻塞。
-      void settingsStore.loadFromBridge('app');
+      // 应用默认模型;懒做不阻塞。配置就绪后做一次"无模型配置"守卫。
+      void settingsStore.loadFromBridge('app').then(() => this.guardModelSetup());
     } catch {
       this.initStage = 'error';
     }
+  }
+
+  /** 启动模型守卫:gh 侧没有任何可用模型(供应商列表为空或全都没有
+   * 模型)时,自动进入设置的模型分区引导完成配置 —— 此时发送只会收到
+   * 服务端报错,不如直接把用户带到配置页。读取失败(桥不可达 / gh 过旧
+   * 不支持 agent API)时 modelCfg 为 null,视为未知、不误判。与
+   * chat-panel 发送时的模型守卫(modelReady)同一落地路径。 */
+  private guardModelSetup(): void {
+    const mc = settingsStore.modelCfg;
+    if (!mc) return;
+    const hasModel = (mc.providers ?? []).some((p) => (p.models ?? []).length > 0);
+    if (hasModel) return;
+    void this.updateComplete.then(() => {
+      const shell = this.renderRoot.querySelector('grf-app-shell');
+      shell?.dispatchEvent(new CustomEvent('grf-open-settings', { bubbles: true, composed: true }));
+      shell?.dispatchEvent(new CustomEvent('grf-settings-section', { detail: 'models', bubbles: true, composed: true }));
+    });
   }
 
   render() {

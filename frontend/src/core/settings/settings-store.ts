@@ -38,7 +38,7 @@ import {
   type RemoteReleaseDTO,
   type ServerStatusDTO,
 } from '../../host/bridge';
-import { getScope, configureScope, savedConn, locationDefaultBase } from '../store/scope';
+import { getScope, configureScope, savedConn, locationDefaultBase, setModelNameResolver } from '../store/scope';
 import {
   fetchModelCfg,
   putModelCfg,
@@ -670,3 +670,12 @@ class SettingsStore {
 }
 
 export const settingsStore = new SettingsStore();
+
+// 裸模型名补全器(供 scope 继承旧记录用):按当前 gh 供应商表把裸名配成
+// "provider/model" 全名。同名模型挂多个供应商时取首个,属 best-effort。
+setModelNameResolver((bare) => {
+  for (const p of settingsStore.modelCfg?.providers ?? []) {
+    if ((p.models ?? []).includes(bare)) return `${p.name}/${bare}`;
+  }
+  return undefined;
+});
