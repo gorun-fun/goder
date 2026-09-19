@@ -30,7 +30,7 @@ export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settin
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
-export { registry, sideTabId, setUser, getUser, setSettingsConfig, getSettingsConfig } from '../registry/registry';
+export { registry, sideTabId, setUser, getUser, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard } from '../registry/registry';
 export type {
   PanelContext,
   ShellState,
@@ -43,6 +43,7 @@ export type {
 } from '../registry/registry';
 import { setUser } from '../registry/registry';
 import { setSettingsConfig } from '../registry/registry';
+import { setModelGuard } from '../registry/registry';
 import type { UserConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
 
@@ -66,7 +67,10 @@ registerBuiltinCommon();
  * user 供自带用户体系的嵌入方注入左栏底部身份 chip 的展示名,并可给出
  * panel 让 chip 可点击、弹出嵌入方自绘的用户信息面板(见 UserConfig)。
  * settings 供嵌入方裁剪设置页:agentGroup:false 隐藏「智能体」分组
- * (Harness/插件/MCP/技能,浏览器形态本就只读引导)。 */
+ * (Harness/插件/MCP/技能,浏览器形态本就只读引导)。modelGuard: true
+ * 供「模型由使用者自行配置」的嵌入方(零配置起步平台)开启启动模型
+ * 守卫:gh 侧没有任何可用模型时自动进入设置-模型页引导完成配置
+ * (下发过 model 的 scope 不适用)。 */
 export function configure(
   scope: string,
   cfg: {
@@ -77,10 +81,12 @@ export function configure(
     policySelector?: boolean;
     user?: UserConfig;
     settings?: SettingsConfig;
+    modelGuard?: boolean;
   },
 ): void {
   if (cfg.user !== undefined) setUser(scope, cfg.user);
   if (cfg.settings !== undefined) setSettingsConfig(scope, cfg.settings);
+  if (cfg.modelGuard !== undefined) setModelGuard(scope, cfg.modelGuard);
   configureScope(scope, cfg);
 }
 

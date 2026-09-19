@@ -15,7 +15,8 @@ import { inWails } from '../host/bridge';
 import { isMacDesktop } from '../host/platform';
 import { closeWindow, isWindowMaximised, isFramelessDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
-import { registry, sideTabId, type PanelContext, type SideTabInstance } from '../registry/registry';
+import { registry, sideTabId, getModelGuard, onModelGuardChange, type PanelContext, type SideTabInstance } from '../registry/registry';
+import { settingsStore } from '../core/settings/settings-store';
 import '../panels/files/file-list';
 import '../panels/chat/chat-panel';
 
@@ -64,6 +65,9 @@ export class GrfAppShell extends GrfPanel {
 
   /** 左栏顶行即窗口标题栏:空白区拖拽移动 / 双击缩放(非桌面态静默) */
   private tdrag: TitleDrag | null = null;
+  /** 嵌入态启动模型守卫:是否已检查过(只生效一次)与 registry 订阅句柄 */
+  private modelGuardDone = false;
+  private modelGuardOff: (() => void) | undefined;
   private dragging: 'left' | null = null;
   private regUnsub?: () => void;
 
@@ -235,6 +239,14 @@ export class GrfAppShell extends GrfPanel {
     this.tdrag = makeTitleDrag('button, grf-update-chip');
     // registry 变更(三方增删条目)即时反映到装配
     this.regUnsub = registry.subscribe(() => this.requestUpdate());
+    // 嵌入态启动模型守卫(宿主经 embed.configure 的 modelGuard 开启;桌面/
+    // 纯 web 由各自入口 GrfDesktop 守卫,不重复):gh 侧没有任何可用模型
+    // 时自动进入设置的模型分区引导完成配置。configure 可能晚于本壳连接
+    // (静态声明的壳元素在嵌入库加载瞬间升级),registry 通知兜底唤醒;
+    // 守卫只生效一次,用户关掉设置页返回后不再强拉。宿主下发过 model 的
+    // scope 不适用;gh 配置读取失败(modelCfg 为 null)视为未知、不误判。
+    this.modelGuardOff = onModelGuardChange(() => this.tryModelGuard());
+    this.tryModelGuard();
     // 导航切换:设置进入(session-list 齿轮)/ 返回 / 三方 grf-nav-activate
     this.addEventListener('grf-open-settings', () => this.navTo('settings'));
     this.addEventListener('grf-close-settings', () => this.navBack());
@@ -280,10 +292,26 @@ export class GrfAppShell extends GrfPanel {
     this.tdrag = null;
     this.regUnsub?.();
     this.regUnsub = undefined;
+    this.modelGuardOff?.();
+    this.modelGuardOff = undefined;
     window.removeEventListener('pointermove', this.onDrag);
     window.removeEventListener('pointerup', this.stopDrag);
     window.removeEventListener('resize', this.syncMaximised);
     super.disconnectedCallback();
+  }
+
+  /** 嵌入态启动模型守卫本体(见 connectedCallback 处注释;连接时与
+   * configure 后的 registry 通知都会尝试,幂等只检查一次)。 */
+  private tryModelGuard(): void {
+    if (this.modelGuardDone || inWails() || !getModelGuard(this.scope) || this.store?.model) return;
+    this.modelGuardDone = true;
+    void settingsStore.loadModelCfg().then(() => {
+      const mc = settingsStore.modelCfg;
+      if (!mc) return; // 读取失败/不支持:未知不误判
+      if ((mc.providers ?? []).some((p) => (p.models ?? []).length > 0)) return;
+      this.navTo('settings');
+      this.navStates = new Map(this.navStates).set('settings', 'models');
+    });
   }
 
   /** 同步"是否最大化"(自绘按钮图标);桥不可达保持原值。 */

@@ -758,6 +758,22 @@ export class GrfComposer extends LitElement {
     }
   }
 
+  /** 回填草稿:发送被上层拦截(如模型守卫带去设置页)时恢复输入,
+   * 避免用户回来后文本/图片丢失。焦点回输入框。 */
+  setDraft(text: string, images?: string[]): void {
+    this.text = text;
+    this.images = images?.length ? [...images] : [];
+    this.slashDismissed = false;
+    this.slashIdx = 0;
+    const ta = this.renderRoot.querySelector('textarea');
+    if (ta) {
+      ta.value = text;
+      this.autosize(ta);
+      ta.focus();
+      ta.setSelectionRange(text.length, text.length);
+    }
+  }
+
   // 策略弹出列表:两个预制选项(与 gh set_policy 一致)
   private renderPolicyPop(pos: PopPos) {
     return html`

@@ -255,3 +255,32 @@ export function onSettingsChange(fn: Listener): () => void {
   settingsListeners.add(fn);
   return () => settingsListeners.delete(fn);
 }
+
+// ---------- 宿主模型守卫(embed.configure 的 modelGuard 落点) ----------
+
+/** 嵌入方声明「模型由使用者自行配置」(grf-play 类零配置起步的平台):
+ * 开启后嵌入壳(app-shell)启动时检查 gh 侧可用模型,没有任何可用模型
+ * 则自动进入设置-模型页引导完成配置。宿主经 configure 下发了 model 的
+ * scope 不适用。默认关闭 —— 官方嵌入约定宿主自管配置,不打扰。 */
+const modelGuards = new Set<string>();
+const modelGuardListeners = new Set<Listener>();
+
+/** 开/关某 scope 的启动模型守卫。变更即通知(app-shell 守卫的唤醒源:
+ * configure 可能晚于壳元素连接 —— 静态声明的 <grf-app-shell> 在嵌入库
+ * 加载瞬间升级连接,而 embed.configure 在其之后才执行)。 */
+export function setModelGuard(scope: string, on: boolean): void {
+  if (on) modelGuards.add(scope);
+  else modelGuards.delete(scope);
+  for (const fn of modelGuardListeners) fn();
+}
+
+/** 读取某 scope 是否开启启动模型守卫。 */
+export function getModelGuard(scope: string): boolean {
+  return modelGuards.has(scope);
+}
+
+/** 订阅 modelGuard 变更。 */
+export function onModelGuardChange(fn: Listener): () => void {
+  modelGuardListeners.add(fn);
+  return () => modelGuardListeners.delete(fn);
+}

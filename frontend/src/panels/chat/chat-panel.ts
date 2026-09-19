@@ -28,6 +28,10 @@ interface BottomTabInstance {
   el: HTMLElement;
 }
 
+/** 被模型守卫拦截的输入(模块级:跳设置-模型页会卸载 composer 甚至本
+ * 面板,视图切回、面板重连时恢复,用户配完模型回来输入不丢)。 */
+let guardDraft: { text: string; images?: string[] } | null = null;
+
 @customElement('grf-chat')
 export class GrfChat extends GrfPanel {
   /** 隐藏头部(嵌入态由宿主自绘头部时) */
@@ -1092,6 +1096,13 @@ export class GrfChat extends GrfPanel {
   connectedCallback(): void {
     super.connectedCallback();
     this.tdrag = makeTitleDrag('button');
+    // 守卫草稿恢复:模型守卫带去设置页时记下的输入,面板重连(视图切回)
+    // 后回填 composer;恢复即清,后续重连不再覆盖新输入。
+    if (guardDraft) {
+      const d = guardDraft;
+      guardDraft = null;
+      void this.updateComplete.then(() => this.restoreDraft(d));
+    }
     window.addEventListener('pointermove', this.onResizeDrag);
     window.addEventListener('pointerup', this.stopResizeDrag);
     window.addEventListener('pointerdown', this.onWinPointerDown);
@@ -1731,20 +1742,43 @@ export class GrfChat extends GrfPanel {
   // ---------- composer 事件 ----------
 
   private onSend(e: CustomEvent<{ text: string; images?: string[] }>): void {
-    if (!this.modelReady()) {
-      this.goModelSettings();
-      return;
-    }
-    void this.store!.send(e.detail.text, e.detail.images);
+    const payload = e.detail;
+    void this.ensureModelReady(payload).then((ok) => {
+      if (ok) void this.store!.send(payload.text, payload.images);
+    });
   }
 
-  /** 模型守卫:本端未选模型、当前会话也没有实际模型、gh 侧也无默认模型
-   * 时视为"未设置模型" —— 此时发送只会收到服务端报错,不如直接带用户
-   * 去设置的模型页完成配置。纯 web/嵌入态模型页依赖桌面桥,保持直接发送。 */
-  private modelReady(): boolean {
-    if (!inWails()) return true;
+  /** 模型守卫(异步):本端已选模型或当前会话有实际模型时直接放行;
+   * 否则确认 gh 侧还有可用模型 —— 全无可用模型时发送只会收到服务端报错,
+   * 不如直接带用户去设置的模型页完成配置,并把输入记为守卫草稿(跳设置
+   * 页会卸载 composer,本面板重连时恢复,防止输入丢失)。
+   * 桌面判 gh 侧默认模型;网页/嵌入态判"有任何可用模型"(与启动守卫
+   * guardModelSetup 同一判据,网页形态 gh 配置懒加载,守卫时补拉一次)。
+   * gh 配置读取失败(modelCfg 为 null)视为未知、不拦截,维持直接发送。 */
+  private async ensureModelReady(payload: { text: string; images?: string[] }): Promise<boolean> {
     const s = this.store;
-    return !!(s?.model || s?.activeRuntime?.model || settingsStore.modelCfg?.default);
+    if (s?.model || s?.activeRuntime?.model) return true;
+    if (inWails()) {
+      return !!(settingsStore.cfg?.defaultModel || settingsStore.modelCfg?.default);
+    }
+    if (!settingsStore.modelCfg) await settingsStore.loadModelCfg();
+    const mc = settingsStore.modelCfg;
+    if (!mc) return true;
+    const hasModel = (mc.providers ?? []).some((p) => (p.models ?? []).length > 0);
+    if (!hasModel) {
+      // 跳设置页会卸载 composer(视图切换重建),即时回填必丢 —— 记模块级
+      // 守卫草稿,本面板重连(用户配完模型返回)时恢复。
+      guardDraft = payload;
+      this.goModelSettings();
+      return false;
+    }
+    return true;
+  }
+
+  /** 把守卫草稿回填 composer(文本/图片),焦点回输入框。 */
+  private restoreDraft(payload: { text: string; images?: string[] }): void {
+    const c = this.renderRoot.querySelector('grf-composer') as { setDraft?(t: string, i?: string[]): void } | null;
+    c?.setDraft?.(payload.text, payload.images);
   }
 
   /** 跳到设置的模型分区(先切到设置页再下发分区,两事件均由 app-shell 接)。 */
@@ -1791,11 +1825,9 @@ export class GrfChat extends GrfPanel {
     this.cancelEdit();
     // 编辑重发:从被编辑消息处截断历史(grf:history),编辑文本作为该回合输入
     if (text) {
-      if (!this.modelReady()) {
-        this.goModelSettings();
-        return;
-      }
-      void this.store!.send(text, undefined, editOf ? { editOf } : undefined);
+      void this.ensureModelReady({ text }).then((ok) => {
+        if (ok) void this.store!.send(text, undefined, editOf ? { editOf } : undefined);
+      });
     }
   }
 
