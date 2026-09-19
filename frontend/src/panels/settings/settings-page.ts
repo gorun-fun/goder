@@ -656,6 +656,7 @@ export class GrfSettingsPage extends GrfPanel {
             CORS 头,直连需经同源反代(如 grf-web-serve 的 /grf-api)。
           </div>
         </div>
+        ${this.renderGhSettings()}
       `;
     }
     return html`
@@ -695,9 +696,17 @@ export class GrfSettingsPage extends GrfPanel {
     `;
   }
 
-  /** gh settings.json 常用设置(max_steps / mouse / policy);桌面态可编辑。 */
+  /** 网页形态配置区回落文案:gh 过旧不支持 vs 读取中/失败。 */
+  private webAgentHint(what: string): string {
+    return settingsStore.agentApi === 'unsupported'
+      ? `当前 gh server 版本过旧,暂不支持网页管理${what}(升级 gh server 后可用)。`
+      : `正在读取${what}…(长时间无响应请检查上方服务连接)`;
+  }
+
+  /** gh settings.json 常用设置(max_steps / mouse / policy);桌面经桥、
+   * 网页经 gh server agent API(配置随登录用户隔离)。 */
   private renderGhSettings() {
-    if (!inWails()) return nothing;
+    if (!inWails() && !settingsStore.modelCfg) return nothing; // 未就绪/不支持
     const mc = settingsStore.modelCfg;
     if (!mc) {
       return html`<div class="sec"><h4>gh 设置</h4><div class="hint">正在读取 gh 配置…</div></div>`;
@@ -765,7 +774,7 @@ export class GrfSettingsPage extends GrfPanel {
   private renderPlugins() {
     const pc = settingsStore.pluginsCfg;
     if (!pc) {
-      return html`<div class="sec"><div class="hint">${inWails() ? '正在读取插件配置…' : '浏览器形态无法管理插件,请在桌面版操作。'}</div></div>`;
+      return html`<div class="sec"><div class="hint">${inWails() ? '正在读取插件配置…' : this.webAgentHint('插件配置')}</div></div>`;
     }
     // 已安装 = 自动发现目录文件 ∪ 显式列表里的本地项(command 型)
     const local = pc.plugins.filter((p) => !p.url).map((p) => p.name);
@@ -883,7 +892,7 @@ export class GrfSettingsPage extends GrfPanel {
   private renderMcp() {
     const pc = settingsStore.pluginsCfg;
     if (!pc) {
-      return html`<div class="sec"><div class="hint">${inWails() ? '正在读取 MCP 配置…' : '浏览器形态无法访问 gh 的 MCP 配置,请在桌面版管理。'}</div></div>`;
+      return html`<div class="sec"><div class="hint">${inWails() ? '正在读取 MCP 配置…' : this.webAgentHint('MCP 配置')}</div></div>`;
     }
     const ro = !pc.writable;
     // 远程 MCP 依赖显式列表:自动发现模式下先切换。
@@ -986,6 +995,7 @@ export class GrfSettingsPage extends GrfPanel {
             <input
               type="password"
               .value=${p.token}
+              placeholder=${!inWails() && p.hasToken ? '已设置(留空保留,输入更换)' : ''}
               ?disabled=${ro}
               @change=${(e: InputEvent) => settingsStore.updatePlugin(p.name, { token: (e.target as HTMLInputElement).value })}
             />
@@ -1038,7 +1048,7 @@ export class GrfSettingsPage extends GrfPanel {
   private renderSkills() {
     const sc = settingsStore.skillsCfg;
     if (!sc) {
-      return html`<div class="sec"><div class="hint">${inWails() ? '正在读取技能列表…' : '浏览器形态无法管理技能,请在桌面版操作。'}</div></div>`;
+      return html`<div class="sec"><div class="hint">${inWails() ? '正在读取技能列表…' : this.webAgentHint('技能列表')}</div></div>`;
     }
     const ro = !sc.writable;
     const kw = this.skillKw.trim().toLowerCase();
@@ -1385,13 +1395,15 @@ export class GrfSettingsPage extends GrfPanel {
                 <div class="prov-detail">${this.renderProvDetail(readOnly)}</div>
               </div>
               <div class="hint">
-                配置保存在 <code class="tok">${mc.path}</code>(其余配置项不受影响)。服务运行中时保存后自动重启 gh server 生效。
+                配置保存在 <code class="tok">${mc.path}</code>(其余配置项不受影响)。${inWails()
+                  ? '服务运行中时保存后自动重启 gh server 生效。'
+                  : '保存后新会话即生效(配置随登录用户隔离;API Key 不回显,留空即保留)。'}
               </div>
             `
           : html`<div class="hint">
               ${inWails()
                 ? '正在读取模型配置…'
-                : '浏览器形态无法访问 gh 的模型配置(~/.grf/settings.json),供应商请在运行 gh server 的机器上用桌面版或 gh model 管理。'}
+                : this.webAgentHint('模型配置')}
             </div>`}
       </div>
     `;
@@ -1484,7 +1496,7 @@ export class GrfSettingsPage extends GrfPanel {
               <input
                 type="password"
                 .value=${p.apiKey}
-                placeholder="sk-…(本地服务可留空)"
+                placeholder=${!inWails() && p.hasKey ? '已设置(留空保留,输入更换)' : 'sk-…(本地服务可留空)'}
                 ?disabled=${readOnly}
                 @change=${(e: InputEvent) => this.field(p.name, { apiKey: (e.target as HTMLInputElement).value })}
               />

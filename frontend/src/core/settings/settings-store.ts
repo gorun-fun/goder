@@ -39,6 +39,19 @@ import {
   type ServerStatusDTO,
 } from '../../host/bridge';
 import { getScope, configureScope, savedConn, locationDefaultBase } from '../store/scope';
+import {
+  fetchModelCfg,
+  putModelCfg,
+  detectModelsRemote,
+  fetchPlugins,
+  putPlugins,
+  fetchSkills,
+  getSkillRemote,
+  putSkillRemote,
+  deleteSkillRemote,
+  setSkillEnabledRemote,
+  AgentApiUnsupportedError,
+} from './agent-api';
 
 export type ThemeMode = 'dark' | 'light';
 /** 强调色:预设 key 或 "#rrggbb" 自定义色值 */
@@ -172,9 +185,17 @@ class SettingsStore {
   /** 在线可安装产物(官方下载服务器);null = 未拉取/不可达 */
   remotePlugins: RemoteReleaseDTO | null = null;
   remoteSkills: RemoteReleaseDTO | null = null;
+  /** 网页形态 gh 配置 API(/v1/agent/*)可用性:unknown 未探测,ok 可用
+   * (配置随登录用户隔离),unsupported = gh server 过旧,设置页回落引导 */
+  agentApi: 'unknown' | 'ok' | 'unsupported' = 'unknown';
   appearance: Appearance = { ...DEFAULT_APPEARANCE };
   /** 桌面态桥配置是否已加载完成 */
   loaded = false;
+
+  /** 网页形态 agent API 连接参数(沿用设置页的连接配置) */
+  private get conn(): { baseUrl: string; token: string } {
+    return { baseUrl: this.cfg.remoteUrl || locationDefaultBase(), token: this.cfg.remoteToken };
+  }
 
   private listeners = new Set<Listener>();
 
@@ -269,12 +290,25 @@ class SettingsStore {
     configureScope(scope, { model: this.cfg.defaultModel || undefined });
   }
 
-  // ---------- 模型供应商(gh settings.json;仅桌面态可读写) ----------
+  // ---------- 模型供应商(gh settings.json;桌面走桥,网页走 agent API) ----------
 
   /** 进入模型设置时拉取;force 用于保存后或外部改动后的强制刷新。 */
   async loadModelCfg(force = false): Promise<void> {
-    if (!inWails()) return;
     if (this.modelCfg && !force) return;
+    if (!inWails()) {
+      // 网页形态:gh server /v1/agent API(网关按用户注入 GRF_HOME,
+      // 读到的就是登录用户自己的配置;密钥掩码,apiKey 恒空 + hasKey)
+      try {
+        const cfg = await fetchModelCfg(this.conn.baseUrl, this.conn.token);
+        this.agentApi = 'ok';
+        this.modelCfg = cfg;
+        if (!this.cfg.defaultModel && cfg.default) this.cfg = { ...this.cfg, defaultModel: cfg.default };
+      } catch (e) {
+        if (e instanceof AgentApiUnsupportedError) this.agentApi = 'unsupported';
+      }
+      this.bump();
+      return;
+    }
     const cfg = await loadModelConfig().catch(() => null);
     if (cfg) {
       this.modelCfg = cfg;
@@ -287,10 +321,16 @@ class SettingsStore {
   /** 把当前内存中的供应商配置写回 settings.json。 */
   async saveModelCfg(): Promise<void> {
     if (!this.modelCfg) return;
+    if (!inWails()) {
+      // gh server 每会话现读 settings.json,无需重启;保存后回读刷新掩码标记
+      await putModelCfg(this.conn.baseUrl, this.conn.token, this.modelCfg).catch(() => undefined);
+      await this.loadModelCfg(true);
+      return;
+    }
     await saveModelConfig(this.modelCfg).catch(() => undefined);
     // gh server 只在启动时读 settings.json:本地托管且运行中时自动重启使其生效
     // (桌面 scope 恒为 'app')。
-    if (inWails() && this.cfg.serverMode === 'managed' && this.srv?.running) {
+    if (this.cfg.serverMode === 'managed' && this.srv?.running) {
       await this.applyManaged('app').catch(() => undefined);
     }
   }
@@ -330,7 +370,7 @@ class SettingsStore {
     if (!this.modelCfg) return -1;
     const p = this.modelCfg.providers.find((x) => x.name === name);
     if (!p) return -1;
-    const ids = await detectModels(p);
+    const ids = inWails() ? await detectModels(p) : await detectModelsRemote(this.conn.baseUrl, this.conn.token, p);
     if (!ids) return -1;
     const merged = Array.from(new Set([...(p.models ?? []), ...ids]));
     this.updateProvider(name, { models: merged });
@@ -345,6 +385,11 @@ class SettingsStore {
       const rest = l.filter((x) => x.name !== oldName && x.name !== to);
       const src = l.find((x) => x.name === oldName);
       const item: ProviderDTO = { ...(src ?? { name: to, type: '', baseUrl: '', apiKey: '', models: [] }), name: to };
+      if (!inWails()) {
+        // 网页形态密钥是掩码空值:改名经 keepKeyFrom 指回旧名,服务端继承原 Key
+        item.apiKey = src?.apiKey ?? '';
+        item.keepKeyFrom = oldName;
+      }
       const oldIdx = l.findIndex((x) => x.name === oldName);
       const out = [...rest];
       out.splice(oldIdx < 0 ? out.length : Math.min(oldIdx, out.length), 0, item);
@@ -362,8 +407,18 @@ class SettingsStore {
 
   /** 进入插件/MCP/技能分区时拉取;force 用于保存后的强制刷新。 */
   async loadPluginsCfg(force = false): Promise<void> {
-    if (!inWails()) return;
     if (this.pluginsCfg && !force) return;
+    if (!inWails()) {
+      try {
+        const cfg = await fetchPlugins(this.conn.baseUrl, this.conn.token);
+        this.agentApi = 'ok';
+        this.pluginsCfg = { ...cfg, plugins: (cfg.plugins ?? []).map((p) => ({ ...p, command: p.command ?? [] })) };
+      } catch (e) {
+        if (e instanceof AgentApiUnsupportedError) this.agentApi = 'unsupported';
+      }
+      this.bump();
+      return;
+    }
     const cfg = await loadPlugins().catch(() => null);
     if (cfg) {
       this.pluginsCfg = { ...cfg, plugins: cfg.plugins ?? [] };
@@ -374,9 +429,14 @@ class SettingsStore {
   /** 把插件/MCP 列表写回 settings.json 并按需重启托管 gh server。 */
   async savePluginsCfg(): Promise<void> {
     if (!this.pluginsCfg) return;
+    if (!inWails()) {
+      await putPlugins(this.conn.baseUrl, this.conn.token, this.pluginsCfg).catch(() => undefined);
+      await this.loadPluginsCfg(true);
+      return;
+    }
     await savePlugins(this.pluginsCfg).catch(() => undefined);
     await this.loadPluginsCfg(true);
-    if (inWails() && this.cfg.serverMode === 'managed' && this.srv?.running) {
+    if (this.cfg.serverMode === 'managed' && this.srv?.running) {
       await this.applyManaged('app').catch(() => undefined);
     }
   }
@@ -459,8 +519,18 @@ class SettingsStore {
   // ---------- 智能体扩展:技能(~/.grf/skills/<name>/SKILL.md) ----------
 
   async loadSkillsCfg(force = false): Promise<void> {
-    if (!inWails()) return;
     if (this.skillsCfg && !force) return;
+    if (!inWails()) {
+      try {
+        const cfg = await fetchSkills(this.conn.baseUrl, this.conn.token);
+        this.agentApi = 'ok';
+        this.skillsCfg = { ...cfg, skills: cfg.skills ?? [] };
+      } catch (e) {
+        if (e instanceof AgentApiUnsupportedError) this.agentApi = 'unsupported';
+      }
+      this.bump();
+      return;
+    }
     const cfg = await loadSkills().catch(() => null);
     if (cfg) {
       this.skillsCfg = { ...cfg, skills: cfg.skills ?? [] };
@@ -469,19 +539,23 @@ class SettingsStore {
   }
 
   readSkill(name: string): Promise<string | null> {
-    return getSkillContent(name);
+    return inWails() ? getSkillContent(name) : getSkillRemote(this.conn.baseUrl, this.conn.token, name);
   }
 
   /** 新建/覆盖技能;返回 null 表示成功,否则为错误信息。 */
   async writeSkill(name: string, content: string): Promise<string | null> {
-    const err = await saveSkill(name, content);
+    const err = inWails()
+      ? await saveSkill(name, content)
+      : await putSkillRemote(this.conn.baseUrl, this.conn.token, name, content);
     if (!err) await this.loadSkillsCfg(true);
     return err;
   }
 
   /** 删除技能目录;返回 null 表示成功,否则为错误信息。 */
   async removeSkill(name: string): Promise<string | null> {
-    const err = await deleteSkill(name);
+    const err = inWails()
+      ? await deleteSkill(name)
+      : await deleteSkillRemote(this.conn.baseUrl, this.conn.token, name);
     if (!err) await this.loadSkillsCfg(true);
     return err;
   }
@@ -534,7 +608,9 @@ class SettingsStore {
 
   /** 启用/禁用技能(SKILL.md ↔ SKILL.md.disabled);返回错误信息或 null。 */
   async toggleSkillEnabled(name: string, enabled: boolean): Promise<string | null> {
-    const err = await skillSetEnabled(name, enabled);
+    const err = inWails()
+      ? await skillSetEnabled(name, enabled)
+      : await setSkillEnabledRemote(this.conn.baseUrl, this.conn.token, name, enabled);
     if (!err) await this.loadSkillsCfg(true);
     return err;
   }

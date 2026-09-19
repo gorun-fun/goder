@@ -12,6 +12,11 @@
 //
 // 多用户托管:一个 uid 一个 gh server 进程(独立端口池 + 数据目录
 // <GRF_DATA>/users/<uid>/server-data);各进程令牌由本服务注入,不下发浏览器。
+// header/sso 模式默认每用户独立 GRF_HOME(<...>/users/<uid>/grf-home,
+// settings.json/技能/插件全部按用户隔离,网页设置页 /v1/agent/* 落到用户
+// 自己的配置;GRF_USER_HOME=0 关闭回到共享宿主 ~/.grf)。GRF_SETTINGS_SEED
+// 指向宿主 settings.json 时,用户首启无配置则复制一份作初始快照(之后
+// 完全独立;GRF_SETTINGS_SEED=1 取宿主 GRF_HOME/~/.grf 的 settings.json)。
 //
 // 常用环境变量:
 //
@@ -19,6 +24,7 @@
 //	GRF_STATIC_DIR(frontend/dist)  GRF_CORS(1)
 //	GRF_PORT_MIN/MAX(17400/18400)  GRF_MAX_USERS(50)  GRF_IDLE_TTL(30m)
 //	GRF_UPSTREAM(仅 single)  GRF_UID_HEADER(X-GRF-UID)  GRF_NAME_HEADER(X-GRF-Name)
+//	GRF_USER_HOME(1)  GRF_SETTINGS_SEED(空/1/绝对路径)
 //	SSO_ENDPOINT / SSO_CLIENT_ID / SSO_CLIENT_SECRET / SSO_REDIRECT_URL /
 //	SSO_ORGANIZATION / AUTH_DEV_EMAIL / COOKIE_SECURE(仅 sso)
 package main
@@ -115,6 +121,8 @@ func main() {
 }
 
 // managerFromEnv 从环境变量构建多用户进程管理器。
+// GRF_USER_HOME(默认 1):每用户独立 GRF_HOME;GRF_SETTINGS_SEED
+// (空/1/绝对路径):用户首启无 settings.json 时的播种来源。
 func managerFromEnv(ghBin, dataDir string) *ghserver.Manager {
 	return ghserver.NewManager(ghserver.ManagerConfig{
 		GhBin:        ghBin,
@@ -124,7 +132,29 @@ func managerFromEnv(ghBin, dataDir string) *ghserver.Manager {
 		MaxUsers:     envInt("GRF_MAX_USERS", 50),
 		IdleTTL:      envDur("GRF_IDLE_TTL", 30*time.Minute),
 		ReadyTimeout: envDur("GRF_READY_TIMEOUT", 15*time.Second),
+		PerUserHome:  envBool("GRF_USER_HOME", true),
+		SettingsSeed: settingsSeedFromEnv(),
 	})
+}
+
+// settingsSeedFromEnv 解析播种来源:"1" = 宿主默认配置,绝对路径 = 指定
+// settings.json,空 = 不播种(纯隔离,用户自行配置)。
+func settingsSeedFromEnv() string {
+	v := os.Getenv("GRF_SETTINGS_SEED")
+	if v == "" || v == "0" {
+		return ""
+	}
+	if v != "1" {
+		return v
+	}
+	if h := os.Getenv("GRF_HOME"); h != "" {
+		return h + "/settings.json"
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home + "/.grf/settings.json"
 }
 
 func env(k, def string) string {

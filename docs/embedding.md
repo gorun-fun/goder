@@ -157,11 +157,14 @@ registry 是全局单例:同页所有 scope 实例共享条目定义;数据按 s
 
 ### 设置页裁剪
 
-设置页的「智能体」分组(Harness/插件/MCP/技能)管理的是 gh 运行机的
-本地配置(`~/.grf/settings.json`),浏览器形态仅显示引导文案。平台不
-开放这些管理入口时经 `configure(scope, { settings: { agentGroup: false } })`
-整组隐藏,设置页只留基础设置(外观/模型;模型的「默认模型」在 web
-形态可用)。当前分区落在被隐藏分组时会自动退回「外观」。
+设置页的「智能体」分组(Harness/插件/MCP/技能)与「模型」供应商管理,
+网页形态经 gh server 的 `/v1/agent/*` 配置 API 读写(需较新版本 gh;
+API Key/MCP Token 掩码——不下发明文,空值=保留)。多用户网关默认按
+用户注入 `GRF_HOME`(`<data>/users/<uid>/grf-home`),配置随登录用户
+完全隔离;`GRF_USER_HOME=0` 关闭,`GRF_SETTINGS_SEED` 可指定用户首启
+播种的初始 settings.json(一次性快照,之后独立)。gh server 过旧或未
+启用隔离时这些分区回落为引导文案;平台不开放管理入口时仍可经
+`configure(scope, { settings: { agentGroup: false } })` 整组隐藏。
 
 ## 5. 服务端接入:grf-web-serve 网关
 

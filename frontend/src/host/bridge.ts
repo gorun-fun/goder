@@ -105,6 +105,11 @@ export interface ProviderDTO {
   baseUrl: string;
   apiKey: string;
   models: string[];
+  /** 网页形态(agent API):是否已设置 Key(明文不下发,apiKey 恒空);
+   * 桌面形态不填(undefined 按已有明文行为) */
+  hasKey?: boolean;
+  /** 网页形态 PUT 专用:改名时指向改名前的供应商名,空 apiKey 从它继承 */
+  keepKeyFrom?: string;
 }
 
 export interface ModelConfigDTO {
@@ -160,6 +165,8 @@ export interface PluginDTO {
   token: string;
   /** 工具调用超时秒数;0 = 默认 */
   timeout: number;
+  /** 网页形态(agent API):是否已设置 Token(明文不下发,token 恒空) */
+  hasToken?: boolean;
 }
 
 export interface PluginsDTO {

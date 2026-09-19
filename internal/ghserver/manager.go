@@ -23,6 +23,13 @@ type ManagerConfig struct {
 	MaxUsers     int           // 同时托管的用户进程上限;0 = 不限
 	IdleTTL      time.Duration // 空闲回收阈值;0 = 不回收
 	ReadyTimeout time.Duration // 传给 Proc;0 = 默认
+	// PerUserHome true = 每用户独立 GRF_HOME(<root>/users/<uid>/grf-home):
+	// settings.json/技能/插件全部按用户隔离,网页设置页(/v1/agent/*)落到
+	// 用户自己的配置。false = 沿用宿主 ~/.grf(桌面/共享部署)。
+	PerUserHome bool
+	// SettingsSeed PerUserHome 时的播种来源(宿主 settings.json 绝对路径;
+	// 用户文件不存在则复制一份作初始配置,之后完全独立)。空 = 不播种。
+	SettingsSeed string
 }
 
 // Manager 多用户 gh server 进程注册表。
@@ -65,6 +72,33 @@ func (m *Manager) UserDir(uid string) string {
 	return filepath.Join(m.cfg.DataRoot, "users", san, "server-data")
 }
 
+// userGrfHome 某用户的独立 GRF_HOME(<DataRoot>/users/<san>/grf-home)。
+func (m *Manager) userGrfHome(uid string) string {
+	san := uidSan.ReplaceAllString(uid, "_")
+	return filepath.Join(m.cfg.DataRoot, "users", san, "grf-home")
+}
+
+// prepareUserHome PerUserHome 时建用户 GRF_HOME 并按需播种:用户
+// settings.json 不存在且配置了种子则复制一份(一次性快照,之后互不影响)。
+func (m *Manager) prepareUserHome(uid string) (string, error) {
+	if !m.cfg.PerUserHome {
+		return "", nil
+	}
+	home := m.userGrfHome(uid)
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return "", err
+	}
+	dst := filepath.Join(home, "settings.json")
+	if m.cfg.SettingsSeed != "" {
+		if _, err := os.Stat(dst); os.IsNotExist(err) {
+			if raw, err := os.ReadFile(m.cfg.SettingsSeed); err == nil {
+				_ = os.WriteFile(dst, raw, 0o600)
+			}
+		}
+	}
+	return home, nil
+}
+
 // UserAddr 某用户的监听地址(仅对已存在的进程有意义;未启动返回空)。
 func (m *Manager) UserAddr(uid string) string {
 	m.mu.Lock()
@@ -101,12 +135,18 @@ func (m *Manager) Get(uid string) (*Proc, error) {
 		m.mu.Unlock()
 		return nil, err
 	}
+	grfHome, err := m.prepareUserHome(uid)
+	if err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
 	addr := fmt.Sprintf("%s:%d", m.cfg.AddrBase, port)
 	p = NewProc(ProcConfig{
 		GhBin:        m.cfg.GhBin,
 		Addr:         addr,
 		DataDir:      m.UserDir(uid),
 		ReadyTimeout: m.cfg.ReadyTimeout,
+		GrfHome:      grfHome,
 	})
 	m.procs[uid] = p
 	m.ports[port] = uid

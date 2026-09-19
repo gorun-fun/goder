@@ -33,6 +33,9 @@ type ProcConfig struct {
 	Addr         string        // 形如 127.0.0.1:7400
 	DataDir      string        // gh server -data 目录
 	ReadyTimeout time.Duration // 等待健康+令牌的上限;0 = 默认 8s
+	// GrfHome 非空时给 gh 进程注入 GRF_HOME(配置/技能/插件按用户隔离;
+	// 桌面形态留空沿用 ~/.grf,与桌面端 UI 同一份配置)。
+	GrfHome string
 }
 
 // Proc 单个 gh server 的句柄。Stop 后不再复用,需要时新建。
@@ -102,6 +105,11 @@ func (p *Proc) Start() Status {
 	cmd.Stdout = lf
 	cmd.Stderr = lf
 	cmd.SysProcAttr = childProcAttr() // 平台差异见 proc_unix.go / proc_windows.go
+	if p.cfg.GrfHome != "" {
+		// 按用户隔离 gh 配置(settings.json/skills/plugins 解析根);
+		// 只追加覆盖,继承网关进程的其余环境。
+		cmd.Env = append(os.Environ(), "GRF_HOME="+p.cfg.GrfHome)
+	}
 	if err := cmd.Start(); err != nil {
 		lf.Close()
 		p.lastErr = err.Error()
