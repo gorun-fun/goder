@@ -776,9 +776,11 @@ export class GrfSettingsPage extends GrfPanel {
     if (!pc) {
       return html`<div class="sec"><div class="hint">${inWails() ? '正在读取插件配置…' : this.webAgentHint('插件配置')}</div></div>`;
     }
-    // 已安装 = 自动发现目录文件 ∪ 显式列表里的本地项(command 型)
+    // 已安装 = 自动发现目录文件 ∪ 显式列表里的本地项(command 型)。
+    // Windows 的发现名带 .exe、显式列表存裸名:展示与去重统一按裸名
+    // (删除走服务端 名/名.exe 双探测,均兼容)。
     const local = pc.plugins.filter((p) => !p.url).map((p) => p.name);
-    const installed = Array.from(new Set([...pc.discovered, ...local]));
+    const installed = Array.from(new Set([...pc.discovered.map((f) => f.replace(/\.exe$/, '')), ...local]));
     installed.sort();
     const ro = !pc.writable;
     // 服务器上可安装的 = 远端文件减去已安装(宽松匹配 grf- 前缀/.exe 后缀)
@@ -911,11 +913,18 @@ export class GrfSettingsPage extends GrfPanel {
               settingsStore.updatePlugins({
                 explicit: true,
                 // 切换时把已发现的本地插件一并带入,避免显式列表为空导致全部停用
+                // (条目名用裸名,command 指向目录里的真实文件,Windows 带 .exe)
                 plugins: [
                   ...pc.plugins,
                   ...pc.discovered
-                    .filter((f) => !pc.plugins.some((x) => x.name === f))
-                    .map((f) => ({ name: f, command: [`${pc.dir}/${f}`], url: '', token: '', timeout: 0 })),
+                    .filter((f) => !pc.plugins.some((x) => x.name === f.replace(/\.exe$/, '')))
+                    .map((f) => ({
+                      name: f.replace(/\.exe$/, ''),
+                      command: [`${pc.dir}/${f}`],
+                      url: '',
+                      token: '',
+                      timeout: 0,
+                    })),
                 ],
               })}
           >

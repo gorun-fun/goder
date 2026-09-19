@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 // ResolveGhBin 解析 gh 可执行文件路径,返回可执行绝对路径;找不到返回空。
@@ -51,7 +52,11 @@ func lookup(cand string) string {
 		return ""
 	}
 	if filepath.Base(cand) != cand { // 显式路径
-		if st, err := os.Stat(cand); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+		// Windows 无执行位(os.Stat 对普通文件恒报 0666),不能按执行位
+		// 校验,否则显式配置的绝对路径永远判失败(与 servermanager 的
+		// 托管目录校验同 carve-out)。
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() &&
+			(runtime.GOOS == "windows" || st.Mode()&0o111 != 0) {
 			return cand
 		}
 		return ""

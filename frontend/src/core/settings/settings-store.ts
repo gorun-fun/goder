@@ -467,15 +467,17 @@ class SettingsStore {
     this.patchPlugins((c) => ({ ...c, plugins: c.plugins.filter((x) => x.name !== name) }));
   }
 
-  /** 把自动发现目录里的一个可执行文件加入显式列表(绝对路径)。 */
+  /** 把自动发现目录里的一个可执行文件加入显式列表(绝对路径)。
+   * 条目名用裸名(去 .exe),command 指向目录里的真实文件。 */
   adoptDiscovered(file: string): void {
     this.patchPlugins((c) => {
-      if (c.plugins.some((x) => x.name === file)) return c;
+      const name = file.replace(/\.exe$/, '');
+      if (c.plugins.some((x) => x.name === name)) return c;
       const path = c.dir ? `${c.dir}/${file}` : file;
       return {
         ...c,
         explicit: true,
-        plugins: [...c.plugins, { name: file, command: [path], url: '', token: '', timeout: 0 }],
+        plugins: [...c.plugins, { name, command: [path], url: '', token: '', timeout: 0 }],
       };
     });
   }
@@ -490,6 +492,7 @@ class SettingsStore {
   /**
    * 启用/禁用插件(文件保留,只动显式列表)。自动发现模式下首次操作会
    * 把已发现的插件全部带入显式列表再摘/入该项,保证其余行为不变。
+   * Windows 的发现文件名带 .exe:条目名统一用裸名,command 指向真实文件。
    */
   setPluginEnabled(name: string, enabled: boolean): void {
     this.patchPlugins((c) => {
@@ -499,15 +502,22 @@ class SettingsStore {
         plugins = [
           ...plugins,
           ...c.discovered
-            .filter((f) => !plugins.some((x) => x.name === f))
-            .map((f) => ({ name: f, command: [`${c.dir}/${f}`], url: '', token: '', timeout: 0 })),
+            .filter((f) => !plugins.some((x) => x.name === f.replace(/\.exe$/, '')))
+            .map((f) => ({
+              name: f.replace(/\.exe$/, ''),
+              command: [`${c.dir}/${f}`],
+              url: '',
+              token: '',
+              timeout: 0,
+            })),
         ];
         explicit = true;
       }
       if (enabled) {
         if (!plugins.some((x) => x.name === name)) {
-          const found = c.discovered.includes(name);
-          plugins = [...plugins, { name, command: [found ? `${c.dir}/${name}` : name], url: '', token: '', timeout: 0 }];
+          // 目录里的真实文件名(Windows 带 .exe),command 必须指向它
+          const found = c.discovered.find((f) => f === name || f === `${name}.exe`);
+          plugins = [...plugins, { name, command: [found ? `${c.dir}/${found}` : name], url: '', token: '', timeout: 0 }];
         }
       } else {
         plugins = plugins.filter((x) => x.name !== name);

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -93,19 +94,41 @@ func (a *AgentConfig) PluginsLoad() PluginsDTO {
 			}
 		}
 	}
-	// 自动发现:plugins/ 下非隐藏、带可执行位的常规文件(与 gh plugin/discover 同规则)
+	// 自动发现:plugins/ 下非隐藏、可执行的常规文件(与 gh plugin/discover
+	// 同规则,见 isExecutableFile);.old* 是更新挪出的旧副本,不算插件
 	if ents, err := os.ReadDir(dir); err == nil {
 		for _, e := range ents {
-			if e.IsDir() || strings.HasPrefix(e.Name(), ".") || strings.HasSuffix(e.Name(), ".md") {
+			if e.IsDir() || strings.HasPrefix(e.Name(), ".") || strings.HasSuffix(e.Name(), ".md") || isStaleOldName(e.Name()) {
 				continue
 			}
-			if info, err := e.Info(); err == nil && info.Mode()&0o111 != 0 {
+			if info, err := e.Info(); err == nil && isExecutableFile(e.Name(), info.Mode()) {
 				out.Discovered = append(out.Discovered, e.Name())
 			}
 		}
 		sort.Strings(out.Discovered)
 	}
 	return out
+}
+
+// isExecutableFile 判断 plugins/ 目录里的文件是否视为可执行插件。
+// Windows 没有 POSIX 可执行位:Go 把普通文件统一报成 0666(只读 0444),
+// os.Chmod 也只切换只读属性,按位过滤恒为空 —— 改按可执行后缀判定。
+// grf-harness 的 plugin/discover.go 有同规则副本,两边必须同步改。
+func isExecutableFile(name string, mode os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		switch strings.ToLower(filepath.Ext(name)) {
+		case ".exe", ".bat", ".cmd", ".com", ".ps1":
+			return true
+		}
+		return false
+	}
+	return mode.IsRegular() && mode.Perm()&0o111 != 0
+}
+
+// isStaleOldName 更新落盘时挪出的旧副本名(x.old / x.old.2…):仍被占用
+// 没清掉时会短暂留在目录里,不应被当作插件发现或同步对象。
+func isStaleOldName(name string) bool {
+	return strings.HasSuffix(name, ".old") || strings.Contains(name, ".old.")
 }
 
 // PluginsSave 写回 plugins 键(其余键原样保留)。Explicit=false 时删除该键
@@ -466,7 +489,10 @@ func downloadFile(ctx context.Context, url, dst string) error {
 		_ = os.Remove(name)
 		return err
 	}
-	return os.Rename(name, dst)
+	// 覆盖已存在的旧插件时,Windows 上目标可能仍被运行中的插件进程占用
+	// (替换被占用 exe 报 Access is denied):走 installDownload(挪唯一
+	// .old + 短重试),与 gh 更新同一条路径。
+	return installDownload(name, dst)
 }
 
 // matchPluginFile 宽松匹配下载服务器上的插件文件名(与 gh pick 一致):
