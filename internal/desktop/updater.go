@@ -160,21 +160,27 @@ func (u *Updater) Apply(which string) error {
 	u.busy = true
 	u.mu.Unlock()
 	go func() {
-		defer func() {
-			u.mu.Lock()
-			u.busy = false
-			u.mu.Unlock()
-		}()
+		doneMsg := ""
 		var err error
 		if which == "gh" {
-			err = u.applyGh()
+			doneMsg, err = u.applyGh()
 		} else {
-			err = u.applyGoder()
+			doneMsg, err = u.applyGoder()
 		}
+		// 先释放 busy 再下发终态事件:前端收到 done/error 后可能立即发起
+		// 下一个组件的更新(先 gh 后 goder,一次确认全部更完),若此刻
+		// busy 仍被占用,第二次 Apply 会被「已有更新正在进行」拒绝,用户
+		// 只好再点一次。applyGh 的服务重启(defer sm.Start)在其 return
+		// 前已执行完,不会与 goder 更新里的 Stop/Start 交叉。
+		u.mu.Lock()
+		u.busy = false
+		u.mu.Unlock()
 		if err != nil {
 			log.Printf("[updater] %s 更新失败: %v", which, err)
 			u.emit(UpdateProgressDTO{Which: which, Phase: "error", Msg: err.Error()})
+			return
 		}
+		u.emit(UpdateProgressDTO{Which: which, Phase: "done", Msg: doneMsg})
 	}()
 	return nil
 }
@@ -214,22 +220,23 @@ func (u *Updater) download(which, url, dst string) error {
 
 // applyGh 更新 gh:停托管服务 → 下载到托管目录(planGhDownload 落点)→
 // 同步更新已安装插件 → 重启托管服务(新二进制经 servermanager 的托管目录
-// 优先解析立即生效)。
-func (u *Updater) applyGh() error {
+// 优先解析立即生效)。返回 done 阶段的提示文案;终态事件由 Apply 统一在
+// 释放 busy 之后下发(保证前端能立即接续 goder 更新)。
+func (u *Updater) applyGh() (string, error) {
 	sm := GetServerManager()
 	sm.Stop()
 	defer sm.Start() // 失败也要把服务拉回来(幂等:已运行则复用)
 	p, err := planGhDownload()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := u.download("gh", p.url, p.dst); err != nil {
-		return err
+		return "", err
 	}
 	u.emit(UpdateProgressDTO{Which: "gh", Phase: "install", Pct: 100, Msg: "正在同步插件"})
 	syncPluginsForGh(p.dir, p.ver)
-	u.emit(UpdateProgressDTO{Which: "gh", Phase: "done", Msg: "gh 已更新到 " + p.ver})
-	return nil
+	u.emit(UpdateProgressDTO{Which: "gh", Phase: "install", Pct: 100, Msg: "正在重启 gh 服务"})
+	return "gh 已更新到 " + p.ver, nil
 }
 
 // syncPluginsForGh gh 更新后把 ~/.grf/plugins/ 里已安装的插件同步到新版:
@@ -282,41 +289,43 @@ func syncPluginsForGh(dir, ver string) {
 }
 
 // applyGoder 更新 goder 自身:下载 zip → 解包 → 自替换(见 installGoder)
-// → 停 gh(新进程会重新拉起)→ 启动新进程 → 退出当前进程。
-func (u *Updater) applyGoder() error {
+// → 停 gh(新进程会重新拉起)→ 启动新进程 → 退出当前进程。返回 done
+// 阶段的提示文案;终态事件由 Apply 统一下发(前端把 restart 阶段视为
+// 完成,之后进程即将退出)。
+func (u *Updater) applyGoder() (string, error) {
 	dir, err := ghPlatformDir()
 	if err != nil {
-		return err
+		return "", err
 	}
 	ver, err := latestDlVersion(goderDlBase)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if appVersion != "dev" && compareVersion(ver, appVersion) <= 0 {
-		return fmt.Errorf("当前已是最新版本(%s)", appVersion)
+		return "", fmt.Errorf("当前已是最新版本(%s)", appVersion)
 	}
 	base, err := appcfg.DefaultDir()
 	if err != nil {
-		return err
+		return "", err
 	}
 	work := filepath.Join(base, "update", ver)
 	_ = os.RemoveAll(work) // 上次失败残留
 	if err := os.MkdirAll(work, 0o755); err != nil {
-		return err
+		return "", err
 	}
 	zipPath := filepath.Join(work, "goder.zip")
 	url := goderDlBase + "/" + dir + "/" + ver + "/" + goderZipName()
 	if err := u.download("goder", url, zipPath); err != nil {
-		return err
+		return "", err
 	}
 	u.emit(UpdateProgressDTO{Which: "goder", Phase: "install", Pct: 100, Msg: "正在安装"})
 	exDir := filepath.Join(work, "x")
 	if err := unzip(zipPath, exDir); err != nil {
-		return err
+		return "", err
 	}
 	newExe, err := installGoder(exDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	// 先停 gh 再起新进程:避免新进程收养一个即将被旧进程退出逻辑杀掉的
 	// gh(servermanager.ServiceShutdown 在退出时回收托管进程)。
@@ -328,13 +337,13 @@ func (u *Updater) applyGoder() error {
 	cmd.Dir = filepath.Dir(newExe)
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("启动新版本失败: %w", err)
+		return "", fmt.Errorf("启动新版本失败: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond) // 让新进程先完成启动
 	if app := application.Get(); app != nil {
 		app.Quit()
 	}
-	return nil
+	return "goder 已更新到 " + ver, nil
 }
 
 // goderZipName 当前平台的 goder 发布 zip 名(与 CI 产物名一致:
