@@ -827,7 +827,7 @@ export class GrfSettingsPage extends GrfPanel {
       <div class="sec">
         <h4>在线安装</h4>
         ${settingsStore.remotePlugins === null
-          ? html`<div class="hint">正在查询官方下载服务器…</div>`
+          ? html`<div class="hint">${inWails() ? '正在查询官方下载服务器…' : '在线安装请用桌面版;网页形态经上方的插件/MCP 列表管理。'}</div>`
           : available.length
             ? html`
                 <div class="tiles">
@@ -1108,7 +1108,7 @@ export class GrfSettingsPage extends GrfPanel {
       <div class="sec">
         <h4>在线安装</h4>
         ${settingsStore.remoteSkills === null
-          ? html`<div class="hint">正在查询官方下载服务器…</div>`
+          ? html`<div class="hint">${inWails() ? '正在查询官方下载服务器…' : '在线安装请用桌面版;网页形态可新建/编辑/启停自己的技能。'}</div>`
           : available.length
             ? html`
                 <div class="tiles">
