@@ -18,6 +18,7 @@ func ensureGhDownload() (string, error) {
 	if err := dl.run(p.url, p.dst); err != nil {
 		return "", err
 	}
+	syncPluginsForGh(p.dir, p.ver) // gh 版本可能跳变,已装插件随之同步(best-effort)
 	log.Printf("[ghdownload] gh %s 下载完成", p.ver)
 	return p.dst, nil
 }

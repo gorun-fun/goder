@@ -138,6 +138,7 @@ func ensureGhDownload() (string, error) {
 		messageBox("gh 下载失败: "+err.Error(), caption, mbIconError)
 		return "", err
 	}
+	syncPluginsForGh(p.dir, p.ver) // gh 版本可能跳变,已装插件随之同步(best-effort)
 	messageBox("gh "+p.ver+" 下载完成,继续启动。", caption, mbIconInfo)
 	return p.dst, nil
 }

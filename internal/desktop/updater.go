@@ -213,7 +213,8 @@ func (u *Updater) download(which, url, dst string) error {
 }
 
 // applyGh 更新 gh:停托管服务 → 下载到托管目录(planGhDownload 落点)→
-// 重启托管服务(新二进制经 servermanager 的托管目录优先解析立即生效)。
+// 同步更新已安装插件 → 重启托管服务(新二进制经 servermanager 的托管目录
+// 优先解析立即生效)。
 func (u *Updater) applyGh() error {
 	sm := GetServerManager()
 	sm.Stop()
@@ -225,8 +226,59 @@ func (u *Updater) applyGh() error {
 	if err := u.download("gh", p.url, p.dst); err != nil {
 		return err
 	}
+	u.emit(UpdateProgressDTO{Which: "gh", Phase: "install", Pct: 100, Msg: "正在同步插件"})
+	syncPluginsForGh(p.dir, p.ver)
 	u.emit(UpdateProgressDTO{Which: "gh", Phase: "done", Msg: "gh 已更新到 " + p.ver})
 	return nil
+}
+
+// syncPluginsForGh gh 更新后把 ~/.grf/plugins/ 里已安装的插件同步到新版:
+// 插件产物随 gh 版本发布(目录 {base}/{平台}/{版本}/plugins/),只换 gh
+// 不换插件会留下旧插件配新 gh 的组合。只覆盖本地已存在的同名文件(用户
+// 没装的不强推);逐个尽力而为,单个失败只记日志,不影响 gh 更新结果。
+// 本地一个插件都没有时不访问网络(首装路径零开销)。
+func syncPluginsForGh(dir, ver string) {
+	local := filepath.Join(grfHome(), "plugins")
+	ents, err := os.ReadDir(local)
+	if err != nil {
+		return // 目录不存在 = 一个插件都没装
+	}
+	var names []string
+	for _, e := range ents {
+		n := e.Name()
+		if !e.IsDir() && !strings.HasPrefix(n, ".") && !strings.HasSuffix(n, ".md") && !isStaleOldName(n) {
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	files, ok, err := listDlDir(ctx, fmt.Sprintf("%s/%s/%s/plugins/", ghDlBase, dir, ver))
+	if err != nil || !ok {
+		log.Printf("[updater] 同步插件:%s/%s 无插件产物,跳过(%v)", dir, ver, err)
+		return
+	}
+	remote := make(map[string]bool, len(files))
+	for _, f := range files {
+		remote[f] = true
+	}
+	n := 0
+	for _, name := range names {
+		if !remote[name] {
+			continue
+		}
+		url := fmt.Sprintf("%s/%s/%s/plugins/%s", ghDlBase, dir, ver, name)
+		if err := downloadFile(ctx, url, filepath.Join(local, name)); err != nil {
+			log.Printf("[updater] 同步插件 %s 失败: %v", name, err)
+			continue
+		}
+		n++
+	}
+	if n > 0 {
+		log.Printf("[updater] 已随 gh %s 同步更新 %d 个插件", ver, n)
+	}
 }
 
 // applyGoder 更新 goder 自身:下载 zip → 解包 → 自替换(见 installGoder)
