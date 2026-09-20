@@ -95,7 +95,7 @@ func (m *Manager) ensureView() *view {
 		return m.v
 	}
 	if p := m.mainWin.NativeWindow(); p != nil {
-		if v := createBrowserView(m.app, p); v != nil {
+		if v := createBrowserView(m.app, p, hooksJS); v != nil {
 			m.v = v
 			if m.bg != "" {
 				setViewBackground(v, m.bg)

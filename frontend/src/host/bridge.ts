@@ -483,6 +483,65 @@ export async function killTerm(id: string): Promise<void> {
   }
 }
 
+/** 终端输出增量读取结果(data 为 base64;from/to 为绝对字节游标)。 */
+export interface TermReadDTO {
+  from: number;
+  to: number;
+  data: string;
+}
+
+/** 增量读取终端会话输出(goder-console 智能体接管会话时回放缓冲)。 */
+export async function readTerm(id: string, from: number): Promise<TermReadDTO | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<TermReadDTO>(`${SVC}.TerminalManager.ReadTerm`, id, from);
+  } catch {
+    return null;
+  }
+}
+
+// ---------- goder-console 智能体控制面(ConsoleMCP service,仅桌面) ----------
+
+/** Go 侧下发的界面操作载荷(grf:console-ui 事件)。 */
+export interface ConsoleUiPayload {
+  action: string;
+  params?: Record<string, unknown>;
+}
+
+/** 订阅智能体界面操作事件;返回取消订阅。非桌面态为 no-op。 */
+export function consoleUiListen(cb: (p: ConsoleUiPayload) => void): () => void {
+  if (!inWails()) return () => {};
+  let off: (() => void) | null = null;
+  let cancelled = false;
+  void (async () => {
+    try {
+      const mod = (await import('@wailsio/runtime')) as unknown as { Events: WailsEvents };
+      if (cancelled) return;
+      off = mod.Events.On('grf:console-ui', (ev) => {
+        const raw = ev?.data;
+        const v = Array.isArray(raw) ? raw[0] : raw;
+        if (v && typeof v === 'object') cb(v as ConsoleUiPayload);
+      });
+    } catch {
+      /* 桥不可达:保持 no-op */
+    }
+  })();
+  return () => {
+    cancelled = true;
+    off?.();
+  };
+}
+
+/** 上报界面状态 JSON(goder_ui_state 工具读;非桌面态静默)。 */
+export async function consoleUiReport(state: string): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(`${SVC}.ConsoleMCP.ReportUIState`, state);
+  } catch {
+    /* 静默:服务未就绪/会话关闭 */
+  }
+}
+
 interface WailsEvents {
   On: (name: string, cb: (ev: { name: string; data?: unknown }) => void) => () => void;
 }

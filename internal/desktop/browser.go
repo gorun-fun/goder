@@ -23,6 +23,10 @@ var browserManager = &BrowserManager{}
 // GetBrowserManager 取全局 BrowserManager。
 func GetBrowserManager() *BrowserManager { return browserManager }
 
+// Manager 取底层 browser.Manager(goder-console 控制面用;装配期可能
+// 为 nil,调用方须判空)。
+func (b *BrowserManager) Manager() *browser.Manager { return b.m }
+
 // ServiceStartup wails 启动钩子:app 就绪后构建 browser.Manager。
 func (b *BrowserManager) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	b.m = browser.NewManager(slog.New(slog.NewTextHandler(os.Stderr, nil)), application.Get())

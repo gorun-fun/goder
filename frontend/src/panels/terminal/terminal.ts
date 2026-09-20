@@ -9,7 +9,8 @@ import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import xtermCss from '@xterm/xterm/css/xterm.css?inline';
 import { GrfPanel, theme } from '../../ui/panel';
-import { inWails, startTerm, writeTerm, resizeTerm, killTerm, onTermEvent } from '../../host/bridge';
+import { inWails, startTerm, writeTerm, resizeTerm, killTerm, readTerm, onTermEvent } from '../../host/bridge';
+import { consumePendingTerm, onConsoleTerm, registerVisibleTerm, unregisterVisibleTerm } from '../../shell/console-ui';
 
 /** base64 → 字节(xterm.write 接受 Uint8Array,可正确处理跨块的 UTF-8)。 */
 function decodeB64(b64: string): Uint8Array {
@@ -38,6 +39,10 @@ export class GrfTerminal extends GrfPanel {
   private pendingBoot = false;
   /** 曾启动过(用于 tab 关闭重开后重新拉起会话) */
   private everBooted = false;
+  /** 智能体接管的会话 id(goder_terminal_new 创建的 PTY;boot 时优先) */
+  private forcedAdopt?: string;
+  /** 智能体新建终端事件订阅 */
+  private consoleTermOff?: () => void;
 
   static styles = [
     theme,
@@ -144,6 +149,8 @@ export class GrfTerminal extends GrfPanel {
   }
 
   disconnectedCallback(): void {
+    this.consoleTermOff?.();
+    this.consoleTermOff = undefined;
     this.teardown();
     super.disconnectedCallback();
   }
@@ -152,6 +159,13 @@ export class GrfTerminal extends GrfPanel {
     super.connectedCallback();
     // tab 关闭重开(元素复用、重新插入 DOM):重新拉起 PTY 会话。
     if (this.everBooted && !this.term) void this.boot();
+    // 智能体新建终端(goder_terminal_new):当前没有存活会话时接管显示
+    // (用户正在跑的会话不打断;智能体会话仍可经 goder_terminal_* 驱动)。
+    this.consoleTermOff = onConsoleTerm((id) => {
+      if (this.status === 'running' || this.status === 'boot') return;
+      this.forcedAdopt = id;
+      void this.boot();
+    });
   }
 
   // boot 启动(或重启)PTY 会话:加载 xterm → fit 初尺寸 → StartTerm →
@@ -200,25 +214,39 @@ export class GrfTerminal extends GrfPanel {
       term.open(host);
       fit.fit();
 
-      const s = await startTerm(cwd, term.cols, term.rows);
-      if (!s) throw new Error('无法启动终端(非桌面态)');
-      this.sessionId = s.id;
+      // 智能体接管的会话优先(goder_terminal_new 创建、待界面显示的 PTY):
+      // 回放输出缓冲后接续事件流;否则正常新建会话。
+      const adopt = this.forcedAdopt ?? consumePendingTerm();
+      this.forcedAdopt = undefined;
+      let sid = '';
+      if (adopt) {
+        sid = adopt;
+        const back = await readTerm(adopt, 0);
+        if (back?.data) term.write(decodeB64(back.data));
+      } else {
+        const s = await startTerm(cwd, term.cols, term.rows);
+        if (!s) throw new Error('无法启动终端(非桌面态)');
+        sid = s.id;
+      }
+      this.sessionId = sid;
       this.term = term;
       this.fit = fit;
+      registerVisibleTerm(sid);
 
       this.offs.push(
-        onTermEvent(s.id, 'data', (b64) => {
+        onTermEvent(sid, 'data', (b64) => {
           if (b64) term.write(decodeB64(b64));
         }),
       );
       this.offs.push(
-        onTermEvent(s.id, 'exit', (code) => {
+        onTermEvent(sid, 'exit', (code) => {
           this.status = 'exited';
           this.message = code;
+          unregisterVisibleTerm(sid);
           term.write(`\r\n\x1b[90m[进程已退出${code ? ` (${code})` : ''}]\x1b[0m\r\n`);
         }),
       );
-      term.onData((d) => void writeTerm(s.id, d));
+      term.onData((d) => void writeTerm(sid, d));
 
       this.ro = new ResizeObserver(() => this.scheduleFit());
       this.ro.observe(host);
@@ -259,6 +287,7 @@ export class GrfTerminal extends GrfPanel {
     if (this.sessionId) {
       const id = this.sessionId;
       this.sessionId = undefined;
+      unregisterVisibleTerm(id);
       void killTerm(id);
     }
     this.term?.dispose();

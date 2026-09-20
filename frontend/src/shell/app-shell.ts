@@ -16,6 +16,7 @@ import { isMacDesktop } from '../host/platform';
 import { closeWindow, isWindowMaximised, isFramelessDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
 import { registry, sideTabId, getModelGuard, onModelGuardChange, type PanelContext, type SideTabInstance } from '../registry/registry';
+import { initConsoleUi, reportConsoleUi, visibleTermIds } from './console-ui';
 import { settingsStore } from '../core/settings/settings-store';
 import '../panels/files/file-list';
 import '../panels/chat/chat-panel';
@@ -279,6 +280,23 @@ export class GrfAppShell extends GrfPanel {
     });
     window.addEventListener('pointermove', this.onDrag);
     window.addEventListener('pointerup', this.stopDrag);
+    // goder-console 智能体接线(goder_ui_do / goder_terminal_new 的前端
+    // 落点;纯 web 态内部 no-op)。操作面与用户手动操作同一入口。
+    initConsoleUi({
+      navTo: (id) => this.navTo(id),
+      openSideTab: (t) => this.openSideTab(t),
+      activateSideTab: (id) => {
+        this.activeSideTab = id;
+        this.showSidebar = true;
+      },
+      setSidebar: (on) => (this.showSidebar = on),
+      setBottom: (on) => (this.showBottom = on),
+      setSessions: (on) => (this.showSessions = on),
+      openFile: (f) => this.openSideTab({ defId: 'file', key: f.path, title: f.rel ?? f.name ?? f.path }),
+      focusSession: (id) => this.store?.selectSession(id),
+      openBrowser: (url) => this.consoleOpenBrowser(url),
+    },
+    () => this.consoleSnapshot());
     // 无边框桌面平台:最大化状态只有自绘按钮要知道(切换图标)。窗口尺寸
     // 变化即查询一次,覆盖双击顶排/Win+↑/任务栏等一切非按钮路径。
     if (this.nativeWinControls) {
@@ -403,6 +421,39 @@ export class GrfAppShell extends GrfPanel {
       if (k === 'sessions') this.showSessions = v !== 'false';
       if (k === 'leftWidth') this.leftWidth = Number(v) || this.leftWidth;
     }
+  }
+
+  protected updated(props: Map<string, unknown>): void {
+    super.updated(props);
+    reportConsoleUi(this.consoleSnapshot());
+  }
+
+  /** consoleOpenBrowser 智能体的 open_browser:开浏览器 tab 并导航
+   * (导航经 chat 面板既有的 grf-open-browser-url 事件,复用其元素查找)。 */
+  private consoleOpenBrowser(url: string): void {
+    this.openSideTab({ defId: 'browser' });
+    if (!url) return;
+    void this.updateComplete.then(() => {
+      const chat = this.renderRoot.querySelector('grf-chat');
+      chat?.dispatchEvent(
+        new CustomEvent('grf-open-browser-url', { detail: { url }, bubbles: true, composed: true }),
+      );
+    });
+  }
+
+  /** consoleSnapshot 界面状态快照(goder_ui_state 工具读;终端会话等
+   * 跨模块状态由 console-ui 模块汇入)。 */
+  private consoleSnapshot(): unknown {
+    return {
+      nav: this.activeNavId,
+      sessions: this.showSessions,
+      sidebar: this.showSidebar,
+      bottom: this.showBottom,
+      sideTabs: this.sideTabs.map((t) => ({ defId: t.defId, key: t.key ?? null, title: t.title ?? null })),
+      activeSideTab: this.activeSideTab || null,
+      activeSessionId: this.store?.activeSessionId ?? null,
+      terminals: visibleTermIds(),
+    };
   }
 
   private panelOn(name: PanelName): boolean {

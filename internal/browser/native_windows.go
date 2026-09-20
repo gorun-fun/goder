@@ -16,6 +16,8 @@
 package browser
 
 import (
+	"errors"
+	"strconv"
 	"syscall"
 	"unsafe"
 
@@ -62,8 +64,9 @@ const supported = true
 func allowFirstMouseWebviews() {}
 
 // createBrowserView 建托管窗口并把它的 HWND 重父级进主窗口;失败返回 nil
-// (调用方放弃原生内容,面板回退 iframe)。
-func createBrowserView(app *application.App, mainWin unsafe.Pointer) *view {
+// (调用方放弃原生内容,面板回退 iframe)。hooks 参数忽略:WebView2 无
+// document start 注入通道,捕获钩子由 evalIn 每次求值前幂等补装。
+func createBrowserView(app *application.App, mainWin unsafe.Pointer, _ string) *view {
 	if app == nil || mainWin == nil {
 		return nil
 	}
@@ -209,4 +212,42 @@ func getWindowLongPtr(hwnd, index uintptr) uintptr {
 
 func setWindowLongPtr(hwnd, index, value uintptr) {
 	procSetWindowLongPtr.Call(hwnd, index, value)
+}
+
+// ---------- JS 求值(Windows:无返回值 ExecJS + fetch 回报) ----------
+
+// evalIn Windows 实现:Wails 窗口只有 void ExecJS —— 把信封表达式的
+// 结果 fetch 回报到本进程 loopback 端点(EvalReportPath),按调用 id 等
+// 应答。回报前先幂等补装捕获钩子(无 document start 注入通道,导航后
+// 的新文档靠这里覆盖)。限制:页面 CSP 禁止向 127.0.0.1 发起请求时
+// 回报会失败(eval.go 头注释)。
+func evalIn(v *view, envelope string) (string, error) {
+	base := getReportBase()
+	if base == "" {
+		return "", errors.New("求值回报通道未就绪(goder-console 服务未启动)")
+	}
+	id := nextEvalCookie()
+	ch := registerEvalWaiter(id)
+	js := `Promise.resolve(` + envelope + `).then(s => {
+		try {
+			fetch(` + jsString(base+EvalReportPath) + `, {
+				method: 'POST', mode: 'no-cors',
+				headers: {'Content-Type': 'text/plain'},
+				body: '` + strconv.FormatUint(id, 10) + `\\n' + s
+			});
+		} catch (e) {}
+		return s;
+	})`
+	if v == nil || v.win == nil {
+		return "", errors.New("面板 webview 不存在")
+	}
+	v.win.ExecJS(hooksJS) // 幂等;失败页面静默,eval 本身不依赖钩子
+	v.win.ExecJS(js)
+	res, err := waitEval(id, ch)
+	return res.text, err
+}
+
+// snapshotIn Windows 实现:暂不支持(wails 未暴露 WebView2 截图通道)。
+func snapshotIn(v *view) ([]byte, error) {
+	return nil, ErrUnsupported
 }

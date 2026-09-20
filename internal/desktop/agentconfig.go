@@ -337,8 +337,10 @@ func (e *skillNameError) Error() string { return "非法技能名:" + e.name }
 
 const defaultDownloadBase = "https://download.gorun.fun/grf-harness"
 
-// builtinPlugins 内置插件,禁止删除(浏览器/电脑操作是 UI 核心能力)。
-var builtinPlugins = map[string]bool{"grf-browser": true, "grf-computer": true}
+// builtinPlugins 内置插件,禁止删除(浏览器/电脑操作是 UI 核心能力;
+// goder-console 是智能体驱动面板浏览器/终端/界面的自带控制面,每次
+// 启动会自动重装 wrapper)。
+var builtinPlugins = map[string]bool{"grf-browser": true, "grf-computer": true, "goder-console": true}
 
 func downloadBase() string {
 	if v := strings.TrimSpace(os.Getenv("GRF_DOWNLOAD_BASE")); v != "" {

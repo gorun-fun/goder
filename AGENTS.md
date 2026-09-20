@@ -49,11 +49,28 @@ internal/                Go 共享层(桌面壳与 web 网关同一套实现)
                          会话 cookie;SessionStore 接口预留持久化)
   gateway/               多用户网关:静态托管 + /grf-api 按用户路由(身份 →
                          懒拉起用户进程 → 注入令牌转发)+ auth 端点挂载 + CORS
-main.go                  wails v3 桌面入口(仅装配:服务注册、窗口、embed 资源)
+  consolemcp/            goder-console:智能体驱动界面面板的 MCP 服务(仅绑
+                         127.0.0.1,loopback 7450 偏好端口 + 随机令牌)。工具
+                         面 goder_browser_*(右栏浏览器面板:导航/快照 ref 机制/
+                         点击输入/console 与网络捕获/截图——快照 JS 移植自 gh
+                         grf-browser 插件,合成事件无 isTrusted)、goder_terminal_*
+                         (终端面板:新建/输入/增量读缓冲)、goder_ui_*(界面
+                         操作经 wails 事件 + 前端 shell/console-ui.ts 映射)。
+                         含 console-shim 子命令(gh stdio 插件 ↔ HTTP 的行
+                         JSON-RPC 转发)与安装器(~/.grf/plugins/goder-console
+                         wrapper,自动发现模式直接生效;settings.json 有
+                         plugins 键时 upsert 命令项,不破坏自动发现语义)
+  browser/               右栏内嵌浏览器面板的原生 webview(macOS 自建
+                         WKWebView 子视图/Windows WebView2 重父级子窗),
+                         含 Eval/截图与 console/网络捕获钩子(eval.go:
+                         macOS 原生 callAsyncJavaScript 回调,Windows
+                         void ExecJS + fetch 回报 /grf-eval-report)
+main.go                  wails v3 桌面入口(仅装配:服务注册、窗口、embed 资源;
+                         开头分派 `goder console-shim` 子命令)
 internal/desktop/        桌面 wails 服务薄壳(AppConfig/ServerManager/
-                         ModelConfig/Desktop/TerminalManager + rootHandler
-                         /grf-api 反代与 /grf-api/token 冷启动端点;引用
-                         internal/appcfg、internal/ghserver)
+                         ModelConfig/Desktop/TerminalManager/BrowserManager/
+                         ConsoleMCP + rootHandler /grf-api 反代与 /grf-api/token
+                         冷启动端点;引用 internal/appcfg、internal/ghserver)
 cmd/grf-web-serve/       多用户网关 CLI(GRF_IDENTITY=single|header|sso)
 frontend/src/
   core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗)/ model(会话运行
@@ -101,6 +118,16 @@ frontend/src/
 - `internal/ghserver/proxy.go`:WKWebView 自定义 scheme 请求不带
   Content-Length,转发前必须整体缓冲 body 并补齐长度(Go#16036),
   否则 POST body 丢失。
+- **goder-console 接入不变量**:gh 的 plugins 配置「settings.json 无
+  plugins 键 = 自动发现 ~/.grf/plugins」语义不可破坏 —— 给 gh 注册
+  goder-console 一律走 consolemcp.Install(wrapper/命令项),不要写
+  URL 条目(那会把 gh 切到显式列表模式、杀死自动发现)。wrapper 与
+  settings 里的端点/令牌由启动期 Install 烙写,端口令牌持久化在
+  appcfg 目录 console-mcp.json;goder-console 在 builtinPlugins 里
+  不可删。工具命名带 `goder_` 前缀,避免与 grf-browser 插件的
+  `browser_*` 撞名(gh 对重名工具取先连者并告警)。浏览器面板求值
+  的平台机制(macOS callAsyncJavaScript 回调 / Windows fetch 回报)
+  见 internal/browser/eval.go 头注释,改信封格式两边同步。
 - 桌面 wails 服务(`internal/desktop/` 下 `appconfig.go`/`servermanager.go`/
   `desktop.go`/`modelconfig.go`/`terminal.go`)的 DTO 与
   `frontend/src/host/bridge.ts` 手工对齐,两边同改保持同步;wails
@@ -117,6 +144,8 @@ frontend/src/
 - 桌面配置与项目索引存 `~/Library/Application Support/goder/`
   (`index-<scope>.json`);纯 web 态项目索引存 localStorage;网关多用户
   数据在 `GRF_DATA/users/<uid>/server-data`(端口池默认 17400-18400)
+- goder-console MCP 仅绑 127.0.0.1(偏好端口 7450,被占随机回退并
+  回写 appcfg 目录 console-mcp.json;随机令牌同存,跨启动稳定)
 - 模型配置沿用 `~/.grf/settings.json`(GRF_HOME 可重定位)
 - 版本:Go 1.26 / wails v3.0.0-beta.19 / lit 3 / vite 7 / TS 5.9 strict
 

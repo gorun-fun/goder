@@ -52,9 +52,11 @@ static void grf_allowFirstMouseWebviews(void) {
 #define GRF_BROWSER_STORE_UUID "6D9A2C31-9F4B-4A8D-83C2-2B7E5C0A41F6"
 
 // 创建浏览器 WKWebView(共享 data store),作为隐藏、零尺寸子视图加入
-// mainWin 的 contentView。返回指针多持一次 retain(grf_detachView 释放),
-// 嵌入期间保持有效。位置由 Manager 按前端 rect 上报布局。失败返回 NULL。
-static void* grf_createBrowserView(void* mainWin) {
+// mainWin 的 contentView。hooks 非 NULL 时作为 document start 用户脚本
+// 注入(每个新文档执行前跑一次:goder-console 的 console/网络捕获钩子)。
+// 返回指针多持一次 retain(grf_detachView 释放),嵌入期间保持有效。
+// 位置由 Manager 按前端 rect 上报布局。失败返回 NULL。
+static void* grf_createBrowserView(void* mainWin, const char* hooks) {
 	if (!mainWin) return NULL;
 	__block WKWebView* created = nil;
 	grf_onMainSync(^{
@@ -67,6 +69,14 @@ static void* grf_createBrowserView(void* mainWin) {
 			});
 			WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
 			config.websiteDataStore = store;
+			if (hooks && hooks[0]) {
+				WKUserContentController* ucc = [[WKUserContentController alloc] init];
+				[ucc addUserScript:[[WKUserScript alloc]
+					initWithSource:[NSString stringWithUTF8String:hooks]
+					injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+					forMainFrameOnly:YES]];
+				config.userContentController = ucc;
+			}
 			WKWebView* w = [[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)
 			                                          configuration:config];
 			[w setWantsLayer:YES];
@@ -178,11 +188,17 @@ func allowFirstMouseWebviews() {
 
 // createBrowserView 创建共享持久 data store 的 WKWebView,隐藏嵌入
 // 主窗口 contentView;失败返回 nil。app 未使用(macOS 无需托管窗口)。
-func createBrowserView(_ *application.App, mainWin unsafe.Pointer) *view {
+// hooks 作为 document start 用户脚本注入(console/网络捕获钩子)。
+func createBrowserView(_ *application.App, mainWin unsafe.Pointer, hooks string) *view {
 	if mainWin == nil {
 		return nil
 	}
-	p := C.grf_createBrowserView(mainWin)
+	var ch *C.char
+	if hooks != "" {
+		ch = C.CString(hooks)
+		defer C.free(unsafe.Pointer(ch))
+	}
+	p := C.grf_createBrowserView(mainWin, ch)
 	if p == nil {
 		return nil
 	}

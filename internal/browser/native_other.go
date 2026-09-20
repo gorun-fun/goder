@@ -17,7 +17,7 @@ const supported = false
 
 func allowFirstMouseWebviews() {}
 
-func createBrowserView(_ *application.App, _ unsafe.Pointer) *view { return nil }
+func createBrowserView(_ *application.App, _ unsafe.Pointer, _ string) *view { return nil }
 
 func viewLoadURL(_ *view, _ string) {}
 
@@ -32,3 +32,8 @@ func setViewVisible(_ *view, _ bool) {}
 func setViewBackground(_ *view, _ string) {}
 
 func closeView(_ *view) {}
+
+// evalIn / snapshotIn:无原生 webview 的平台一律不支持。
+func evalIn(_ *view, _ string) (string, error) { return "", ErrUnsupported }
+
+func snapshotIn(_ *view) ([]byte, error) { return nil, ErrUnsupported }

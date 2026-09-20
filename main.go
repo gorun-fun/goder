@@ -7,8 +7,10 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 	"runtime"
 
+	"git.gorun.fun/share/goder/internal/consolemcp"
 	"git.gorun.fun/share/goder/internal/desktop"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -19,6 +21,13 @@ import (
 var assets embed.FS
 
 func main() {
+	// goder-console 的 stdio shim 子命令:gh 以本地 MCP 插件方式 spawn
+	// 本程序(`goder console-shim <endpoint> <token>`),行 JSON-RPC 转
+	// 发到桌面进程的 loopback /mcp。必须抢在一切 GUI 初始化之前分派。
+	if len(os.Args) > 1 && os.Args[1] == "console-shim" {
+		os.Exit(consolemcp.RunShim(os.Args[1:]))
+	}
+
 	sm := desktop.GetServerManager()
 
 	// 环境检查门(三平台同一时点):gh 缺失时自动下载(Windows 弹原生
@@ -46,6 +55,8 @@ func main() {
 			application.NewService(&desktop.Desktop{}),
 			application.NewService(desktop.GetTerminalManager()),
 			application.NewService(desktop.GetBrowserManager()),
+			// ConsoleMCP 依赖 BrowserManager 的 Manager,注册须在其后
+			application.NewService(desktop.GetConsoleMCP()),
 			application.NewService(desktop.GetUpdater()),
 		},
 		Assets: application.AssetOptions{
