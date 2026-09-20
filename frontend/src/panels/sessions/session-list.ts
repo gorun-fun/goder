@@ -1,7 +1,8 @@
 // session-list.ts — <grf-session-list>:左栏项目级会话列表。
 // 项目分组(可折叠)→ 会话;项目行以文件夹图标开头(折叠/展开切换
-// 开/合样式),悬停操作:查看文件(左栏切换为该项目文件列表)/新建会话;
-// 会话行不缩进,状态点与项目文件夹图标同列居中、标题与项目名左对齐;
+// 开/合样式),悬停操作:查看文件(左栏切换为该项目文件列表)/新建会话/
+// 删除项目(两段式行内确认,见 onProjectDeleteClick);会话行不缩进,
+// 状态点与项目文件夹图标同列居中、标题与项目名左对齐;
 // 会话显示距今相对时间,悬停时时间隐去、露出删除(两段式行内确认,见
 // onDeleteClick);新建项目走原生目录选择(桌面)或内联输入(web)。底部
 // 为身份 chip(grf-user-chip,支持宿主注入)+ 设置入口(进入设置页)。
@@ -30,6 +31,9 @@ export class GrfSessionList extends GrfPanel {
   @state() private armedDelete?: string;
   /** 待确认态自动退出计时器 */
   private disarmTimer?: number;
+  /** 两段式删除确认:已进入待确认态的项目 id(与会话各自独立) */
+  @state() private armedProjectDelete?: string;
+  private disarmProjTimer?: number;
 
   /** 相对时间(刚刚/n分钟…)每分钟自刷新 */
   private minuteTick?: number;
@@ -121,6 +125,16 @@ export class GrfSessionList extends GrfPanel {
       .op button:hover {
         color: var(--grf-text);
         background: var(--grf-bg-active);
+      }
+      /* 项目删除待确认态:垃圾桶换为红色「确认」文字(与会话删除同语义) */
+      .op button.armed {
+        color: var(--grf-error);
+        font-size: var(--grf-font-size-xs);
+        font-weight: 650;
+        line-height: 1;
+      }
+      .op button.armed:hover {
+        color: var(--grf-error);
       }
       .op svg {
         width: 12px;
@@ -282,6 +296,8 @@ export class GrfSessionList extends GrfPanel {
     this.minuteTick = undefined;
     if (this.disarmTimer) window.clearTimeout(this.disarmTimer);
     this.disarmTimer = undefined;
+    if (this.disarmProjTimer) window.clearTimeout(this.disarmProjTimer);
+    this.disarmProjTimer = undefined;
     super.disconnectedCallback();
   }
 
@@ -356,7 +372,19 @@ export class GrfSessionList extends GrfPanel {
                 </button>`
               : nothing}
             ${pid !== UNGROUPED
-              ? html`<button title="新建会话" @click=${() => void s.newDraft(pid)}>${unsafeHTML(icon.plus)}</button>`
+              ? html`<button title="新建会话" @click=${() => void s.newDraft(pid)}>${unsafeHTML(icon.plus)}</button>
+                  <button
+                    class=${this.armedProjectDelete === pid ? 'armed' : ''}
+                    title=${this.armedProjectDelete === pid
+                      ? '再次点击确认:删除项目及其全部会话'
+                      : '删除项目(连同其全部会话归档)'}
+                    @click=${(e: Event) => {
+                      e.stopPropagation();
+                      this.onProjectDeleteClick(pid);
+                    }}
+                  >
+                    ${this.armedProjectDelete === pid ? '确认' : unsafeHTML(icon.trash)}
+                  </button>`
               : nothing}
           </span>
         </div>
@@ -446,6 +474,27 @@ export class GrfSessionList extends GrfPanel {
     if (this.disarmTimer) window.clearTimeout(this.disarmTimer);
     this.disarmTimer = undefined;
     this.armedDelete = undefined;
+  }
+
+  // onProjectDeleteClick 项目删除的两段式行内确认(与会话删除同模式):
+  // 删除会连带归档该项目全部会话,误触代价更高,故按钮 title 点名后果;
+  // 首击只进入待确认态,再击才真正执行。同屏同时只保留一个待确认态。
+  private onProjectDeleteClick(pid: string): void {
+    if (this.armedProjectDelete === pid) {
+      this.disarmProjectDelete();
+      this.store.deleteProject(pid, true);
+      return;
+    }
+    this.disarmDelete();
+    this.disarmProjectDelete();
+    this.armedProjectDelete = pid;
+    this.disarmProjTimer = window.setTimeout(() => this.disarmProjectDelete(), 3000);
+  }
+
+  private disarmProjectDelete(): void {
+    if (this.disarmProjTimer) window.clearTimeout(this.disarmProjTimer);
+    this.disarmProjTimer = undefined;
+    this.armedProjectDelete = undefined;
   }
 
   private startNewProject(): void {
