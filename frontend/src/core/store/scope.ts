@@ -31,8 +31,9 @@ import {
   textOfContent,
   type SessionRuntime,
 } from '../model/chat-model';
-import { emptyIndex, persistence, type ProjectsIndex, type ProjectRecord } from './persistence';
-import { desktopHomeDir } from '../../host/bridge';
+import { emptyIndex, persistence, type AutomationTask, type ProjectsIndex, type ProjectRecord } from './persistence';
+import { operatorSystemPrompt, runnerSystemPrompt, runnerMessage } from './automation';
+import { desktopHomeDir, ensureHomeDir } from '../../host/bridge';
 import { Emitter } from './emitter';
 
 export const UNGROUPED = '__ungrouped';
@@ -69,6 +70,8 @@ export type ConnState = 'unknown' | 'checking' | 'ok' | 'error';
 
 export interface DraftInfo {
   projectId: string;
+  /** 'run' = 点击自动化任务触发的执行会话(注入执行版 prompt) */
+  variant?: 'run';
 }
 
 export class GrfScope extends Emitter {
@@ -493,6 +496,137 @@ export class GrfScope extends Emitter {
       this.persistIndex();
       this.notify();
     }
+  }
+
+  // ---------- 自动化操作员 ----------
+
+  /** 新建自动化操作员:在用户主目录下建同名专属目录作工作区,落一个
+   * kind:'operator' 项目并立即开出第一个会话草稿。目录名非法/创建失败
+   * 时 log 提示、不落项目;非桌面态无桥可用,同样拦下。返回草稿 id。 */
+  async createOperator(name: string): Promise<string | undefined> {
+    const trimmed = name.trim();
+    if (!trimmed) return undefined;
+    let path: string;
+    try {
+      const dir = await ensureHomeDir(trimmed);
+      if (!dir) {
+        this.log('warn', '操作员仅桌面态支持(需要在主目录创建工作区)');
+        return undefined;
+      }
+      path = dir;
+    } catch (err) {
+      this.log('warn', `创建操作员目录失败:${errText(err)}`);
+      return undefined;
+    }
+    const p: ProjectRecord = {
+      id: genId('op'),
+      name: trimmed,
+      createdAt: new Date().toISOString(),
+      path,
+      kind: 'operator',
+    };
+    this.index.projects.push(p);
+    this.persistIndex();
+    this.log('info', `操作员已创建:${trimmed}(${path})`);
+    return this.newDraft(p.id);
+  }
+
+  /** 操作员分组列表(左栏「自动化」类别用):kind:'operator' 项目,
+   * 按创建时间正序。 */
+  operatorGroups(): ProjectRecord[] {
+    return this.index.projects
+      .filter((p) => p.kind === 'operator')
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  }
+
+  /** 某操作员名下的自动化任务。 */
+  automationTasksOf(operatorId: string): AutomationTask[] {
+    return (this.index.automation ?? []).filter((t) => t.operatorId === operatorId);
+  }
+
+  /** 会话所属的操作员项目 id(真实 sid 与草稿 id 均可);非操作员会话
+   * 返回 undefined。任务卡的保存/已保存判定用。 */
+  sessionOperatorId(sid: string | undefined): string | undefined {
+    if (!sid) return undefined;
+    const pid = sid.startsWith('draft:')
+      ? this.drafts.get(sid)?.projectId
+      : this.index.sessions[sid]?.projectId;
+    if (!pid) return undefined;
+    return this.index.projects.find((p) => p.id === pid)?.kind === 'operator' ? pid : undefined;
+  }
+
+  /** 保存自动化任务(同一操作员内同名 upsert:改指令不增条目)。
+   * 返回落库后的任务;名字/指令为空不落。 */
+  saveAutomationTask(operatorId: string, name: string, instructions: string): AutomationTask | undefined {
+    const n = name.trim();
+    const ins = instructions.trim();
+    if (!n || !ins) return undefined;
+    const list = this.index.automation ?? [];
+    const exist = list.find((t) => t.operatorId === operatorId && t.name === n);
+    let task: AutomationTask;
+    if (exist) {
+      exist.instructions = ins;
+      exist.updatedAt = new Date().toISOString();
+      task = exist;
+    } else {
+      task = {
+        id: genId('a'),
+        operatorId,
+        name: n,
+        instructions: ins,
+        createdAt: new Date().toISOString(),
+      };
+      list.push(task);
+    }
+    this.index.automation = list;
+    this.persistIndex();
+    this.log('info', `自动化任务已保存:${n}(状态浮窗可执行)`);
+    this.notify();
+    return task;
+  }
+
+  deleteAutomationTask(id: string): void {
+    const list = this.index.automation;
+    if (!list) return;
+    if (!list.some((t) => t.id === id)) return;
+    this.index.automation = list.filter((t) => t.id !== id);
+    this.persistIndex();
+    this.notify();
+  }
+
+  /** 在状态浮窗点击任务:在其所属操作员下新建执行会话(run 变体,注入
+   * 执行版 prompt 继承工作区与记忆),自动发送任务指令并切换过去。 */
+  runAutomationTask(id: string): void {
+    const task = this.index.automation?.find((t) => t.id === id);
+    if (!task) return;
+    if (task.lastRunSid && this.isRunning(task.lastRunSid)) {
+      this.log('info', `任务「${task.name}」正在执行中`);
+      return;
+    }
+    const op = this.index.projects.find((p) => p.id === task.operatorId);
+    if (!op) {
+      this.log('warn', `任务「${task.name}」所属的操作员已删除,无法执行`);
+      return;
+    }
+    if (!this.model && !this.activeRuntime?.model) {
+      this.log('warn', '尚未选择模型:请在输入框下方「模型」中选择后再执行任务');
+      return;
+    }
+    const startedAt = new Date().toISOString();
+    const did = this.newDraft(op.id);
+    this.drafts.get(did)!.variant = 'run';
+    task.lastRunAt = startedAt;
+    this.notify();
+    void this.send(runnerMessage(task), undefined, { sid: did }).then(() => {
+      // 草稿转正后的真实 sid:取该操作员下、本次执行开始后新建的会话
+      // (执行会话是刚建的草稿转正,时间窗内必然唯一)。
+      const hit = Object.entries(this.index.sessions)
+        .filter(([, r]) => r.projectId === op.id && r.createdAt >= startedAt)
+        .sort((a, b) => (a[1].createdAt < b[1].createdAt ? 1 : -1))[0];
+      if (hit) task.lastRunSid = hit[0];
+      this.persistIndex();
+      this.notify();
+    });
   }
 
   toggleProjectCollapsed(pid: string): void {
@@ -959,11 +1093,21 @@ export class GrfScope extends Emitter {
     // 让 agent 的文件/终端工具直接落在项目里;未选工作区时默认用户
     // 主目录 —— 直接聊天不必先建项目)。
     // composer 的策略选择(draftPolicy)优先于项目默认。
+    // 操作员项目额外注入操作员/执行版 system_prompt(放最后,覆盖
+    // defaults 里的同名字段)。
     const grfSession = isDraft
       ? {
           workspace: draftProject?.path || this.homeDir || undefined,
           ...draftProject?.defaults,
           ...(this.draftPolicy ? { policy: this.draftPolicy } : {}),
+          ...(draftProject?.kind === 'operator'
+            ? {
+                system_prompt:
+                  draftInfo?.variant === 'run'
+                    ? runnerSystemPrompt()
+                    : operatorSystemPrompt(this.automationTasksOf(draftProject.id)),
+              }
+            : {}),
         }
       : undefined;
 

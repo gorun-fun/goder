@@ -8,9 +8,11 @@ import { renderMarkdown } from '../../util/markdown';
 import { truncate, fmtDuration } from '../../util/fmt';
 import { icon } from '../../util/icons';
 import type { ChatItem } from '../../core/model/chat-model';
+import { hasTaskBlock, parseGrfTaskBlocks, type TaskSegment } from '../../core/store/automation';
 import './tool-card';
 import './ask-form';
 import './approval-card';
+import './task-card';
 
 /** 消息渲染依赖的宿主状态与回调(由 chat-panel 实现)。 */
 export interface MessageViewProps {
@@ -30,6 +32,10 @@ export interface MessageViewProps {
   onAskAnswer(e: Event): void;
   onAskDismiss(e: Event): void;
   onApprove(e: Event): void;
+  /** 任务卡保存(操作员输出的 <grf-task> 块 → 自动化任务库) */
+  onSaveTask(name: string, instructions: string): void;
+  /** 任务是否已保存(当前会话所属操作员名下同名同指令) */
+  isTaskSaved(name: string, instructions: string): boolean;
 }
 
 /** 渲染单条消息(ask 待答态返回 nothing:交互控件在底部输入框内)。
@@ -80,7 +86,7 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
       return html`
         <div class="msg-assistant">
           <div class="md">
-            ${unsafeHTML(renderMarkdown(it.text))}
+            ${renderAssistantBody(it, p)}
             ${it.streaming && !it.text ? html`<span class="cursor"></span>` : nothing}
           </div>
         </div>
@@ -128,8 +134,27 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
   }
 }
 
-/** 思考块:流式单行高亮(内容跟随输出滚动),完成后折叠头部可展开。 */
-function renderReasoning(
+/** assistant 正文:含 <grf-task> 任务块时拆段渲染 —— 普通段照常走
+ * markdown,完整闭合的任务块渲染为 grf-task-card(流式未闭合块由解析
+ * 层丢弃,闭合后成卡)。 */
+function renderAssistantBody(it: { text: string }, p: MessageViewProps): TemplateResult[] {
+  const segs: TaskSegment[] = hasTaskBlock(it.text)
+    ? parseGrfTaskBlocks(it.text)
+    : [{ type: 'text', text: it.text }];
+  return segs.map((seg) =>
+    seg.type === 'task'
+      ? html`<grf-task-card
+          .name=${seg.name}
+          .instructions=${seg.instructions}
+          .saved=${p.isTaskSaved(seg.name, seg.instructions)}
+          @save=${(e: CustomEvent<{ name: string; instructions: string }>) =>
+            p.onSaveTask(e.detail.name, e.detail.instructions)}
+        ></grf-task-card>`
+      : html`${unsafeHTML(renderMarkdown(seg.text))}`,
+  );
+}
+
+/** 思考块:流式单行高亮(内容跟随输出滚动),完成后折叠头部可展开。 */function renderReasoning(
   it: { kind: 'reasoning'; id: string; text: string; streaming: boolean; startedAt?: number; endedAt?: number },
   p: MessageViewProps,
 ): TemplateResult {

@@ -1,4 +1,7 @@
 // session-list.ts — <grf-session-list>:左栏项目级会话列表。
+// 桌面态顶部多一个「自动化」类别:操作员分组(kind:'operator' 项目,
+// home 下同名目录作工作区,bot 图标),与项目分组同构(可折叠/悬停
+// 新建会话/两段式删除);「项目」小节头随之移入滚动区(sticky)。
 // 项目分组(可折叠)→ 会话;项目行以文件夹图标开头(折叠/展开切换
 // 开/合样式),悬停操作:查看文件(左栏切换为该项目文件列表)/新建会话/
 // 删除项目(两段式行内确认,见 onProjectDeleteClick);会话行不缩进,
@@ -16,6 +19,7 @@ import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtRelative } from '../../util/fmt';
 import { UNGROUPED } from '../../core/store/scope';
+import type { ProjectRecord } from '../../core/store/persistence';
 import { inWails, pickFolder } from '../../host/bridge';
 import './user-chip';
 
@@ -27,6 +31,9 @@ export class GrfSessionList extends GrfPanel {
   /** web 态新建项目的内联输入 */
   @state() private newProject = false;
   @state() private draftName = '';
+  /** 桌面态新建操作员的内联输入(操作员名 = 主目录下工作区目录名) */
+  @state() private newOperator = false;
+  @state() private operatorName = '';
   /** 两段式删除确认:已进入待确认态的会话 id */
   @state() private armedDelete?: string;
   /** 待确认态自动退出计时器 */
@@ -71,6 +78,43 @@ export class GrfSessionList extends GrfPanel {
         overflow-y: auto;
         min-height: 0;
         padding: 6px 6px 12px;
+      }
+      /* 滚动区内的「项目」小节头:滚动经过时吸顶(背景遮住下层内容) */
+      .sec-head {
+        position: sticky;
+        top: -6px;
+        z-index: 1;
+        margin: 4px -6px 2px;
+        padding: 7px 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--grf-bg-raise);
+        border-bottom: 1px solid var(--grf-border-soft);
+        user-select: none;
+        font-weight: 650;
+        font-size: var(--grf-font-size);
+      }
+      .sec-head .t {
+        flex: 1;
+      }
+      .hint-empty {
+        color: var(--grf-text-faint);
+        font-size: var(--grf-font-size-xs);
+        padding: 10px 10px;
+        line-height: 1.5;
+      }
+      /* 操作员分组行:bot 图标常显(折叠以透明度区分),悬停着色 */
+      .proj-head.op-group .fic {
+        color: var(--grf-text-faint);
+        opacity: 0.9;
+      }
+      .proj-head.op-group:not(.open) .fic {
+        opacity: 0.55;
+      }
+      .proj-head.op-group:hover .fic {
+        color: var(--grf-accent-text);
+        opacity: 1;
       }
       .proj {
         margin-bottom: 2px;
@@ -303,14 +347,31 @@ export class GrfSessionList extends GrfPanel {
 
   render() {
     const s = this.store;
-    const projects = [...s.index.projects].sort((a, b) => (a.id === UNGROUPED ? 1 : b.id === UNGROUPED ? -1 : a.createdAt < b.createdAt ? 1 : -1));
+    const desktop = inWails();
+    const operators = desktop ? s.operatorGroups() : [];
+    const projects = [...s.index.projects]
+      .filter((p) => p.kind !== 'operator')
+      .sort((a, b) => (a.id === UNGROUPED ? 1 : b.id === UNGROUPED ? -1 : a.createdAt < b.createdAt ? 1 : -1));
     return html`
-      <div class="head">
-        <span class="t">项目</span>
-        <button class="ghost" title="新建项目" @click=${this.startNewProject}>${unsafeHTML(icon.plus)}</button>
-        <button class="ghost" title="刷新列表" @click=${() => void s.refreshConversations()}>${unsafeHTML(icon.refresh)}</button>
-      </div>
+      ${desktop
+        ? html`
+            <div class="head">
+              <span class="t">自动化</span>
+              <button class="ghost" title="添加操作员(在主目录创建同名工作区)" @click=${this.startNewOperator}>
+                ${unsafeHTML(icon.plus)}
+              </button>
+            </div>
+          `
+        : nothing}
       <div class="list">
+        ${desktop ? this.renderOperators(operators) : nothing}
+        <div class="sec-head">
+          <span class="t">项目</span>
+          <button class="ghost" title="新建项目" @click=${this.startNewProject}>${unsafeHTML(icon.plus)}</button>
+          <button class="ghost" title="刷新列表" @click=${() => void s.refreshConversations()}>
+            ${unsafeHTML(icon.refresh)}
+          </button>
+        </div>
         ${this.newProject
           ? html`
               <div class="proj">
@@ -330,7 +391,7 @@ export class GrfSessionList extends GrfPanel {
           : nothing}
         ${projects.map((p) => this.renderProject(p.id, p.name, !!p.collapsed, p.path))}
         ${projects.length === 0 && !this.newProject
-          ? html`<div style="color:var(--grf-text-faint);font-size:var(--grf-font-size-xs);padding:14px 10px">还没有项目。点击右上 + 新建。</div>`
+          ? html`<div class="hint-empty">还没有项目。点击「项目」右侧 + 新建。</div>`
           : nothing}
       </div>
       ${this.noConnection
@@ -344,7 +405,34 @@ export class GrfSessionList extends GrfPanel {
     `;
   }
 
-  private renderProject(pid: string, name: string, collapsed: boolean, path?: string) {
+  /** 「自动化」类别:操作员内联输入 + 操作员分组(与项目分组同构)。 */
+  private renderOperators(operators: ProjectRecord[]) {
+    return html`
+      ${this.newOperator
+        ? html`
+            <div class="proj">
+              <div class="newproj-form">
+                <input
+                  class="edit-in newproj-in"
+                  type="text"
+                  .value=${this.operatorName}
+                  placeholder="操作员名(主目录下同名文件夹)"
+                  @input=${(e: InputEvent) => (this.operatorName = (e.target as HTMLInputElement).value)}
+                  @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this.commitNewOperator()}
+                  @blur=${this.commitNewOperator}
+                />
+              </div>
+            </div>
+          `
+        : nothing}
+      ${operators.map((p) => this.renderProject(p.id, p.name, !!p.collapsed, p.path, true))}
+      ${operators.length === 0 && !this.newOperator
+        ? html`<div class="hint-empty">还没有操作员。点击上方 + 添加,以会话形式协作调试电脑操作。</div>`
+        : nothing}
+    `;
+  }
+
+  private renderProject(pid: string, name: string, collapsed: boolean, path?: string, operator = false) {
     const s = this.store;
     const sessions = Object.entries(s.index.sessions)
       .filter(([, rec]) => rec.projectId === pid)
@@ -355,12 +443,16 @@ export class GrfSessionList extends GrfPanel {
     return html`
       <div class="proj">
         <div
-          class="proj-head ${collapsed ? '' : 'open'}"
+          class="proj-head ${collapsed ? '' : 'open'} ${operator ? 'op-group' : ''}"
           style=${activeProj ? 'color:var(--grf-text)' : ''}
           title=${tip}
           @click=${() => s.toggleProjectCollapsed(pid)}
         >
-          <span class="fic">${unsafeHTML(collapsed ? icon.folder : icon.folderOpen)}</span>
+          <span class="fic"
+            >${operator
+              ? unsafeHTML(icon.bot)
+              : unsafeHTML(collapsed ? icon.folder : icon.folderOpen)}</span
+          >
           <span class="name">${name}</span>
           <span class="op" @click=${(e: Event) => e.stopPropagation()}>
             ${path && inWails()
@@ -372,12 +464,18 @@ export class GrfSessionList extends GrfPanel {
                 </button>`
               : nothing}
             ${pid !== UNGROUPED
-              ? html`<button title="新建会话" @click=${() => void s.newDraft(pid)}>${unsafeHTML(icon.plus)}</button>
+              ? html`<button title="新建会话" @click=${() => void s.newDraft(pid)}>
+                    ${unsafeHTML(icon.plus)}
+                  </button>
                   <button
                     class=${this.armedProjectDelete === pid ? 'armed' : ''}
                     title=${this.armedProjectDelete === pid
-                      ? '再次点击确认:删除项目及其全部会话'
-                      : '删除项目(连同其全部会话归档)'}
+                      ? operator
+                        ? '再次点击确认:删除操作员及其全部会话'
+                        : '再次点击确认:删除项目及其全部会话'
+                      : operator
+                        ? '删除操作员(连同其全部会话归档;主目录工作区保留)'
+                        : '删除项目(连同其全部会话归档)'}
                     @click=${(e: Event) => {
                       e.stopPropagation();
                       this.onProjectDeleteClick(pid);
@@ -521,6 +619,27 @@ export class GrfSessionList extends GrfPanel {
     if (name) this.store.createProject(name);
     this.newProject = false;
     this.draftName = '';
+    this.requestUpdate();
+  }
+
+  // 新建操作员:内联输入名字(= 主目录下工作区目录名),回车/失焦提交。
+  // createOperator 在 scope 侧建目录 + 落项目 + 开首个会话;失败(名字
+  // 非法/非桌面态)只 log 提示,这里不留输入态。
+  private startNewOperator(): void {
+    this.newOperator = true;
+    this.operatorName = '';
+    this.updateComplete.then(() => {
+      const el = this.renderRoot.querySelector('.newproj-form input, .edit-in') as HTMLInputElement | null;
+      el?.focus();
+    });
+  }
+
+  private commitNewOperator(): void {
+    if (!this.newOperator) return;
+    const name = this.operatorName.trim();
+    this.newOperator = false;
+    this.operatorName = '';
+    if (name) void this.store.createOperator(name);
     this.requestUpdate();
   }
 }

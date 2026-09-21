@@ -35,6 +35,28 @@ func (d *Desktop) HomeDir() (string, error) {
 	return os.UserHomeDir()
 }
 
+// EnsureHomeDir 在用户主目录下确保存在名为 name 的子目录并返回其绝对
+// 路径(新建自动化操作员的工作区用)。幂等:已存在直接复用。名字经
+// 净化(去首尾空白、拒绝路径分隔符与 ".."),不允许逃出主目录。
+func (d *Desktop) EnsureHomeDir(name string) (string, error) {
+	clean := strings.TrimSpace(name)
+	if clean == "" {
+		return "", fmt.Errorf("目录名不能为空")
+	}
+	if strings.ContainsAny(clean, `/\`) || clean == "." || clean == ".." || strings.Contains(clean, "..") {
+		return "", fmt.Errorf("目录名不能包含路径分隔符或 ..")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, clean)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
 // PickFolder 打开原生目录选择器;返回所选目录绝对路径,取消返回空串。
 func (d *Desktop) PickFolder() (string, error) {
 	return application.Get().Dialog.OpenFile().

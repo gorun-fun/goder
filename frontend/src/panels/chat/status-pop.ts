@@ -1,15 +1,17 @@
 // status-pop.ts — <grf-status-pop>:聊天列右上角状态浮窗。
-// 当前项目 git 概览(置顶)与模型 todo 任务 —— 有内容才显示对应区块,
-// 都没有则整框不渲染;默认收起为单行,用户手动展开/收起的状态跨会话
-// 持久化(localStorage);非 git 内容(任务列表/目标)发生变化时自动展开。
-// 聊天列过窄时强制单行(narrow 属性)。todos/goal 自行订阅 scope 数据域;
-// git 状态由宿主(chat 面板)轮询后经属性传入。
+// 自动化任务库(置顶,点击任务即在所属操作员下新建执行会话)、当前项目
+// git 概览与模型 todo 任务 —— 有内容才显示对应区块,都没有则整框不渲染;
+// 默认收起为单行,用户手动展开/收起的状态跨会话持久化(localStorage);
+// 非 git 内容(任务列表/目标/自动化任务数)发生变化时自动展开。聊天列
+// 过窄时强制单行(narrow 属性)。todos/goal/自动化任务自行订阅 scope
+// 数据域;git 状态由宿主(chat 面板)轮询后经属性传入。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import type { GitStatusDTO } from '../../host/bridge';
+import type { AutomationTask } from '../../core/store/persistence';
 
 @customElement('grf-status-pop')
 export class GrfStatusPop extends GrfPanel {
@@ -23,16 +25,21 @@ export class GrfStatusPop extends GrfPanel {
   @state() private open = loadOpen();
   /** 上次观测到的任务/目标快照(会话 id + 内容),用于检测变化触发自动展开 */
   private snap: { sid: string; key: string } | null = null;
+  /** 两段式删除确认:已进入待确认态的任务 id */
+  @state() private armedTaskDelete?: string;
+  private disarmTaskTimer?: number;
 
   protected willUpdate(): void {
-    // 检测非 git 内容(任务列表/目标)变化:会话切换只重置基线不触发;
-    // 同一会话内内容变化则自动展开(不写持久化,下次启动仍以上次手动选择为准)。
+    // 检测非 git 内容(任务列表/目标/自动化任务数)变化:会话切换只重置
+    // 基线不触发;同一会话内内容变化则自动展开(不写持久化,下次启动仍以
+    // 上次手动选择为准)。
     const s = this.store;
     const sid = s?.activeSessionId ?? '';
     const rt = s?.runtimes.get(sid);
     const key = JSON.stringify({
       goal: rt?.goal ? { phase: rt.goal.phase, objective: rt.goal.objective } : null,
       todos: rt?.todos?.map((t) => [t.status, t.content]) ?? null,
+      auto: s?.index.automation?.length ?? 0,
     });
     if (!this.snap || this.snap.sid !== sid) {
       this.snap = { sid, key };
@@ -216,6 +223,104 @@ export class GrfStatusPop extends GrfPanel {
       .sp-todo.in_progress .tx {
         color: var(--grf-text);
       }
+      /* 自动化任务行:整行可点执行;运行中转圈、图标着色;悬停时操作员
+       * 名隐去、原位露出删除按钮(与会话行同款占位互换) */
+      .sp-task {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 6px 5px 2px;
+        border-radius: var(--grf-radius-sm);
+        cursor: pointer;
+        color: var(--grf-text-dim);
+        font-size: var(--grf-font-size-sm);
+        line-height: 1.4;
+      }
+      .sp-task:hover {
+        background: var(--grf-bg-hover);
+        color: var(--grf-text);
+      }
+      .sp-task.running {
+        color: var(--grf-text);
+      }
+      .sp-task.dead {
+        cursor: default;
+        color: var(--grf-text-faint);
+      }
+      .sp-task .sp-tic {
+        flex: none;
+        width: 16px;
+        height: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--grf-text-faint);
+      }
+      .sp-task:hover .sp-tic {
+        color: var(--grf-accent-text);
+      }
+      .sp-task .sp-tic svg {
+        width: 13px;
+        height: 13px;
+      }
+      .sp-task .spin {
+        width: 12px;
+        height: 12px;
+        animation: sp-spin 0.9s linear infinite;
+      }
+      @keyframes sp-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .sp-task .sp-tname {
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .sp-task .sp-towner,
+      .sp-task .sp-tdel {
+        min-width: 44px;
+        flex: none;
+      }
+      .sp-task .sp-towner {
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+        text-align: right;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .sp-task .sp-tdel {
+        display: none;
+        justify-content: center;
+        padding: 2px 4px;
+        border: none;
+        background: transparent;
+        color: var(--grf-text-faint);
+      }
+      .sp-task .sp-tdel svg {
+        width: 12px;
+        height: 12px;
+      }
+      .sp-task .sp-tdel:hover {
+        color: var(--grf-error);
+        background: var(--grf-bg-active);
+      }
+      .sp-task .sp-tdel.armed {
+        color: var(--grf-error);
+        font-size: var(--grf-font-size-xs);
+        font-weight: 650;
+        line-height: 1;
+      }
+      .sp-task:hover .sp-towner {
+        display: none;
+      }
+      .sp-task:hover .sp-tdel {
+        display: inline-flex;
+      }
     `,
   ];
 
@@ -224,14 +329,16 @@ export class GrfStatusPop extends GrfPanel {
     const rt = s?.runtimes.get(s.activeSessionId ?? '');
     const todos = rt?.todos ?? null;
     const goal = rt?.goal ?? null;
+    const tasks = s?.index.automation ?? [];
     const hasGit = !!this.git;
     const hasTodos = !!todos?.length;
     const hasGoal = !!goal;
+    const hasAuto = tasks.length > 0;
     // 没有任何可显示的内容:整框隐藏
-    if (!hasGit && !hasTodos && !hasGoal) return nothing;
+    if (!hasGit && !hasTodos && !hasGoal && !hasAuto) return nothing;
 
-    // 收起态:单行显示——优先级:任务完成度 > 目标阶段 > git 行级变更;
-    // 整行可点击展开(按钮点击冒泡到同一处理)。
+    // 收起态:单行显示——优先级:任务完成度 > 目标阶段 > git 行级变更 >
+    // 自动化任务数;整行可点击展开(按钮点击冒泡到同一处理)。
     if (!this.open || this.narrow) {
       const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
       return html`
@@ -241,9 +348,11 @@ export class GrfStatusPop extends GrfPanel {
               ? html`<span>任务 ${doneCnt}/${todos!.length} 完成</span>`
               : hasGoal
                 ? html`<span>目标 ${goalPhaseText(goal!.phase)}</span>`
-                : html`<span class="sp-diff">
-                    更改 <span class="add">+${this.git!.additions}</span> <span class="del">-${this.git!.deletions}</span>
-                  </span>`}
+                : hasGit
+                  ? html`<span class="sp-diff">
+                      更改 <span class="add">+${this.git!.additions}</span> <span class="del">-${this.git!.deletions}</span>
+                    </span>`
+                  : html`<span>自动化任务 ${tasks.length}</span>`}
             <button class="sp-fold" title="展开" @click=${this.expand}>
               ${unsafeHTML(icon.chevron)}
             </button>
@@ -253,18 +362,30 @@ export class GrfStatusPop extends GrfPanel {
     }
 
     const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
-    // 缩放按钮不单独占行:跟随首个区块(Git 优先,否则任务)的标题行,靠右
+    // 缩放按钮不单独占行:跟随首个区块(自动化优先,否则 Git)的标题行,靠右
     const foldBtn = html`<button class="sp-fold" title="收起为一行" @click=${this.collapse}>
       ${unsafeHTML(icon.chevron)}
     </button>`;
     return html`
       <div class="status-pop">
+        ${hasAuto
+          ? html`
+              <div class="sp-sec">
+                <h4>
+                  ${unsafeHTML(icon.bot)} 自动化
+                  <span class="sp-cnt">${tasks.length}</span>
+                  ${foldBtn}
+                </h4>
+                ${tasks.map((t) => this.renderTaskRow(t))}
+              </div>
+            `
+          : nothing}
         ${hasGit
           ? html`
               <div class="sp-sec">
                 <h4>
                   ${unsafeHTML(icon.gitBranch)} Git
-                  ${foldBtn}
+                  ${hasAuto ? nothing : foldBtn}
                 </h4>
                 <div class="sp-kv">
                   <span class="k">分支</span>
@@ -290,7 +411,7 @@ export class GrfStatusPop extends GrfPanel {
                 <h4>
                   ${unsafeHTML(icon.target)} 目标
                   <span class="sp-cnt">${goalPhaseText(goal!.phase)}</span>
-                  ${hasGit ? nothing : foldBtn}
+                  ${hasGit || hasAuto ? nothing : foldBtn}
                 </h4>
                 <div class="sp-goal ${goal!.phase}">${goal!.objective}</div>
               </div>
@@ -302,7 +423,7 @@ export class GrfStatusPop extends GrfPanel {
                 <h4>
                   ${unsafeHTML(icon.check)} 任务
                   <span class="sp-cnt">${doneCnt}/${todos!.length} 完成</span>
-                  ${hasGit || hasGoal ? nothing : foldBtn}
+                  ${hasGit || hasGoal || hasAuto ? nothing : foldBtn}
                 </h4>
                 ${todos!.map(
                   (t) => html`
@@ -318,6 +439,82 @@ export class GrfStatusPop extends GrfPanel {
       </div>
     `;
   }
+  /** 自动化任务行:整行点击 = 执行(在所属操作员下新建执行会话);运行中
+   * 显示转圈;悬停露出两段式删除。所属操作员已删除的任务置灰不可执行。 */
+  private renderTaskRow(t: AutomationTask) {
+    const s = this.store!;
+    const running = !!t.lastRunSid && s.isRunning(t.lastRunSid);
+    const opName = s.index.projects.find((p) => p.id === t.operatorId)?.name ?? '';
+    const dead = !opName;
+    const armed = this.armedTaskDelete === t.id;
+    return html`
+      <div
+        class="sp-task ${running ? 'running' : ''} ${dead ? 'dead' : ''}"
+        title=${dead
+          ? `${t.name}(所属操作员已删除,无法执行)`
+          : `${t.name}${opName ? ` · ${opName}` : ''}\n点击执行:${t.instructions.slice(0, 160)}${t.instructions.length > 160 ? '…' : ''}`}
+        @click=${() => !dead && s.runAutomationTask(t.id)}
+      >
+        <span class="sp-tic">
+          ${running
+            ? html`<svg class="spin" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="6" fill="none" stroke="var(--grf-border-hover)" stroke-width="2" />
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="6"
+                  fill="none"
+                  stroke="var(--grf-accent)"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-dasharray="16 38"
+                />
+              </svg>`
+            : unsafeHTML(icon.play)}
+        </span>
+        <span class="sp-tname">${t.name}</span>
+        ${dead
+          ? nothing
+          : html`<span class="sp-towner">${opName}</span>
+              <button
+                class="sp-tdel ${armed ? 'armed' : ''}"
+                title=${armed ? '再次点击确认删除任务' : '删除任务(不影响已执行过的会话)'}
+                @click=${(e: Event) => {
+                  e.stopPropagation();
+                  this.onTaskDeleteClick(t.id);
+                }}
+              >
+                ${armed ? '确认' : unsafeHTML(icon.trash)}
+              </button>`}
+      </div>
+    `;
+  }
+
+  // onTaskDeleteClick 任务删除的两段式行内确认(与会话/项目删除同模式):
+  // 首击进入待确认态(按钮变红色「确认」,3 秒未跟击自动退出),再击删除。
+  private onTaskDeleteClick(id: string): void {
+    if (this.armedTaskDelete === id) {
+      this.disarmTaskDelete();
+      this.store?.deleteAutomationTask(id);
+      return;
+    }
+    this.armedTaskDelete = id;
+    if (this.disarmTaskTimer) window.clearTimeout(this.disarmTaskTimer);
+    this.disarmTaskTimer = window.setTimeout(() => this.disarmTaskDelete(), 3000);
+  }
+
+  private disarmTaskDelete(): void {
+    if (this.disarmTaskTimer) window.clearTimeout(this.disarmTaskTimer);
+    this.disarmTaskTimer = undefined;
+    this.armedTaskDelete = undefined;
+  }
+
+  disconnectedCallback(): void {
+    if (this.disarmTaskTimer) window.clearTimeout(this.disarmTaskTimer);
+    this.disarmTaskTimer = undefined;
+    super.disconnectedCallback();
+  }
+
   /** 手动展开/收起:状态持久化,下次启动按此恢复 */
   private expand(): void {
     this.open = true;

@@ -75,14 +75,16 @@ internal/desktop/        桌面 wails 服务薄壳(AppConfig/ServerManager/
 cmd/grf-web-serve/       多用户网关 CLI(GRF_IDENTITY=single|header|sso)
 frontend/src/
   core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗)/ model(会话运行
-           时模型)/ store(emitter 响应式基座、scope 编排、persistence)/
+           时模型)/ store(emitter 响应式基座、scope 编排、persistence、
+           automation 操作员 system_prompt 与 <grf-task> 任务块解析)/
            settings(设置状态)
   registry/ UI 注册表:nav(左栏导航)/ side(右栏 tab)/ bottom(底栏 tab)
            三区条目 —— 内置与三方自定义同一条 add/remove/hide/show API
-  panels/  按功能分组:chat(chat-panel/messages/status-pop/composer/工具卡/
-           ask/审批)、sessions(session-list)、files(file-list/file-view)、
-           inspector(session-detail/review/browser)、console、terminal
-           (仅桌面入口注册,含 xterm)、settings(settings-nav/page)
+  panels/  按功能分组:chat(chat-panel/messages/status-pop(含自动化任务
+           执行入口)/composer/工具卡/ask/审批/任务卡)、sessions
+           (session-list,桌面态含「自动化」操作员类别)、files(file-list/
+           file-view)、inspector(session-detail/review/browser)、console、
+           terminal(仅桌面入口注册,含 xterm)、settings(settings-nav/page)
   shell/   app-shell 布局(registry 驱动)+ builtin-common / builtin-desktop
            (内置条目注册:模块加载即注册,幂等)
   ui/      GrfPanel 基类(panel.ts,同时转出 theme)+ theme.ts(--grf-* 令牌)
@@ -137,6 +139,14 @@ frontend/src/
   internal/appcfg、internal/ghserver。
 - 前端 web 默认 baseUrl、桌面 bootstrap 顺序(先同源代理再补 token)与
   `/grf-api/token` 端点是冷启动链路的一部分,改动需回归桌面+web 两形态。
+- **自动化操作员不变量**:操作员 = ProjectsIndex 里 `kind:'operator'` 的
+  项目(桌面态经 `Desktop.EnsureHomeDir` 在 `~/<名>` 建工作区目录,
+  「自动化」左栏类别仅桌面态显示);其会话首条消息由 scope 注入
+  `core/store/automation.ts` 的 system_prompt(记忆用 gh 内置 memory
+  工具,project 级落工作区 `.grf/memory.json`),任务沉淀协议
+  `<grf-task>` 块同样在 automation.ts 解析、由 chat 任务卡保存进
+  `index.automation`(migrateIndex 必须保留该字段,漏拷 web 态重载即
+  清空);执行入口在 status-pop,点击即在该操作员下新建 run 变体会话。
 
 ## 运行时环境
 

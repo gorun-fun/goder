@@ -1467,7 +1467,26 @@ export class GrfChat extends GrfPanel {
       onAskAnswer: this.onAskAnswer,
       onAskDismiss: this.onAskDismiss,
       onApprove: this.onApprove,
+      onSaveTask: (name, instructions) => this.saveTaskFromCard(name, instructions),
+      isTaskSaved: (name, instructions) => this.isTaskSaved(name, instructions),
     };
+  }
+
+  /** 任务卡保存:落库到当前会话所属操作员名下(非操作员会话忽略)。 */
+  private saveTaskFromCard(name: string, instructions: string): void {
+    const s = this.store;
+    const opId = s?.sessionOperatorId(this.sid);
+    if (!s || !opId) return;
+    s.saveAutomationTask(opId, name, instructions);
+  }
+
+  private isTaskSaved(name: string, instructions: string): boolean {
+    const s = this.store;
+    const opId = s?.sessionOperatorId(this.sid);
+    if (!s || !opId) return false;
+    const n = name.trim();
+    const ins = instructions.trim();
+    return s.automationTasksOf(opId).some((t) => t.name === n && t.instructions === ins);
   }
 
   private scrollToMsg(id: string): void {
