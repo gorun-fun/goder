@@ -6,7 +6,9 @@
 // 是否注册决定渲染,纯 web/嵌入形态模块不加载、不出现。
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { theme, controls } from '../../ui/theme';
+import { renderMarkdown } from '../../util/markdown';
 import {
   inWails,
   checkUpdate,
@@ -146,7 +148,6 @@ export class GrfUpdateChip extends LitElement {
       }
       .comp .note {
         margin-top: 6px;
-        white-space: pre-wrap;
         word-break: break-word;
         color: var(--grf-text-dim);
         font-size: var(--grf-font-size-sm);
@@ -156,6 +157,100 @@ export class GrfUpdateChip extends LitElement {
         padding: 8px 10px;
         max-height: 170px;
         overflow: auto;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+      }
+      /* 说明框内 markdown 元素(紧凑版,适配弹窗小尺寸) */
+      .comp .note > :first-child {
+        margin-top: 0;
+      }
+      .comp .note > :last-child {
+        margin-bottom: 0;
+      }
+      .comp .note .md-p {
+        margin: 0 0 6px;
+      }
+      .comp .note .md-h {
+        margin: 8px 0 4px;
+        font-weight: 650;
+        line-height: 1.4;
+      }
+      .comp .note h1.md-h,
+      .comp .note h2.md-h {
+        font-size: var(--grf-font-size);
+      }
+      .comp .note h3.md-h {
+        font-size: var(--grf-font-size-sm);
+      }
+      .comp .note h4.md-h,
+      .comp .note h5.md-h,
+      .comp .note h6.md-h {
+        font-size: var(--grf-font-size-xs);
+      }
+      .comp .note code {
+        font-family: var(--grf-mono);
+        font-size: 0.9em;
+        background: var(--grf-bg-hover);
+        border-radius: 4px;
+        padding: 1px 4px;
+      }
+      .comp .note pre.md-code {
+        background: var(--grf-bg-raise);
+        border: 1px solid var(--grf-border-soft);
+        border-radius: var(--grf-radius-sm);
+        padding: 6px 8px;
+        overflow: auto;
+        margin: 0 0 6px;
+      }
+      .comp .note pre.md-code code {
+        background: none;
+        padding: 0;
+        font-size: var(--grf-font-size-xs);
+        line-height: 1.5;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .comp .note ul,
+      .comp .note ol {
+        margin: 0 0 6px;
+        padding-left: 18px;
+      }
+      .comp .note li {
+        margin: 1px 0;
+      }
+      .comp .note a {
+        color: var(--grf-accent-text);
+      }
+      .comp .note blockquote.md-quote {
+        margin: 0 0 6px;
+        padding: 2px 10px;
+        border-left: 3px solid var(--grf-border);
+        color: var(--grf-text-dim);
+      }
+      .comp .note hr.md-hr {
+        border: none;
+        border-top: 1px solid var(--grf-border);
+        margin: 8px 0;
+      }
+      .comp .note table {
+        display: block;
+        overflow-x: auto;
+        max-width: 100%;
+        border-collapse: collapse;
+        margin: 0 0 6px;
+        font-size: var(--grf-font-size-xs);
+      }
+      .comp .note th,
+      .comp .note td {
+        border: 1px solid var(--grf-border-soft);
+        padding: 3px 7px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .comp .note th {
+        background: var(--grf-bg-hover);
+        font-weight: 650;
+        white-space: nowrap;
       }
       .hint {
         color: var(--grf-text-faint);
@@ -332,7 +427,7 @@ export class GrfUpdateChip extends LitElement {
           <span class="name">${name}</span>
           <span class="ver">${cur || '?'} <span class="arrow">→</span> ${latest}</span>
         </div>
-        ${note ? html`<div class="note">${note}</div>` : nothing}
+        ${note ? html`<div class="note">${unsafeHTML(renderMarkdown(note))}</div>` : nothing}
       </div>
     `;
   }
