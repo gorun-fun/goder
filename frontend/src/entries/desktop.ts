@@ -89,8 +89,8 @@ export class GrfDesktop extends LitElement {
         }
         await new Promise((r2) => setTimeout(r2, 1000));
       }
-      // 桥就绪后:项目索引切文件持久化、读配置、确保托管 server 运行、
-      // 应用默认模型;懒做不阻塞。配置就绪后做一次"无模型配置"守卫。
+      // 桥就绪后:项目索引切文件持久化、读配置、确保托管 server 运行;
+      // 懒做不阻塞。配置就绪后做一次"无模型配置"守卫。
       void settingsStore.loadFromBridge('app').then(() => this.guardModelSetup());
     } catch {
       this.initStage = 'error';

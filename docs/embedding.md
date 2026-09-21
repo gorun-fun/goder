@@ -23,7 +23,9 @@ configure('myscope', {
   baseUrl: '/grf-api',   // gh server 根地址(不带 /v1);推荐同源网关
   token: '…',            // 可选:直连 gh server 时的 Bearer 令牌;
                          // 多用户网关模式由服务端注入,留空
-  model: 'deepseek/deepseek-chat', // 可选:默认模型(provider/model)
+  model: 'deepseek/deepseek-chat', // 可选:默认模型;必须 provider/model
+                         // 全名(裸名会被按供应商表补全,补不出视同未选、
+                         // 走服务端默认 —— gh 只认全名,裸名静默忽略)
   auth: {                // 可选:多用户网关的未登录(401)处置
     loginUrl: '/grf-api/auth/login', // 跳转登录入口
     // 或 onUnauthorized: (scope) => { … }  // 宿主自定义(设置后不再自动跳转)

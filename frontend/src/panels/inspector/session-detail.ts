@@ -6,6 +6,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtDuration, fmtTokens, toolLabel } from '../../util/fmt';
+import { displayFullModel } from '../../core/settings/settings-store';
 import type { ToolItem } from '../../core/model/chat-model';
 
 @customElement('grf-session-detail')
@@ -241,7 +242,7 @@ export class GrfSessionDetail extends GrfPanel {
           <h4>${unsafeHTML(icon.info)} 概览</h4>
           <div class="kv">
             <span class="k">项目</span><span class="v">${proj?.name ?? '—'}</span>
-            <span class="k">模型</span><span class="v">${rt?.model ?? s.model ?? '—'}</span>
+            <span class="k">模型</span><span class="v">${displayFullModel(rt?.model ?? s.model ?? '') || '—'}</span>
             <span class="k">状态</span>
             <span class="v">
               ${s.isRunning(sid) ? '运行中' : (rt?.pendingRequests.length ?? 0) > 0 ? '等待输入' : '空闲'}

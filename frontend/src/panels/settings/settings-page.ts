@@ -51,8 +51,6 @@ export class GrfSettingsPage extends GrfPanel {
   /** 待二次确认删除的供应商名 */
   private pendingDelete: string | null = null;
   private deleteTimer?: ReturnType<typeof setTimeout>;
-  /** 默认模型候选下拉(每实例唯一 id,避免嵌入多实例撞车) */
-  private readonly dlId = `grf-models-${Math.random().toString(36).slice(2, 9)}`;
 
   static styles = [
     theme,
@@ -434,24 +432,12 @@ export class GrfSettingsPage extends GrfPanel {
       .mrow:hover {
         background: var(--grf-bg-hover);
       }
-      .mrow.on {
-        background: var(--grf-accent-soft);
-        border-color: var(--grf-accent);
-        color: var(--grf-accent-text);
-      }
       .mrow .minput {
         flex: 1;
         min-width: 0;
         font-family: var(--grf-mono);
         font-size: var(--grf-font-size-sm);
         padding: 3px 8px;
-      }
-      .mrow .mset {
-        flex: none;
-        font-size: var(--grf-font-size-xs);
-      }
-      .mrow.on .mset {
-        color: var(--grf-accent-text);
       }
       .mrow .mdel {
         flex: none;
@@ -1363,38 +1349,14 @@ export class GrfSettingsPage extends GrfPanel {
     settingsStore.setAppearance({ fontSize: next });
   }
 
-  // ---------- 模型:默认模型 + 供应商/模型双栏 ----------
+  // ---------- 模型:供应商/模型双栏(默认模型是 gh 侧概念,goder 不设:
+  // 新会话模型按"同项目最近会话 → 全局最近会话"继承,无记录时守卫引导) ----------
 
   private renderModels() {
-    const cfg = settingsStore.cfg;
     const mc = settingsStore.modelCfg;
-    // 候选模型:provider/model 全组合(供输入联想,也允许手填任意值)。
-    const opts: string[] = [];
-    for (const p of mc?.providers ?? []) for (const m of p.models ?? []) opts.push(`${p.name}/${m}`);
     const readOnly = !mc || !mc.writable;
 
     return html`
-      <div class="sec">
-        <h4>默认模型</h4>
-        <label>
-          provider/model
-          <input
-            type="text"
-            list=${this.dlId}
-            .value=${cfg.defaultModel}
-            placeholder="如 deepseek/deepseek-chat"
-            @change=${(e: InputEvent) => this.setDefaultModel((e.target as HTMLInputElement).value)}
-          />
-          <datalist id=${this.dlId}>
-            ${opts.map((o) => html`<option value=${o}></option>`)}
-          </datalist>
-        </label>
-        <div class="hint">
-          新会话默认使用该模型;同时写入 gh 的 settings.json(default),终端
-          gh 与服务端默认保持一致。留空则沿用服务端默认。
-        </div>
-      </div>
-
       <div class="sec">
         <h4>供应商与模型</h4>
         ${mc
@@ -1451,7 +1413,6 @@ export class GrfSettingsPage extends GrfPanel {
     if (!p) {
       return html`<div class="hint">${list.length ? '从左侧选择一个供应商查看详情。' : '还没有供应商,点左下"添加供应商"新增一个。'}</div>`;
     }
-    const def = settingsStore.modelCfg?.default ?? '';
     return html`
       <div class="prov">
         <div class="prov-head" title="当前模型数">
@@ -1513,10 +1474,8 @@ export class GrfSettingsPage extends GrfPanel {
           </div>
           <div class="mlist">
             ${(p.models ?? []).map((m, i) => {
-              const full = `${p.name}/${m}`;
-              const isDef = def === full;
               return html`
-                <div class="mrow ${isDef ? 'on' : ''}">
+                <div class="mrow">
                   <input
                     class="minput"
                     type="text"
@@ -1524,11 +1483,6 @@ export class GrfSettingsPage extends GrfPanel {
                     ?disabled=${readOnly}
                     @change=${(e: InputEvent) => this.setModelAt(p.name, i, (e.target as HTMLInputElement).value)}
                   />
-                  ${readOnly
-                    ? nothing
-                    : html`<button class="ghost mset" title=${isDef ? '当前默认模型' : '设为默认模型'} @click=${() => this.setDefaultModel(full)}>
-                        ${isDef ? '默认' : '设默认'}
-                      </button>`}
                   ${readOnly
                     ? nothing
                     : html`<button class="ghost mdel" title="删除该模型" @click=${() => this.removeModelAt(p.name, i)}>×</button>`}
@@ -1566,10 +1520,6 @@ export class GrfSettingsPage extends GrfPanel {
         </div>
       </div>
     `;
-  }
-
-  private setDefaultModel(v: string): void {
-    void settingsStore.setDefaultModel(this.scope, v.trim()).then(() => this.flashSaved());
   }
 
   private field(name: string, patch: Partial<ProviderDTO>): void {

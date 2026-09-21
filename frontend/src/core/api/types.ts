@@ -84,6 +84,10 @@ export interface ResponseResource {
   status: ResponseStatus;
   incomplete_details?: IncompleteDetails | null;
   error?: ErrorPayload | null;
+  /** 实际使用的模型(服务端回报)。注意:通常是裸名 —— 不含 provider
+   * 前缀,部分供应商的模型名自带 /(如九天 qwen/qwen3.8-27b)。只作展示
+   * 与估算用,禁止原样再下发(gh 的 trySwitchModel 只认 provider/model
+   * 全名,裸名会被静默忽略)。 */
   model: string;
   previous_response_id?: string;
   instructions?: string | null;
