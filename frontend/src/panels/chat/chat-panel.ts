@@ -1473,7 +1473,7 @@ export class GrfChat extends GrfPanel {
       <p>
         ${s.connState === 'error'
           ? html`连接失败:${s.connError ?? '未知错误'}。请检查服务配置或登录状态。`
-          : '在左侧选择一个项目的会话,或点击项目上的 + 新建。'}
+          : '在左侧选择一个项目的会话,或点击项目上的 + 新建;也可以直接在下方输入发送,自动开始一个新会话(未选项目时归入「未分组会话」)。'}
       </p>
     </div>`;
   }
@@ -1670,13 +1670,16 @@ export class GrfChat extends GrfPanel {
   }
 
   // renderTabBar 右栏顶部 tab 栏;无已开 tab 时显示居中类型入口。
+  // passive 条目(如文件)只由外部带 key 打开,不进两个手动打开入口;
+  // 已开的 passive tab 照常显示在 tab 行、可激活可关闭。
   private renderTabBar(tabs: SideTabInstance[], defs: SideTabDef[]) {
+    const openable = defs.filter((d) => !d.passive);
     if (tabs.length === 0) {
       return html`
         <div class="side-empty">
           <div class="hint">选择要打开的面板</div>
           <div class="entries">
-            ${defs.map(
+            ${openable.map(
               (d) => html`
                 <button class="entry" title=${`打开${d.label}`} @click=${() => this.fire('grf-side-tab-open', { defId: d.id } satisfies SideTabInstance)}>
                   ${unsafeHTML(d.icon)}
@@ -1717,7 +1720,7 @@ export class GrfChat extends GrfPanel {
         ${this.sideMenuOpen
           ? html`
               <div class="side-menu" style=${`left:${this.sideMenuLeft}px`}>
-                ${defs.map(
+                ${openable.map(
                   (d) => html`
                     <div
                       class="mi"

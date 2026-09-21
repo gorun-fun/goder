@@ -851,8 +851,13 @@ export class GrfScope extends Emitter {
       resumeCallOutputs?: { call_id: string; output: string }[];
     },
   ): Promise<void> {
-    const sid = opts?.sid ?? this.activeSessionId;
-    if (!sid) return;
+    let sid = opts?.sid ?? this.activeSessionId;
+    if (!sid) {
+      // 无激活会话时直接发送不再静默丢弃:自动落一个草稿(当前项目,
+      // 未选则未分组)接住输入,随首条消息转正为真实会话。
+      if (!text.trim() && !images?.length) return;
+      sid = this.newDraft(this.activeProjectId || UNGROUPED);
+    }
     const rt = this.ensureRuntime(sid);
     if (this.inflightSends.has(sid) || rt.running) {
       // 回合进行中:入队等本回合结束自动发出,不打断也不丢弃。

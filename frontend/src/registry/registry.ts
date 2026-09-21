@@ -74,6 +74,10 @@ export interface SideTabDef {
   render: (ctx: PanelContext, key?: string) => TemplateResult | HTMLElement;
   /** 多实例 tab 的标题(如文件相对路径);缺省 = label */
   titleFor?: (key?: string) => string;
+  /** 被动条目:不出现在右栏手动打开入口(空态类型入口页与 tab 行「+」
+   * 菜单),只在别处带 key 打开(如文件 tab 由左栏文件树/聊天工具卡点击
+   * 打开才有意义,主动打开只见空态) */
+  passive?: boolean;
   /** 是否可用(内置条目用它做形态降级,如终端仅桌面) */
   visible?: (ctx: PanelContext) => boolean;
 }

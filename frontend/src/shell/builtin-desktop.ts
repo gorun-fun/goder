@@ -53,6 +53,9 @@ export function registerBuiltinDesktop(): void {
     icon: icon.file,
     width: 520,
     multi: true, // 每个文件一个独立 tab:<id>:<绝对路径>
+    // 被动条目:仅由外部带路径打开(左栏文件树/聊天工具卡/console 智能体),
+    // 不出现在右栏手动打开入口 —— 主动打开只会得到空预览,没有意义
+    passive: true,
     visible: (ctx) => ctx.desktop,
     render: (_ctx, key) => html`<grf-file-view .path=${key ?? ''}></grf-file-view>`,
     titleFor: (key) => key?.split('/').pop() || '文件',
