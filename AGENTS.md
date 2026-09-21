@@ -49,22 +49,23 @@ internal/                Go 共享层(桌面壳与 web 网关同一套实现)
                          会话 cookie;SessionStore 接口预留持久化)
   gateway/               多用户网关:静态托管 + /grf-api 按用户路由(身份 →
                          懒拉起用户进程 → 注入令牌转发)+ auth 端点挂载 + CORS
-  consolemcp/            goder-console:智能体驱动界面面板的 MCP 服务(仅绑
-                         127.0.0.1,loopback 7450 偏好端口 + 随机令牌)。工具
-                         面 goder_browser_*(右栏浏览器面板:导航/快照 ref 机制/
-                         点击输入/console 与网络捕获/截图——快照 JS 移植自 gh
-                         grf-browser 插件,合成事件无 isTrusted)、goder_terminal_*
-                         (终端面板:新建/输入/增量读缓冲)、goder_ui_*(界面
-                         操作经 wails 事件 + 前端 shell/console-ui.ts 映射)。
-                         含 console-shim 子命令(gh stdio 插件 ↔ HTTP 的行
-                         JSON-RPC 转发)与安装器(~/.grf/plugins/goder-console
-                         wrapper,自动发现模式直接生效;settings.json 有
-                         plugins 键时 upsert 命令项,不破坏自动发现语义)
   browser/               右栏内嵌浏览器面板的原生 webview(macOS 自建
                          WKWebView 子视图/Windows WebView2 重父级子窗),
                          含 Eval/截图与 console/网络捕获钩子(eval.go:
                          macOS 原生 callAsyncJavaScript 回调,Windows
                          void ExecJS + fetch 回报 /grf-eval-report)
+plugins/console/         goder-console:智能体驱动界面面板的 MCP 服务(仅绑
+                         127.0.0.1,loopback 7450 偏好端口 + 随机令牌;设置页
+                         展示名「界面控制」)。工具面 goder_browser_*(右栏
+                         浏览器面板:导航/快照 ref 机制/点击输入/console 与
+                         网络捕获/截图——快照 JS 移植自 gh grf-browser 插件,
+                         合成事件无 isTrusted)、goder_terminal_*(终端面板:
+                         新建/输入/增量读缓冲)、goder_ui_*(界面操作经
+                         wails 事件 + 前端 shell/console-ui.ts 映射)。
+                         含 console-shim 子命令(gh stdio 插件 ↔ HTTP 的行
+                         JSON-RPC 转发)与安装器(~/.grf/plugins/goder-console
+                         wrapper,自动发现模式直接生效;settings.json 有
+                         plugins 键时 upsert 命令项,不破坏自动发现语义)
 main.go                  wails v3 桌面入口(仅装配:服务注册、窗口、embed 资源;
                          开头分派 `goder console-shim` 子命令)
 internal/desktop/        桌面 wails 服务薄壳(AppConfig/ServerManager/
@@ -120,7 +121,7 @@ frontend/src/
   否则 POST body 丢失。
 - **goder-console 接入不变量**:gh 的 plugins 配置「settings.json 无
   plugins 键 = 自动发现 ~/.grf/plugins」语义不可破坏 —— 给 gh 注册
-  goder-console 一律走 consolemcp.Install(wrapper/命令项),不要写
+  goder-console 一律走 plugins/console 包的 Install(wrapper/命令项),不要写
   URL 条目(那会把 gh 切到显式列表模式、杀死自动发现)。wrapper 与
   settings 里的端点/令牌由启动期 Install 烙写,端口令牌持久化在
   appcfg 目录 console-mcp.json;goder-console 在 builtinPlugins 里

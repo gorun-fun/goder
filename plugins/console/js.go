@@ -3,7 +3,7 @@
 // 快照给可交互元素打 data-grf-ref,后续 click/type 等按 ref 深度定位
 // (穿透 shadow DOM 与同源 iframe)。合成事件无 isTrusted,本地开发
 // 调试场景足够(反爬/canvas 自绘交互请用 grf-browser 插件的真 Chrome)。
-package consolemcp
+package console
 
 import (
 	"encoding/json"

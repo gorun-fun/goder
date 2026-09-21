@@ -7,7 +7,7 @@
 // 主进程早期分派(main.go 在创建 wails app 之前判断 os.Args),shim
 // 路径不初始化任何 GUI。桌面进程可能晚于 gh 的首次握手启动(冷启动竞
 // 态):initialize 请求在连接被拒时重试数秒,其余请求直接透传错误。
-package consolemcp
+package console
 
 import (
 	"bufio"

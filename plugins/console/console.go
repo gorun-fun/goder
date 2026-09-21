@@ -1,4 +1,4 @@
-// Package consolemcp — goder-console:把 goder 桌面壳的能力(右栏内嵌
+// Package console — goder-console:把 goder 桌面壳的能力(右栏内嵌
 // 浏览器面板、终端面板、界面操作)以 MCP 工具面暴露给 gh(grf-harness)
 // 的智能体,用于「智能体可见地调试」:agent 在用户看得见的面板浏览器里
 // 打开页面、点击、读 console/网络,在终端面板里跑命令,用户全程可围观
@@ -16,7 +16,7 @@
 // 会把 shim 命令项 upsert 进 plugins 数组。
 //
 // 工具命名 goder_ 前缀,避免与 grf-browser 插件的 browser_* 撞名。
-package consolemcp
+package console
 
 import "sync"
 

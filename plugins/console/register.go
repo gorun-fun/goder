@@ -10,7 +10,7 @@
 //
 // 端口与令牌持久化在 goder 配置目录的 console-mcp.json(令牌跨启动稳定:
 // 已在跑的 gh 收养场景不至于因令牌轮换而失联;端口被占则换新并回写)。
-package consolemcp
+package console
 
 import (
 	"crypto/rand"

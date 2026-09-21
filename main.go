@@ -10,8 +10,8 @@ import (
 	"os"
 	"runtime"
 
-	"git.gorun.fun/share/goder/internal/consolemcp"
 	"git.gorun.fun/share/goder/internal/desktop"
+	"git.gorun.fun/share/goder/plugins/console"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	wailsEvents "github.com/wailsapp/wails/v3/pkg/events"
@@ -25,7 +25,7 @@ func main() {
 	// 本程序(`goder console-shim <endpoint> <token>`),行 JSON-RPC 转
 	// 发到桌面进程的 loopback /mcp。必须抢在一切 GUI 初始化之前分派。
 	if len(os.Args) > 1 && os.Args[1] == "console-shim" {
-		os.Exit(consolemcp.RunShim(os.Args[1:]))
+		os.Exit(console.RunShim(os.Args[1:]))
 	}
 
 	sm := desktop.GetServerManager()

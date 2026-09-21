@@ -3,7 +3,7 @@
 // 的是「用户看得见的右栏浏览器面板」——与用户共享登录态与视图,适合
 // 本地开发调试与需要人工围观/接管的场景;需要 isTrusted 真实事件或独立
 // 浏览器环境时仍应使用 grf-browser 插件。
-package consolemcp
+package console
 
 import (
 	"encoding/base64"

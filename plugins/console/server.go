@@ -1,7 +1,7 @@
 // server.go — MCP JSON-RPC over HTTP:与 gh mcp 包的 httpTransport 客户端
 // 严格兼容(单 POST 单 application/json 应答,通知回空体)。鉴权为
 // Bearer token(安装期生成的随机值,仅随 shim 参数下发)。
-package consolemcp
+package console
 
 import (
 	"crypto/subtle"

@@ -1,7 +1,7 @@
-// consolemcp.go — ConsoleMCP 服务:goder-console 智能体控制面的装配与
+// console.go — ConsoleMCP 服务:goder-console 智能体控制面的装配与
 // 生命周期。进程内起仅绑 127.0.0.1 的 MCP 服务(浏览器/终端/界面工具),
 // 并把 shim 接入 gh(自动发现模式的 wrapper + 显式列表模式的 settings
-// upsert,见 internal/consolemcp/register.go)。失败只降级(日志告警),
+// upsert,见 plugins/console/register.go)。失败只降级(日志告警),
 // 不阻断 app 启动。
 package desktop
 
@@ -17,7 +17,7 @@ import (
 
 	"git.gorun.fun/share/goder/internal/appcfg"
 	"git.gorun.fun/share/goder/internal/browser"
-	"git.gorun.fun/share/goder/internal/consolemcp"
+	"git.gorun.fun/share/goder/plugins/console"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -25,7 +25,7 @@ import (
 // ConsoleMCP wails 服务。全局单例。
 type ConsoleMCP struct {
 	ln  net.Listener
-	srv *consolemcp.Server
+	srv *console.Server
 }
 
 var consoleMCPService = &ConsoleMCP{}
@@ -41,8 +41,8 @@ func (c *ConsoleMCP) ServiceStartup(ctx context.Context, options application.Ser
 		log.Printf("[goder-console] 配置目录不可用,智能体控制面关闭")
 		return nil
 	}
-	cfg := consolemcp.LoadConfig(dir)
-	ln, listenCfg, err := consolemcp.Listen(cfg)
+	cfg := console.LoadConfig(dir)
+	ln, listenCfg, err := console.Listen(cfg)
 	if err != nil {
 		log.Printf("[goder-console] loopback 监听失败,智能体控制面关闭: %v", err)
 		return nil
@@ -50,20 +50,20 @@ func (c *ConsoleMCP) ServiceStartup(ctx context.Context, options application.Ser
 	c.ln = ln
 	// 总是落盘:首启要把生成的令牌持久化(否则重启即轮换,已被本进程
 	// 收养的 gh 带旧令牌失联);端口被占换新也在此回写。
-	if err := consolemcp.SaveConfig(dir, listenCfg); err != nil {
+	if err := console.SaveConfig(dir, listenCfg); err != nil {
 		log.Printf("[goder-console] 配置落盘失败: %v", err)
 	}
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d/mcp", listenCfg.Port)
 	// Windows 浏览器求值回报通道(macOS 原生回调,不用此路径,设着无害)
 	browser.SetReportBase(fmt.Sprintf("http://127.0.0.1:%d", listenCfg.Port))
 
-	var bm consolemcp.BrowserAPI
+	var bm console.BrowserAPI
 	if m := GetBrowserManager().Manager(); m != nil {
 		bm = m
 	} else {
 		bm = &unsupportedBrowser{}
 	}
-	c.srv = consolemcp.NewServer(consolemcp.Deps{
+	c.srv = console.NewServer(console.Deps{
 		Browser:  bm,
 		Terminal: termAdapter{GetTerminalManager()},
 		EmitUI: func(action string, params map[string]any) {
@@ -83,7 +83,7 @@ func (c *ConsoleMCP) ServiceStartup(ctx context.Context, options application.Ser
 		if err != nil {
 			return
 		}
-		if err := consolemcp.Install(exe,
+		if err := console.Install(exe,
 			filepath.Join(grfHome(), "plugins"),
 			grfSettingsPath(),
 			endpoint, listenCfg.Token); err != nil {
@@ -110,7 +110,7 @@ func (c *ConsoleMCP) ReportUIState(state string) {
 	}
 }
 
-// termAdapter TerminalManager → consolemcp.TerminalAPI(DTO 转换)。
+// termAdapter TerminalManager → console.TerminalAPI(DTO 转换)。
 type termAdapter struct{ t *TerminalManager }
 
 func (a termAdapter) NewTerm(cwd string) (string, error) {
@@ -121,27 +121,27 @@ func (a termAdapter) NewTerm(cwd string) (string, error) {
 	return dto.ID, nil
 }
 
-func (a termAdapter) ListTerms() []consolemcp.TermInfo {
+func (a termAdapter) ListTerms() []console.TermInfo {
 	list := a.t.ListTerm()
-	out := make([]consolemcp.TermInfo, 0, len(list))
+	out := make([]console.TermInfo, 0, len(list))
 	for _, it := range list {
-		out = append(out, consolemcp.TermInfo{ID: it.ID, Cwd: it.Cwd, Alive: it.Alive})
+		out = append(out, console.TermInfo{ID: it.ID, Cwd: it.Cwd, Alive: it.Alive})
 	}
 	return out
 }
 
 func (a termAdapter) WriteTerm(id, text string) error { return a.t.WriteTerm(id, text) }
 
-func (a termAdapter) ReadTerm(id string, from int64) (consolemcp.TermRead, error) {
+func (a termAdapter) ReadTerm(id string, from int64) (console.TermRead, error) {
 	dto, err := a.t.ReadTerm(id, from)
 	if err != nil {
-		return consolemcp.TermRead{}, err
+		return console.TermRead{}, err
 	}
 	data, err := base64.StdEncoding.DecodeString(dto.Data)
 	if err != nil {
-		return consolemcp.TermRead{}, err
+		return console.TermRead{}, err
 	}
-	return consolemcp.TermRead{From: dto.From, To: dto.To, Data: data}, nil
+	return console.TermRead{From: dto.From, To: dto.To, Data: data}, nil
 }
 
 func (a termAdapter) KillTerm(id string) error { return a.t.KillTerm(id) }
