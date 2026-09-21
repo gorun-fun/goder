@@ -15,7 +15,7 @@ import { inWails } from '../host/bridge';
 import { isMacDesktop } from '../host/platform';
 import { closeWindow, isWindowMaximised, isFramelessDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
-import { registry, sideTabId, getModelGuard, onModelGuardChange, type PanelContext, type SideTabInstance } from '../registry/registry';
+import { registry, sideTabId, getModelGuard, onModelGuardChange, getSideTop, onSideTopChange, type PanelContext, type SideTabInstance } from '../registry/registry';
 import { initConsoleUi, reportConsoleUi, visibleTermIds } from './console-ui';
 import { settingsStore } from '../core/settings/settings-store';
 import '../panels/files/file-list';
@@ -71,6 +71,10 @@ export class GrfAppShell extends GrfPanel {
   private modelGuardOff: (() => void) | undefined;
   private dragging: 'left' | null = null;
   private regUnsub?: () => void;
+  /** 左栏顶行注入(embed.configure 的 sideTop):订阅句柄 + 元素缓存
+   * (跨重渲保活,配置变更时丢弃重建) */
+  private sideTopOff?: () => void;
+  private sideTopEls = new Map<'leading' | 'trailing', HTMLElement>();
 
   static styles = [
     theme,
@@ -248,6 +252,11 @@ export class GrfAppShell extends GrfPanel {
     // scope 不适用;gh 配置读取失败(modelCfg 为 null)视为未知、不误判。
     this.modelGuardOff = onModelGuardChange(() => this.tryModelGuard());
     this.tryModelGuard();
+    // 宿主左栏顶行注入(见 registry.SideTopConfig):变更时丢弃缓存重建
+    this.sideTopOff = onSideTopChange(() => {
+      this.sideTopEls.clear();
+      this.requestUpdate();
+    });
     // 导航切换:设置进入(session-list 齿轮)/ 返回 / 三方 grf-nav-activate
     this.addEventListener('grf-open-settings', () => this.navTo('settings'));
     this.addEventListener('grf-close-settings', () => this.navBack());
@@ -312,6 +321,8 @@ export class GrfAppShell extends GrfPanel {
     this.regUnsub = undefined;
     this.modelGuardOff?.();
     this.modelGuardOff = undefined;
+    this.sideTopOff?.();
+    this.sideTopOff = undefined;
     window.removeEventListener('pointermove', this.onDrag);
     window.removeEventListener('pointerup', this.stopDrag);
     window.removeEventListener('resize', this.syncMaximised);
@@ -484,9 +495,18 @@ export class GrfAppShell extends GrfPanel {
     }
   }
 
+  /** 取左栏顶行注入元素(缓存保活;配置变更时由订阅清空重建)。 */
+  private sideTopEl(slot: 'leading' | 'trailing'): HTMLElement {
+    let el = this.sideTopEls.get(slot);
+    if (!el) {
+      el = getSideTop(this.scope)?.[slot]?.() ?? document.createElement('div');
+      this.sideTopEls.set(slot, el);
+    }
+    return el;
+  }
+
   render() {
-    const hasSessions = this.panelOn('sessions');
-    const hasChat = this.panelOn('chat');
+    const hasSessions = this.panelOn('sessions');    const hasChat = this.panelOn('chat');
     const hasSidebar = this.panelOn('sidebar');
     const hasConsole = this.panelOn('console');
     const ctx = this.renderCtx();
@@ -503,12 +523,14 @@ export class GrfAppShell extends GrfPanel {
                   @mousedown=${(e: MouseEvent) => this.tdrag?.onDown(e)}
                   @dblclick=${(e: MouseEvent) => this.tdrag?.onDbl(e)}
                 >
+                  ${getSideTop(this.scope)?.leading ? html`${this.sideTopEl('leading')}` : nothing}
                   <span class="toggler">
                     <button class="on" title="收起侧栏" @click=${() => (this.showSessions = false)}>${unsafeHTML(icon.panelLeft)}</button>
                   </span>
                   ${ctx.desktop && panelRegistered('grf-update-chip')
                     ? html`<grf-update-chip></grf-update-chip>`
                     : nothing}
+                  ${getSideTop(this.scope)?.trailing ? html`${this.sideTopEl('trailing')}` : nothing}
                 </div>
                 ${this.filesView && this.activeNavId === 'sessions'
                   ? html`<grf-file-list

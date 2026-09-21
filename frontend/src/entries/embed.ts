@@ -30,7 +30,7 @@ export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settin
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
-export { registry, sideTabId, setUser, getUser, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard } from '../registry/registry';
+export { registry, sideTabId, setUser, getUser, setSideTop, getSideTop, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard } from '../registry/registry';
 export type {
   PanelContext,
   ShellState,
@@ -39,12 +39,15 @@ export type {
   SideTabInstance,
   BottomTabDef,
   UserConfig,
+  SideTopConfig,
   SettingsConfig,
 } from '../registry/registry';
 import { setUser } from '../registry/registry';
+import { setSideTop } from '../registry/registry';
 import { setSettingsConfig } from '../registry/registry';
 import { setModelGuard } from '../registry/registry';
 import type { UserConfig } from '../registry/registry';
+import type { SideTopConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
 
 import { configureScope } from '../core/store/scope';
@@ -65,7 +68,10 @@ registerBuiltinCommon();
  * 未登录处置预留(见 docs/embedding.md)。policySelector: false 供全权
  * 管理会话策略的嵌入方隐藏 composer 策略选择器(本机策略偏好也不加载)。
  * user 供自带用户体系的嵌入方注入左栏底部身份 chip 的展示名,并可给出
- * panel 让 chip 可点击、弹出嵌入方自绘的用户信息面板(见 UserConfig)。
+ * panel 让 chip 可点击、弹出嵌入方自绘的用户信息面板(chevron:false
+ * 去掉尾部小箭头,hit:'content' 把可点区域收缩为图标+名字块,见
+ * UserConfig)。sideTop 供嵌入方向左栏顶行(折叠侧栏按钮所在行)注入
+ * 自定义元素(leading=行首/trailing=行尾,见 SideTopConfig)。
  * settings 供嵌入方裁剪设置页:agentGroup:false 隐藏「智能体」分组
  * (Harness/插件/MCP/技能,浏览器形态本就只读引导)。modelGuard: true
  * 供「模型由使用者自行配置」的嵌入方(零配置起步平台)开启启动模型
@@ -80,11 +86,13 @@ export function configure(
     auth?: AuthConfig;
     policySelector?: boolean;
     user?: UserConfig;
+    sideTop?: SideTopConfig;
     settings?: SettingsConfig;
     modelGuard?: boolean;
   },
 ): void {
   if (cfg.user !== undefined) setUser(scope, cfg.user);
+  if (cfg.sideTop !== undefined) setSideTop(scope, cfg.sideTop);
   if (cfg.settings !== undefined) setSettingsConfig(scope, cfg.settings);
   if (cfg.modelGuard !== undefined) setModelGuard(scope, cfg.modelGuard);
   configureScope(scope, cfg);

@@ -44,6 +44,15 @@ configure('myscope', {
       el.textContent = '宿主自绘的用户信息面板(如资料/退出登录)';
       return el;
     },
+    chevron: false,      // 可选:false 去掉 chip 尾部小箭头(默认 true)
+    hit: 'content',      // 可选:'content' 时可点/悬停区域收缩为图标+
+  },                     // 名字块(默认 'full' 整行)
+  sideTop: {             // 可选:向左栏顶行(折叠侧栏按钮所在行)注入
+    leading: () => {     // 宿主自定义元素(leading=行首,trailing=行尾;
+      const el = document.createElement('button'); // 元素渲染在 shell 的
+      el.textContent = '⌂'; // shadow DOM 内,样式须内联,跨重渲保活)
+      return el;
+    },
   },
 });
 ```
@@ -155,7 +164,19 @@ registry 是全局单例:同页所有 scope 实例共享条目定义;数据按 s
 点击面板外部或 Esc 关闭。面板元素在 chip 的 shadow DOM 内渲染,宿主
 样式进不去 —— 面板内容用内联样式,颜色可复用会继承穿透的 `--grf-*`
 变量;返回的 HTMLElement 跨开关保活。`user.panel` 的入参与右栏 tab 同
-为 `PanelContext`(无会话上下文,`sessionId` 为空)。
+为 `PanelContext`(无会话上下文,`sessionId` 为空)。`user.chevron:false`
+去掉 chip 尾部小箭头(默认 true);`user.hit:'content'` 把可点/悬停区域
+收缩为图标+名字块(默认 `'full'` 整行)。弹层宽度内容驱动:不窄于 chip
+行,宿主面板可用自身 `min-width` 撑宽(上限 420px / 90vw)。
+
+### 左栏顶行注入(sideTop)
+
+`configure(scope, { sideTop: { leading, trailing } })` 向左栏顶行
+(`.side-top`,折叠侧栏按钮所在行)注入宿主自定义元素:`leading` 渲染
+在折叠按钮之前(行首),`trailing` 渲染在行尾。元素在 shell 的 shadow
+DOM 内渲染(宿主样式进不去,样式须内联),跨重渲保活,配置变更时丢弃
+重建;未配置时该行保持原样。典型用途:嵌入平台在左上角放返回自家
+站点的入口按钮。
 
 ### 设置页裁剪
 

@@ -39,47 +39,67 @@ export class GrfUserChip extends GrfPanel {
         min-width: 0;
         display: flex;
         align-items: center;
+        white-space: nowrap;
+      }
+      /* 图标+名字(+箭头)内容块;可点与悬停语义只落在这里——
+       * hit:'full'(默认)时占满整行(等价旧行为),hit:'content' 时
+       * 收缩为内容宽,行内余白不可点不悬停 */
+      .inner {
+        min-width: 0;
+        display: flex;
+        align-items: center;
         gap: 7px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .chip svg {
+      .inner.grow {
+        flex: 1;
+      }
+      .inner.fit {
+        flex: 0 1 auto;
+      }
+      .inner svg {
         width: 13px;
         height: 13px;
         flex: none;
         color: var(--grf-text-faint);
       }
-      .chip .name {
+      .inner .name {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      /* 注入了自定义面板时:chip 可点,悬停浮起,尾部小箭头提示(收起朝上) */
-      .chip.click {
+      /* 注入了自定义面板时:内容块可点,悬停浮起,尾部小箭头提示
+       * (收起朝上;user.chevron:false 可去掉箭头) */
+      .inner.click {
         cursor: pointer;
         padding: 4px 6px;
         margin-left: -6px;
         border-radius: var(--grf-radius-sm);
       }
-      .chip.click:hover,
-      .chip.click.on {
+      .inner.click:hover,
+      .inner.click.on {
         background: var(--grf-bg-hover);
         color: var(--grf-text);
       }
-      .chip .arr {
+      .inner .arr {
         margin-left: auto;
         flex: none;
         transform: rotate(-90deg);
         transition: transform 0.12s ease;
       }
-      .chip.on .arr {
+      .inner.on .arr {
         transform: rotate(90deg);
       }
+      /* 宽度内容驱动:不窄于 chip 行,宿主面板可用自身 min-width 撑宽,
+       * 上限防溢出视口(弹层锚在左栏底部,向右展开) */
       .pop {
         position: absolute;
         left: 0;
-        right: 0;
+        min-width: 100%;
+        width: max-content;
+        max-width: min(420px, 90vw);
         bottom: calc(100% + 8px);
         background: var(--grf-bg-raise);
         border: 1px solid var(--grf-border);
@@ -149,16 +169,19 @@ export class GrfUserChip extends GrfPanel {
     const name = u?.name || this.sysName || '本地用户';
     const tip = u?.detail ? `${name}（${u.detail}）` : name;
     const clickable = !!u?.panel;
+    const chevron = clickable && u?.chevron !== false;
     return html`
-      <div
-        class="chip ${clickable ? 'click' : ''} ${this.open ? 'on' : ''}"
-        title=${tip}
-        role=${clickable ? 'button' : nothing}
-        @click=${() => (clickable ? (this.open ? this.close() : this.openPanel()) : undefined)}
-      >
-        ${unsafeHTML(icon.user)}
-        <span class="name">${name}</span>
-        ${clickable ? html`<span class="arr">${unsafeHTML(icon.chevron)}</span>` : nothing}
+      <div class="chip">
+        <div
+          class="inner ${clickable ? 'click' : ''} ${u?.hit === 'content' ? 'fit' : 'grow'} ${this.open ? 'on' : ''}"
+          title=${tip}
+          role=${clickable ? 'button' : nothing}
+          @click=${() => (clickable ? (this.open ? this.close() : this.openPanel()) : undefined)}
+        >
+          ${unsafeHTML(icon.user)}
+          <span class="name">${name}</span>
+          ${chevron ? html`<span class="arr">${unsafeHTML(icon.chevron)}</span>` : nothing}
+        </div>
       </div>
       ${this.open && clickable ? html`<div class="pop" part="panel">${this.ensurePanel()}</div>` : nothing}
     `;

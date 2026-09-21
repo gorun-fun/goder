@@ -205,6 +205,10 @@ export interface UserConfig {
   /** 点击 chip 弹出的宿主自绘用户面板(chip 上方弹出)。返回的
    * HTMLElement 跨开关保活;未配置时 chip 仅展示、不可点击。 */
   panel?: (ctx: PanelContext) => HTMLElement;
+  /** chip 尾部小箭头提示(默认 true:收起朝上/展开朝下);false 时不渲染 */
+  chevron?: boolean;
+  /** chip 可点与悬停区域:'full'=整行(默认) | 'content'=仅图标与名字块 */
+  hit?: 'full' | 'content';
 }
 
 const userConfigs = new Map<string, UserConfig>();
@@ -226,6 +230,40 @@ export function getUser(scope: string): UserConfig | undefined {
 export function onUserChange(fn: Listener): () => void {
   userListeners.add(fn);
   return () => userListeners.delete(fn);
+}
+
+// ---------- 宿主左栏顶行注入(embed.configure 的 sideTop 落点) ----------
+
+/** 宿主对左栏顶行(.side-top,折叠侧栏按钮所在行)的注入。返回的
+ * HTMLElement 渲染在 shell 的 shadow DOM 内(宿主样式表进不去,样式须
+ * 内联),跨重渲保活,配置变更时丢弃重建。典型用途:嵌入平台在左上角
+ * 放返回自家站点的入口按钮。 */
+export interface SideTopConfig {
+  /** 注入行首(折叠侧栏按钮之前) */
+  leading?: () => HTMLElement;
+  /** 注入行尾 */
+  trailing?: () => HTMLElement;
+}
+
+const sideTopConfigs = new Map<string, SideTopConfig>();
+const sideTopListeners = new Set<Listener>();
+
+/** 配置某 scope 的左栏顶行注入(undefined = 清除)。 */
+export function setSideTop(scope: string, cfg: SideTopConfig | undefined): void {
+  if (cfg) sideTopConfigs.set(scope, cfg);
+  else sideTopConfigs.delete(scope);
+  for (const fn of sideTopListeners) fn();
+}
+
+/** 读取某 scope 的左栏顶行注入。 */
+export function getSideTop(scope: string): SideTopConfig | undefined {
+  return sideTopConfigs.get(scope);
+}
+
+/** 订阅左栏顶行注入变更(shell 等展示方刷新用)。 */
+export function onSideTopChange(fn: Listener): () => void {
+  sideTopListeners.add(fn);
+  return () => sideTopListeners.delete(fn);
 }
 
 // ---------- 宿主设置页裁剪(embed.configure 的 settings 落点) ----------
