@@ -76,7 +76,6 @@ export interface AppConfigDTO {
   serverMode: 'managed' | 'remote';
   remoteUrl: string;
   remoteToken: string;
-  defaultModel: string;
   ghBinary: string;
   serverAddr: string;
 }
@@ -116,7 +115,8 @@ export interface ModelConfigDTO {
   /** settings.json 路径(展示用) */
   path: string;
   providers: ProviderDTO[];
-  /** 默认模型(provider/model) */
+  /** gh settings.json 的 default(gh CLI/服务端自己的默认模型概念;
+   * goder 不消费,仅整体写回时透传保真,勿删) */
   default: string;
   /** 目标文件是否可写(不可写时 UI 只读) */
   writable: boolean;
@@ -142,11 +142,18 @@ export async function saveModelConfig(cfg: ModelConfigDTO): Promise<void> {
   await call<void>(`${SVC}.ModelConfig.Save`, cfg);
 }
 
-/** 探测供应商可用模型(GET {baseURL}/models,OpenAI 兼容);非桌面态返回 null。 */
-export async function detectModels(p: ProviderDTO): Promise<string[] | null> {
+/** DetectModels 的单条结果:id + 上游回报的上下文窗口(0 = 未回报)。 */
+export interface DetectedModelDTO {
+  id: string;
+  ctxLen: number;
+}
+
+/** 探测供应商可用模型(GET {baseURL}/models,OpenAI 兼容,含模型元数据);
+ * 非桌面态返回 null。 */
+export async function detectModels(p: ProviderDTO): Promise<DetectedModelDTO[] | null> {
   if (!inWails()) return null;
   try {
-    return await call<string[]>(`${SVC}.ModelConfig.DetectModels`, p);
+    return await call<DetectedModelDTO[]>(`${SVC}.ModelConfig.DetectModels`, p);
   } catch {
     return null;
   }

@@ -14,8 +14,8 @@ import { modelContextWindow } from '../../util/modelctx';
 import { icon } from '../../util/icons';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
 import { inWails, gitStatus, type GitStatusDTO } from '../../host/bridge';
-import type { AskItem } from '../../core/model/chat-model';
-import { settingsStore } from '../../core/settings/settings-store';
+import { usageTotals, type AskItem } from '../../core/model/chat-model';
+import { settingsStore, displayFullModel } from '../../core/settings/settings-store';
 import { registry, sideTabId, type PanelContext, type SideTabDef, type SideTabInstance, type BottomTabDef } from '../../registry/registry';
 import './composer';
 import './status-pop';
@@ -1325,9 +1325,10 @@ export class GrfChat extends GrfPanel {
     const policy: 'write-workspace' | 'off' = policySrc && policySrc !== 'off' ? 'write-workspace' : 'off';
     const policyImmediate = !!sid && !sid.startsWith('draft:');
     // 模型按钮显示"下一回合将使用的模型":本机选择优先(刚切换就能看到),
-    // 会话尚未发过消息时回落服务端回报/默认值
-    const curModel = s?.model || rt?.model || settingsStore.modelCfg?.default || '';
-    const activeModel = s?.model || rt?.model || '';
+    // 会话尚未发过消息时回落服务端回报(goder 无默认模型概念,不从 gh
+    // default 兜底 —— 未选择时按钮显示「选择模型」并由发送守卫拦截)
+    const curModel = s?.model || rt?.model || '';
+    const activeModel = curModel;
     const providers = (settingsStore.modelCfg?.providers ?? []).map((p) => ({
       name: p.name,
       // models 判空:Go 侧 nil 切片序列化为 null,直接展开会抛 TypeError
@@ -1336,16 +1337,20 @@ export class GrfChat extends GrfPanel {
       // "provider/model" 全名,裸模型名会被忽略(切换不生效)
       models: (p.models ?? []).map((m) => `${p.name}/${m}`),
     }));
-    // 服务端回报的 model 是裸名,补 provider 前缀对齐菜单项(勾选态匹配)
-    const toFull = (m: string): string =>
-      m && !m.includes('/') ? (providers.flatMap((g) => g.models).find((x) => x.endsWith(`/${m}`)) ?? m) : m;
-    const curFull = toFull(curModel);
-    const activeFull = toFull(activeModel);
+    // 服务端回报的 model 是裸名(含九天式自带 / 的裸名),统一补 provider
+    // 前缀对齐菜单项(勾选态匹配);表未加载/未命中原样保留
+    const curFull = displayFullModel(curModel);
+    const activeFull = displayFullModel(activeModel);
     if (curFull && !providers.some((g) => g.models.includes(curFull))) {
       providers.push({ name: '当前模型', models: [curFull] });
     }
-    // 上下文窗口按会话实际模型估算(圆环分母)
-    const contextWindow = modelContextWindow(rt?.model || curModel || undefined);
+    // 上下文窗口取会话实际模型(圆环分母):优先供应商 /models 接口回报的
+    // 真实值(token-hub / OpenRouter 等网关);查不到暂用按名估算并后台
+    // 探测一次,成功后 store bump 触发重渲染换上真实值
+    const ctxModel = rt?.model || curModel || '';
+    const ctxExact = settingsStore.providerCtxWindow(ctxModel);
+    const contextWindow = ctxExact ?? modelContextWindow(ctxModel || undefined);
+    if (ctxExact == null) settingsStore.probeProviderCtx(ctxModel);
     // 头部开关:装配开启且确有可用条目才显示
     const bottomDefs = registry.bottom.visible(ctx);
     const showBottomToggle = this.bottomToggle && bottomDefs.length > 0;
@@ -1415,9 +1420,11 @@ export class GrfChat extends GrfPanel {
                       .activeModel=${activeFull}
                       .effort=${s!.reasoningEffort ?? ''}
                       .usage=${rt?.usage ?? null}
-                      .usageModel=${rt?.model ?? ''}
+                      .usageTotals=${rt ? usageTotals(rt) : null}
+                      .usageModel=${displayFullModel(rt?.model ?? '')}
                       .stats=${rt?.stats ?? null}
                       .contextWindow=${contextWindow}
+                      .ctxExact=${ctxExact != null}
                       @policy-change=${this.onPolicyChange}
                       @model-change=${this.onModelChange}
                       @effort-change=${(e: CustomEvent<string>) => s!.setReasoningEffort(e.detail)}
@@ -1770,19 +1777,15 @@ export class GrfChat extends GrfPanel {
     });
   }
 
-  /** 模型守卫(异步):本端已选模型或当前会话有实际模型时直接放行;
-   * 否则确认 gh 侧还有可用模型 —— 全无可用模型时发送只会收到服务端报错,
-   * 不如直接带用户去设置的模型页完成配置,并把输入记为守卫草稿(跳设置
-   * 页会卸载 composer,本面板重连时恢复,防止输入丢失)。
-   * 桌面判 gh 侧默认模型;网页/嵌入态判"有任何可用模型"(与启动守卫
-   * guardModelSetup 同一判据,网页形态 gh 配置懒加载,守卫时补拉一次)。
+  /** 模型守卫(异步):本端已选模型或当前会话有实际模型时直接放行。
+   * gh 侧没有任何可用模型 → 带用户去设置的模型页完成配置,输入记为守卫
+   * 草稿(跳设置页会卸载 composer,本面板重连时恢复,防止输入丢失);
+   * 有可用模型但本端未选 → 拦截发送并提示(goder 没有"默认模型"概念,
+   * gh 的服务端默认不代填,须显式选择),同时打开模型菜单引导一步到位。
    * gh 配置读取失败(modelCfg 为 null)视为未知、不拦截,维持直接发送。 */
   private async ensureModelReady(payload: { text: string; images?: string[] }): Promise<boolean> {
     const s = this.store;
     if (s?.model || s?.activeRuntime?.model) return true;
-    if (inWails()) {
-      return !!(settingsStore.cfg?.defaultModel || settingsStore.modelCfg?.default);
-    }
     if (!settingsStore.modelCfg) await settingsStore.loadModelCfg();
     const mc = settingsStore.modelCfg;
     if (!mc) return true;
@@ -1794,7 +1797,10 @@ export class GrfChat extends GrfPanel {
       this.goModelSettings();
       return false;
     }
-    return true;
+    s?.log('warn', '尚未选择模型:请在输入框下方「模型」中选择后再发送');
+    const c = this.renderRoot.querySelector('grf-composer') as { openModelPicker?(): void } | null;
+    c?.openModelPicker?.();
+    return false;
   }
 
   /** 把守卫草稿回填 composer(文本/图片),焦点回输入框。 */

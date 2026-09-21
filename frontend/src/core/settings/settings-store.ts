@@ -4,7 +4,8 @@
 // - 外观:主题 / 强调色 / 字号,写 documentElement 的 --grf-skin-* 挂钩
 //   (见 ui/theme.ts)穿透全部 shadow DOM 即时生效,并镜像到 localStorage,
 //   桌面与浏览器两种形态重启后都能即刻恢复;
-// - 模型:默认模型,应用到对应 scope。
+// - 模型:供应商配置读写(gh settings.json;默认模型是 gh 侧概念,goder
+//   不设不用 —— 会话模型按"同项目最近会话 → 全局最近会话"继承)。
 import {
   inWails,
   initHostBridge,
@@ -32,6 +33,7 @@ import {
   type AppConfigDTO,
   type ModelConfigDTO,
   type ProviderDTO,
+  type DetectedModelDTO,
   type PluginsDTO,
   type PluginDTO,
   type SkillsDTO,
@@ -140,6 +142,51 @@ export interface Appearance {
 const DEFAULT_APPEARANCE: Appearance = { theme: 'dark', accent: 'blue', fontSize: 13.5 };
 const LS_KEY = 'grf-appearance-v1';
 
+// ---------- 供应商模型上下文窗口(探测缓存) ----------
+// OpenAI 兼容网关(token-hub / OpenRouter / SiliconFlow / vLLM 等)会在
+// GET /models 的模型对象上回报上下文窗口(context_length 等字段);
+// 这里缓存「provider → {url, 裸模型名 → token 数}」,url 指纹不符即失效。
+// localStorage 双形态通用,重启后免探测直接可用。
+const CTX_LS_KEY = 'grf-ctxlens-v1';
+
+interface ProviderCtx {
+  url: string;
+  lens: Record<string, number>;
+}
+
+function loadCtxLensLocal(): Record<string, ProviderCtx> {
+  try {
+    const raw = localStorage.getItem(CTX_LS_KEY);
+    if (!raw) return {};
+    const p = JSON.parse(raw) as Record<string, { url?: unknown; lens?: unknown }>;
+    const out: Record<string, ProviderCtx> = {};
+    for (const [name, v] of Object.entries(p)) {
+      if (typeof v?.url !== 'string' || typeof v?.lens !== 'object' || v.lens === null) continue;
+      const lens: Record<string, number> = {};
+      for (const [m, n] of Object.entries(v.lens as Record<string, unknown>)) {
+        if (typeof n === 'number' && n > 0) lens[m] = n;
+      }
+      out[name] = { url: v.url, lens };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveCtxLensLocal(data: Record<string, ProviderCtx>): void {
+  try {
+    localStorage.setItem(CTX_LS_KEY, JSON.stringify(data));
+  } catch {
+    /* 隐私模式等写入失败时静默,当次会话内仍生效 */
+  }
+}
+
+/** 模型名去 provider 前缀取裸名(与 util/modelctx 的匹配规则一致) */
+function bareModelName(model: string): string {
+  return model.toLowerCase().split('/').pop() ?? model.toLowerCase();
+}
+
 type Listener = () => void;
 
 function loadAppearanceLocal(): Appearance {
@@ -171,13 +218,16 @@ class SettingsStore {
     // web 形态默认同源网关(/grf-api);桌面态此字段仅在远程模式生效
     remoteUrl: locationDefaultBase(),
     remoteToken: '',
-    defaultModel: '',
     ghBinary: 'gh',
     serverAddr: '127.0.0.1:7400',
   };
   srv: ServerStatusDTO | null = null;
   /** gh 侧模型配置(settings.json 的 providers/default);非桌面态为 null */
   modelCfg: ModelConfigDTO | null = null;
+  /** 供应商模型上下文窗口探测缓存(provider 名 → url 指纹 + 裸模型名 → token 数) */
+  ctxLens: Record<string, ProviderCtx> = loadCtxLensLocal();
+  /** 已探测过(成功或失败)的 provider:会话内不重复请求,防渲染每帧触发 */
+  private ctxProbed = new Set<string>();
   /** 智能体扩展:插件/MCP(settings.json 的 plugins);非桌面态为 null */
   pluginsCfg: PluginsDTO | null = null;
   /** 智能体扩展:技能(~/.grf/skills);非桌面态为 null */
@@ -266,11 +316,10 @@ class SettingsStore {
     this.bump();
   }
 
-  /** 保存配置并即时应用到连接与默认模型(scope 为数据域名,桌面为 'app') */
+  /** 保存配置并即时应用到连接(scope 为数据域名,桌面为 'app') */
   async saveCfg(scope: string): Promise<void> {
     await saveAppConfig(this.cfg);
     this.applyConnection(scope);
-    this.applyDefaultModel(scope);
     this.bump();
   }
 
@@ -286,10 +335,6 @@ class SettingsStore {
     });
   }
 
-  applyDefaultModel(scope: string): void {
-    configureScope(scope, { model: this.cfg.defaultModel || undefined });
-  }
-
   // ---------- 模型供应商(gh settings.json;桌面走桥,网页走 agent API) ----------
 
   /** 进入模型设置时拉取;force 用于保存后或外部改动后的强制刷新。 */
@@ -302,7 +347,6 @@ class SettingsStore {
         const cfg = await fetchModelCfg(this.conn.baseUrl, this.conn.token);
         this.agentApi = 'ok';
         this.modelCfg = cfg;
-        if (!this.cfg.defaultModel && cfg.default) this.cfg = { ...this.cfg, defaultModel: cfg.default };
       } catch (e) {
         if (e instanceof AgentApiUnsupportedError) this.agentApi = 'unsupported';
       }
@@ -312,8 +356,6 @@ class SettingsStore {
     const cfg = await loadModelConfig().catch(() => null);
     if (cfg) {
       this.modelCfg = cfg;
-      // gh 侧已有默认模型而本端未设置时回填,避免两处默认值打架。
-      if (!this.cfg.defaultModel && cfg.default) this.cfg = { ...this.cfg, defaultModel: cfg.default };
       this.bump();
     }
   }
@@ -364,23 +406,105 @@ class SettingsStore {
 
   /**
    * 自动检测:询问供应商 /models 接口,把探测到的模型合并进该供应商
-   * 的列表(去重保序)。返回探测到的数量;失败返回 -1。
+   * 的列表(去重保序),并缓存模型上下文窗口。返回探测到的数量;失败返回 -1。
    */
   async detectProviderModels(name: string): Promise<number> {
     if (!this.modelCfg) return -1;
     const p = this.modelCfg.providers.find((x) => x.name === name);
     if (!p) return -1;
-    const ids = inWails() ? await detectModels(p) : await detectModelsRemote(this.conn.baseUrl, this.conn.token, p);
+    let ids: string[] | null = null;
+    if (inWails()) {
+      // 桌面态拿富结果(id + ctxLen)顺带缓存上下文窗口
+      const rich = await detectModels(p);
+      if (!rich) return -1;
+      this.setProviderCtx(p.name, p.baseUrl, rich);
+      ids = rich.map((x) => x.id);
+    } else {
+      // 网页形态 gh server 的 detect 端点只回 ids,上下文窗口待 gh
+      // 扩展后接入(回落估算表,不阻塞功能)
+      ids = await detectModelsRemote(this.conn.baseUrl, this.conn.token, p);
+    }
     if (!ids) return -1;
     const merged = Array.from(new Set([...(p.models ?? []), ...ids]));
     this.updateProvider(name, { models: merged });
     return ids.length;
   }
 
+  /** 从 "provider/model" 全名或裸模型名(含自带 / 的裸名)定位所属供应商。 */
+  private providerOf(model: string): ProviderDTO | undefined {
+    if (!this.modelCfg) return undefined;
+    const slash = model.indexOf('/');
+    if (slash > 0) {
+      const hit = this.modelCfg.providers.find((p) => p.name === model.slice(0, slash));
+      if (hit) return hit;
+    }
+    // 裸名(或前缀未命中)按 models 列表忽略大小写全文匹配
+    const lower = model.toLowerCase();
+    return this.modelCfg.providers.find((p) => (p.models ?? []).some((m) => m.toLowerCase() === lower));
+  }
+
+  /** 写入某 provider 的上下文窗口缓存(仅保留上游回报了长度的模型)。 */
+  private setProviderCtx(name: string, url: string, models: DetectedModelDTO[]): void {
+    const lens: Record<string, number> = {};
+    for (const m of models) if (m.ctxLen > 0) lens[m.id] = m.ctxLen;
+    this.ctxProbed.add(name);
+    if (!Object.keys(lens).length) return; // 上游不回报长度:不建缓存,避免脏数据
+    this.ctxLens = { ...this.ctxLens, [name]: { url, lens } };
+    saveCtxLensLocal(this.ctxLens);
+    this.bump();
+  }
+
+  /**
+   * 查模型的真实上下文窗口:接受 "provider/model" 全名或裸模型名,
+   * provider 的 baseUrl 与缓存指纹不符视为失效。查不到返回 null
+   * (调用方回落 util/modelctx 的按名估算表)。
+   */
+  providerCtxWindow(model: string): number | null {
+    if (!model) return null;
+    const prov = this.providerOf(model);
+    if (!prov) return null;
+    const c = this.ctxLens[prov.name];
+    if (!c || c.url !== prov.baseUrl) return null;
+    // 查表用探测到的原始 id;先精确、其次忽略大小写(按去前缀裸名)
+    const slash = model.indexOf('/');
+    const suffix = slash > 0 ? model.slice(slash + 1) : model;
+    if (c.lens[suffix]) return c.lens[suffix];
+    const bare = bareModelName(model);
+    for (const [m, n] of Object.entries(c.lens)) if (m.toLowerCase() === bare) return n;
+    return null;
+  }
+
+  /**
+   * 惰性探测当前模型的真实上下文窗口(聊天圆环分母):桌面态经 wails
+   * 问供应商 /models;已有缓存、探测中或已探测过(含失败)则跳过,
+   * 成功后 bump() 触发界面重渲染。网页形态暂无探测通道,直接跳过。
+   */
+  probeProviderCtx(model: string): void {
+    if (!inWails() || !model) return;
+    const prov = this.providerOf(model);
+    if (!prov || !prov.baseUrl || this.ctxProbed.has(prov.name)) return;
+    const c = this.ctxLens[prov.name];
+    if (c && c.url === prov.baseUrl) return;
+    this.ctxProbed.add(prov.name);
+    void detectModels(prov).then((rich) => {
+      if (rich) this.setProviderCtx(prov.name, prov.baseUrl, rich);
+    });
+  }
+
   /** 重命名;与目标名已存在时覆盖目标(旧的先摘掉,避免双份)。 */
   renameProvider(oldName: string, newName: string): void {
     const to = newName.trim();
     if (!to || to === oldName) return;
+    // 上下文窗口缓存随迁;探测标记同步改名
+    if (this.ctxLens[oldName]) {
+      const { [oldName]: hit, ...rest } = this.ctxLens;
+      this.ctxLens = { ...rest, [to]: hit };
+      saveCtxLensLocal(this.ctxLens);
+    }
+    if (this.ctxProbed.has(oldName)) {
+      this.ctxProbed.delete(oldName);
+      this.ctxProbed.add(to);
+    }
     this.patchProviders((l) => {
       const rest = l.filter((x) => x.name !== oldName && x.name !== to);
       const src = l.find((x) => x.name === oldName);
@@ -401,6 +525,13 @@ class SettingsStore {
   removeProvider(name: string): void {
     this.patchProviders((l) => l.filter((x) => x.name !== name));
     void this.saveModelCfg();
+    // 一并清掉该供应商的上下文窗口缓存与探测标记
+    if (this.ctxLens[name]) {
+      const { [name]: _drop, ...rest } = this.ctxLens;
+      this.ctxLens = rest;
+      saveCtxLensLocal(this.ctxLens);
+    }
+    this.ctxProbed.delete(name);
   }
 
   // ---------- 智能体扩展:插件/MCP(gh settings.json 的 plugins) ----------
@@ -625,14 +756,6 @@ class SettingsStore {
     return err;
   }
 
-  /** 默认模型:app 配置(前端请求)与 gh settings.json(服务端默认)同步写。 */
-  async setDefaultModel(scope: string, value: string): Promise<void> {
-    this.patchCfg({ defaultModel: value });
-    if (this.modelCfg) this.modelCfg = { ...this.modelCfg, default: value };
-    await this.saveCfg(scope);
-    await this.saveModelCfg();
-  }
-
   async toggleServer(): Promise<void> {
     if (!inWails()) return;
     this.srv = this.srv?.running ? await serverStop() : await serverStart();
@@ -661,7 +784,7 @@ class SettingsStore {
 
   /**
    * 桌面态异步引导(桥就绪后):项目索引切文件持久化、读配置、
-   * 确保托管 server 运行、应用默认模型与外观镜像。
+   * 确保托管 server 运行与外观镜像。
    */
   async loadFromBridge(scope: string): Promise<void> {
     if (!(await initHostBridge().catch(() => false))) return;
@@ -674,7 +797,6 @@ class SettingsStore {
     }
     this.loaded = true;
     await this.loadModelCfg();
-    this.applyDefaultModel(scope);
     this.bump();
   }
 }
@@ -689,3 +811,18 @@ setModelNameResolver((bare) => {
   }
   return undefined;
 });
+
+/** 展示用模型名补全:已是合法全名原样;命中某供应商模型名(含九天式
+ * 自带 / 的裸名,如 qwen/qwen3.8-27b)补 "provider/" 前缀;表未加载或
+ * 未命中原样返回。仅用于展示,不用于下发 —— 服务端回报的裸名经此对齐
+ * 菜单项与详情展示。 */
+export function displayFullModel(m: string): string {
+  if (!m) return m;
+  for (const p of settingsStore.modelCfg?.providers ?? []) {
+    for (const name of p.models ?? []) {
+      if (m === `${p.name}/${name}`) return m; // 已是合法全名
+      if (m === name) return `${p.name}/${m}`; // 裸名(含九天式)补全
+    }
+  }
+  return m;
+}

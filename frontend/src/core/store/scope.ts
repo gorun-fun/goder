@@ -15,6 +15,8 @@ import type {
 import {
   applyEvent,
   applyResponseSnapshot,
+  restoreLocalUsage,
+  forgetUsage,
   genId,
   goalFromItems,
   historyToItems,
@@ -116,8 +118,9 @@ export class GrfScope extends Emitter {
     super();
     this.name = name;
     this.client = new GrfClient({ baseUrl: cfg.baseUrl, token: cfg.token });
-    this.model = cfg.model;
-    this.reasoningEffort = cfg.reasoningEffort;
+    this.model = fullModelName(cfg.model);
+    // 思考强度无可继承记录/未选择时默认高(goder 约定,不依赖服务端默认)
+    this.reasoningEffort = cfg.reasoningEffort ?? 'high';
     this.authCfg = cfg.auth;
     this.policySelector = cfg.policySelector !== false;
     this.draftPolicy = this.policySelector ? loadPolicyLocal(name) : undefined;
@@ -141,9 +144,12 @@ export class GrfScope extends Emitter {
     this.notify();
   }
 
-  /** 设置随请求发送的模型('' = 服务端默认);本地持久化,不动连接状态。 */
+  /** 设置随请求发送的模型('' = 服务端默认);一律归一为 "provider/model"
+   * 全名 —— gh 的 trySwitchModel 只认全名,裸名会被静默忽略、沿用当前模型。
+   * 裸名按当前供应商表补全,补不出视为未选(走服务端默认)。本地持久化,
+   * 不动连接状态。 */
   setModel(m: string): void {
-    this.model = m || undefined;
+    this.model = fullModelName(m);
     saveConnLocal(this.name, {
       baseUrl: this.client.config.baseUrl,
       token: this.client.config.token,
@@ -153,7 +159,8 @@ export class GrfScope extends Emitter {
     this.notify();
   }
 
-  /** 思考强度('' = 服务端默认;low/high/max);本地持久化,随每个请求下发。 */
+  /** 思考强度(low/high/max);无可继承/未选择时默认 high,随每个请求
+   * 下发。本地持久化(localStorage),新会话按项目继承策略覆盖。 */
   reasoningEffort?: string;
   setReasoningEffort(e: string): void {
     this.reasoningEffort = e || undefined;
@@ -278,7 +285,7 @@ export class GrfScope extends Emitter {
 
   setConnection(cfg: Partial<ConnectionConfig>): void {
     this.client.setConfig({ baseUrl: cfg.baseUrl ?? this.client.config.baseUrl, token: cfg.token ?? this.client.config.token });
-    if (cfg.model !== undefined) this.model = cfg.model;
+    if (cfg.model !== undefined) this.model = fullModelName(cfg.model);
     if (cfg.reasoningEffort !== undefined) this.reasoningEffort = cfg.reasoningEffort;
     if (cfg.policySelector !== undefined) {
       this.policySelector = cfg.policySelector !== false;
@@ -524,6 +531,7 @@ export class GrfScope extends Emitter {
       this.runtimes.set(sid, rt);
     }
     rt.sid = sid; // 工具耗时本地持久化按键用
+    restoreLocalUsage(rt, sid); // 前端 usage 累计回填(跨 gh 重启兜底)
     return rt;
   }
 
@@ -545,15 +553,23 @@ export class GrfScope extends Emitter {
     return did;
   }
 
-  /** 新会话继承偏好:模型与思考强度取同项目最近一次会话的取值
-   * (没有记录时保持当前值)。写回 scope 级配置,composer 即时显示。 */
+  /** 新会话继承偏好:模型与思考强度优先取同项目最近一次会话的取值;
+   * 该项目尚无记录时回落到全部项目里最近一次对话的会话(新开项目沿用
+   * 用户最近在用的模型)。都没有时:模型保持当前值(localStorage 里上次
+   * 的选择,无选择由发送守卫引导),思考强度回落默认高。
+   * 写回 scope 级配置,composer 即时显示。 */
   private inheritProjectPrefs(projectId: string): void {
-    const latest = Object.values(this.index.sessions)
-      .filter((r) => r.projectId === projectId && (r.model || r.effort !== undefined))
+    const withModel = Object.values(this.index.sessions).filter((r) => r.model || r.effort !== undefined);
+    const inProject = withModel.filter((r) => r.projectId === projectId);
+    const latest = (inProject.length ? inProject : withModel)
       .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))[0];
-    if (!latest) return;
+    if (!latest) {
+      this.reasoningEffort = this.reasoningEffort ?? 'high';
+      return;
+    }
     if (latest.model !== undefined) this.model = fullModelName(latest.model);
-    if (latest.effort !== undefined) this.reasoningEffort = latest.effort || undefined;
+    // effort 空串 = 旧版本记录未选(现恒有值),视同无可继承回落默认高
+    this.reasoningEffort = latest.effort !== undefined ? latest.effort || 'high' : this.reasoningEffort ?? 'high';
     saveConnLocal(this.name, {
       baseUrl: this.client.config.baseUrl,
       token: this.client.config.token,
@@ -698,6 +714,7 @@ export class GrfScope extends Emitter {
     delete this.index.sessions[sid];
     this.runtimes.delete(sid);
     this.sendQueues.delete(sid);
+    forgetUsage(sid); // 前端 usage 累计随会话清理
     if (this.index.lastActiveSessionId === sid) this.index.lastActiveSessionId = undefined;
     if (this.activeSessionId === sid) this.activeSessionId = undefined;
     this.persistIndex();
@@ -1324,9 +1341,13 @@ export class GrfScope extends Emitter {
       this.log('warn', '会话尚无回合,无法压缩');
       return;
     }
-    const model = rt.model ?? this.model;
+    // 压缩模型同样必须全名:rt.model 是服务端回报的裸名,直接下发会被 gh
+    // 的 trySwitchModel 忽略。本端已选模型优先;未选时补全会话实际模型
+    // (九天式自带 / 的裸名补不出、原样下发被忽略,gh 沿用会话当前模型,
+    // 行为不劣于旧版)。
+    const model = this.model ?? fullModelName(rt.model ?? '');
     if (!model) {
-      this.log('warn', '压缩需要 model,请先在连接配置里设置默认模型');
+      this.log('warn', '压缩需要先选择模型(输入框下方「模型」)');
       return;
     }
     try {
@@ -1399,10 +1420,14 @@ export function setModelNameResolver(fn: (bare: string) => string | undefined): 
   resolveBareModel = fn;
 }
 
-/** 归一为可下发的模型全名:已是全名原样返回;裸名尝试补全,补不出返回
- * undefined(视同未选模型,走服务端默认 —— 强于留一个显示与实际不符、
- * 发送时被服务端静默忽略的值)。 */
-function fullModelName(m: string): string | undefined {
+/** 归一为可下发的模型全名:含 "/" 视为已带 provider 前缀原样返回(来源
+ * 限于 UI 全名菜单、gh default、本端持久化,可信);纯裸名尝试按供应商表
+ * 补全,补不出返回 undefined(视同未选模型,走服务端默认 —— 强于留一个
+ * 显示与实际不符、发送时被服务端静默忽略的值)。
+ * 已知局限:九天等供应商的模型名自带 /(如 qwen/qwen3.8-27b),其裸名
+ * 回报也含 /、会被当作全名原样放行 —— 下发后 gh 按 provider=qwen 解析
+ * 失败而忽略,沿用会话当前模型(行为不劣化,仅"换模型压缩"不生效)。 */
+function fullModelName(m: string | undefined): string | undefined {
   if (!m) return undefined;
   if (m.includes('/')) return m;
   return resolveBareModel?.(m);
@@ -1485,7 +1510,8 @@ export function getScope(name = 'default'): GrfScope {
     const cfg = {
       baseUrl: saved?.baseUrl ?? locationDefaultBase(),
       token: saved?.token ?? '',
-      ...(saved?.model ? { model: saved.model } : {}),
+      // localStorage 旧数据可能是裸名(下发会被 gh 忽略),恢复时归一
+      ...(saved?.model ? { model: fullModelName(saved.model) } : {}),
       ...(saved?.reasoningEffort ? { reasoningEffort: saved.reasoningEffort } : {}),
     };
     scopeConfigs.set(name, cfg);
@@ -1503,10 +1529,13 @@ export function configureScope(name: string, cfg: Partial<ConnectionConfig>): Gr
   const base = scopeConfigs.get(name) ?? {
     baseUrl: saved?.baseUrl ?? locationDefaultBase(),
     token: saved?.token ?? '',
-    ...(saved?.model ? { model: saved.model } : {}),
+    ...(saved?.model ? { model: fullModelName(saved.model) } : {}),
     ...(saved?.reasoningEffort ? { reasoningEffort: saved.reasoningEffort } : {}),
   };
   const merged = { ...base, ...cfg };
+  // 进来的 model 一律归一为全名再落 localStorage(settings 页手填、宿主
+  // configure 均可能给裸名;gh 的 trySwitchModel 忽略裸名)
+  if (merged.model) merged.model = fullModelName(merged.model);
   scopeConfigs.set(name, merged);
   saveConnLocal(name, merged);
   const existing = scopes.get(name);

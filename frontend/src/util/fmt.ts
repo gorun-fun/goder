@@ -32,11 +32,11 @@ export function fmtClock(ts: number): string {
   ).padStart(2, '0')}`;
 }
 
+/** token 数中文短写:1 万以下原样,以上折万并去尾零(1.6万 / 16万 / 100万)。 */
 export function fmtTokens(n: number | undefined): string {
   if (!n) return '0';
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n < 10_000) return String(n);
+  return `${(n / 10_000).toFixed(1).replace(/\.0$/, '')}万`;
 }
 
 export function fmtDuration(ms: number | undefined): string {

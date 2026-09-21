@@ -90,7 +90,7 @@ export class GrfComposer extends LitElement {
   @property({ type: Boolean }) policySelector = true;
   /** 模型菜单数据:供应商 → 模型(空 = 无法枚举) */
   @property({ type: Array }) providers: ModelGroup[] = [];
-  /** 当前使用的模型('' = 未知/服务端默认,按钮回落显示「默认模型」) */
+  /** 当前使用的模型('' = 未选择,按钮回落显示「选择模型」,发送被守卫拦截) */
   @property({ type: String }) model = '';
   /** 选中态模型(菜单打勾/下一回合使用;'' = 未显式选择,回落当前模型) */
   @property({ type: String }) activeModel = '';
@@ -104,6 +104,10 @@ export class GrfComposer extends LitElement {
   @property({ type: Object }) stats: { llm: LLMStats } | null = null;
   /** 当前模型的上下文窗口(token 数,估算;占用圆环分母) */
   @property({ type: Number }) contextWindow = 128_000;
+  /** 分母是否来自供应商接口的真实回报(true 时 tooltip 不标「预估」) */
+  @property({ type: Boolean }) ctxExact = false;
+  /** 前端本地 usage 累计(跨 gh server 重启兜底;gh 会话统计是内存态) */
+  @property({ attribute: false }) usageTotals: { prompt: number; completion: number } | null = null;
 
   @state() private images: string[] = [];
   @state() private text = '';
@@ -513,9 +517,9 @@ export class GrfComposer extends LitElement {
       .tip {
         min-width: 230px;
         max-width: 300px;
-        padding: 8px 10px;
+        padding: 10px 12px;
         display: grid;
-        gap: 4px;
+        gap: 8px;
       }
       .tip .row {
         display: flex;
@@ -534,7 +538,7 @@ export class GrfComposer extends LitElement {
       }
       .tip .row.head {
         color: var(--grf-text);
-        padding-bottom: 2px;
+        padding-bottom: 4px;
         border-bottom: 1px solid var(--grf-border-soft);
         margin-bottom: 2px;
       }
@@ -637,10 +641,10 @@ export class GrfComposer extends LitElement {
                 ${this.usage ? this.renderCtxRing() : nothing}
                 <button
                   class="bar-btn model-ctl ${this.modelPos ? 'open' : ''}"
-                  title=${this.model || '模型(当前未知,发送首条消息后显示)'}
+                  title=${this.model || '选择模型(未选择时无法发送)'}
                   @click=${(e: MouseEvent) => this.togglePop('model', e)}
                 >
-                  <span class="cur">${this.model || '默认模型'}</span>
+                  <span class="cur">${this.model || '选择模型'}</span>
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
@@ -878,15 +882,28 @@ export class GrfComposer extends LitElement {
     if (llm && llm.CompletionTokens > 0 && llm.GenerationTime > 0) {
       speed = `${Math.round(llm.CompletionTokens / (llm.GenerationTime / 1e9))} tok/s`;
     }
+    // 总输入/总输出:gh 会话累计优先(服务端权威,多窗口准),gh 重启丢
+    // 数据时与前端本地累计取大——保证重开后不归零、数值单调不减
+    const ghIn = llm?.UsageSeen ? llm.PromptTokens : 0;
+    const ghOut = llm?.UsageSeen ? llm.CompletionTokens : 0;
+    const inTot = Math.max(ghIn, this.usageTotals?.prompt ?? 0);
+    const outTot = Math.max(ghOut, this.usageTotals?.completion ?? 0);
+    // 模型行:统计属最近一次实际调用(usageModel);当前选择(model)与
+    // 之不同 = 已切换待下回合生效,展示「旧 → 新」让切换状态可见
+    const lastModel = this.usageModel;
+    const nextModel = this.model;
+    const modelLabel =
+      lastModel && nextModel && lastModel !== nextModel ? `${lastModel} → ${nextModel}` : (lastModel || nextModel || '');
     return html`
       <div class="tip" style=${posStyle(pos)}>
-        <div class="row head"><span>上下文占用</span><b>${fmtTokens(ctxTokens)} / ${fmtTokens(win)}(预估) · ${Math.round(pct * 100)}%</b></div>
-        <div class="row"><span>本回合输入</span><b>${fmtTokens(u.input_tokens)}</b></div>
-        <div class="row"><span>本回合输出</span><b>${fmtTokens(u.output_tokens)}</b></div>
+        <div class="row head"><span>上下文容量</span><b>${fmtTokens(ctxTokens)} / ${fmtTokens(win)}${this.ctxExact ? '' : '(预估)'} · ${Math.round(pct * 100)}%</b></div>
+        <div class="row"><span>总输入</span><b>${inTot > 0 ? fmtTokens(inTot) : '—'}</b></div>
+        <div class="row"><span>总输出</span><b>${outTot > 0 ? fmtTokens(outTot) : '—'}</b></div>
+        <div class="row"><span>输出</span><b>${fmtTokens(u.output_tokens)}</b></div>
         <div class="row"><span>缓存命中率</span><b>${cache}</b></div>
         <div class="row"><span>生成速度</span><b>${speed}</b></div>
-        ${this.usageModel || this.model
-          ? html`<div class="row"><span>模型</span><b title=${this.usageModel || this.model}>${this.usageModel || this.model}</b></div>`
+        ${modelLabel
+          ? html`<div class="row"><span>模型</span><b title=${modelLabel}>${modelLabel}</b></div>`
           : nothing}
       </div>
     `;
@@ -941,6 +958,17 @@ export class GrfComposer extends LitElement {
       this.effortPos = this.effortPos ? null : this.anchorPos(el, 'right');
       this.policyPos = null;
       this.modelPos = null;
+    }
+  }
+
+  /** 打开模型选择弹层(未选模型发送被拦时引导,一步到位)。 */
+  openModelPicker(): void {
+    if (this.modelPos) return;
+    const btn = this.renderRoot.querySelector('.bar-btn.model-ctl');
+    if (btn) {
+      this.modelPos = this.anchorPos(btn, 'right');
+      this.policyPos = null;
+      this.effortPos = null;
     }
   }
 

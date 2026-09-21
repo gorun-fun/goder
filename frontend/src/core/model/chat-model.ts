@@ -105,8 +105,13 @@ export interface SessionRuntime {
   running: boolean;
   pendingRequests: IncompleteRequest[];
   lastResponseId?: string;
+  /** 会话实际运行模型(服务端回报的裸名,不含 provider 前缀;仅展示用,
+   * 下发一律走 scope.model 的 "provider/model" 全名) */
   model?: string;
   usage?: Usage | null;
+  /** 前端本地 usage 累计:gh 的会话统计是内存态,gh server 重启即归零,
+   * 这里按 response 定格累加(持久化由 scope 负责)作跨重启兜底 */
+  localUsage?: LocalUsage;
   /** 会话累计统计(getConversation 的 stats;速度/缓存命中率等,圆环 tooltip 用) */
   stats?: { llm: LLMStats; tools: { calls: number; time_ms: number } };
   /** 当前生效的访问策略(getConversation 回报;草稿/旧 server 无值) */
@@ -124,6 +129,85 @@ export interface SessionRuntime {
 
 export function newRuntime(): SessionRuntime {
   return { items: [], running: false, pendingRequests: [], todos: null, loaded: false };
+}
+
+// ---------- usage 前端累计(跨 gh server 重启) ----------
+// gh 的会话级 LLM 统计(总输入/总输出)是内存态,gh server 随 App 重启
+// 归零,统计框会退化成「—」。这里按 response 定格累加并按 sid 持久化到
+// localStorage,重开后兜底显示(展示时与 gh 累计取大,防重开跳小)。
+const USAGE_KEY = 'grf-ui:usage-totals';
+/** 会话条目上限(超出丢最旧,防无限膨胀) */
+const USAGE_MAX = 500;
+
+export interface LocalUsage {
+  /** 已完结模型调用(按 response 定格)的累计 */
+  basePrompt: number;
+  baseCompletion: number;
+  /** 当前未定格 response 的最新 usage(同一次调用的流事件反复带递增
+   * usage,按 respId 区分:换 respId 即新一次模型调用,旧的并入 base) */
+  curResp?: string;
+  curPrompt: number;
+  curCompletion: number;
+}
+
+function readUsageMap(): Record<string, LocalUsage> {
+  try {
+    const raw = localStorage.getItem(USAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, LocalUsage>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeUsageMap(map: Record<string, LocalUsage>): void {
+  try {
+    const keys = Object.keys(map);
+    if (keys.length > USAGE_MAX) {
+      for (const k of keys.slice(0, keys.length - USAGE_MAX)) delete map[k];
+    }
+    localStorage.setItem(USAGE_KEY, JSON.stringify(map));
+  } catch {
+    /* 隐私模式等写入失败时静默,当次会话内仍生效 */
+  }
+}
+
+/** 历史恢复时回填该会话的前端 usage 累计(scope.ensureRuntime 调用)。 */
+export function restoreLocalUsage(rt: SessionRuntime, sid: string): void {
+  if (!rt.localUsage) rt.localUsage = readUsageMap()[sid];
+}
+
+/** 把一次 response 的 usage 并入本地累计并持久化(按 respId 幂等定格)。 */
+function accumUsage(rt: SessionRuntime, respId: string, u: Usage): void {
+  const lu = rt.localUsage ?? (rt.localUsage = { basePrompt: 0, baseCompletion: 0, curPrompt: 0, curCompletion: 0 });
+  if (lu.curResp !== respId) {
+    lu.basePrompt += lu.curPrompt;
+    lu.baseCompletion += lu.curCompletion;
+    lu.curResp = respId;
+  }
+  lu.curPrompt = u.input_tokens;
+  lu.curCompletion = u.output_tokens;
+  const sid = rt.sid;
+  if (sid && !sid.startsWith('draft:')) {
+    const map = readUsageMap();
+    map[sid] = lu;
+    writeUsageMap(map);
+  }
+}
+
+/** 本地累计的当前总数(总输入/总输出;无累计时为 0)。 */
+export function usageTotals(rt: SessionRuntime): { prompt: number; completion: number } {
+  const lu = rt.localUsage;
+  if (!lu) return { prompt: 0, completion: 0 };
+  return { prompt: lu.basePrompt + lu.curPrompt, completion: lu.baseCompletion + lu.curCompletion };
+}
+
+/** 会话归档时清掉它的前端 usage 累计。 */
+export function forgetUsage(sid: string): void {
+  const map = readUsageMap();
+  if (map[sid]) {
+    delete map[sid];
+    writeUsageMap(map);
+  }
 }
 
 // ---------- 工具耗时本地持久化 ----------
@@ -323,12 +407,17 @@ export function applyEvent(rt: SessionRuntime, ev: SSEEvent): boolean {
   const items = rt.items;
 
   if (ev.response?.id) rt.curRespId = ev.response.id;
-  if (ev.response?.['grf:session_id'] && ev.response.model) {
+  // rt.model 记服务端回报的实际模型(裸名,不含 provider 前缀):仅展示与
+  // 上下文估算用,下发链路一律走 scope.model(全名)。每个响应事件都带
+  // model 字段,跟随更新 —— 否则会话中途切换模型后展示仍停在旧模型。
+  if (ev.response?.model) {
     rt.model = ev.response.model;
   }
-  // 用量随每个带 usage 的事件刷新(回合内多次模型调用也会推进,不等终态)。
+  // 用量随每个带 usage 的事件刷新(回合内多次模型调用也会推进,不等终态);
+  // 同时并入前端累计(跨 gh server 重启的兜底统计)。
   if (ev.response?.usage) {
     rt.usage = ev.response.usage;
+    if (rt.curRespId) accumUsage(rt, rt.curRespId, ev.response.usage);
     changed = true;
   }
   // 文本类 item 以 `${respId}/${itemId}` 寻址,跨回合的 it_1 不互串。
@@ -606,6 +695,8 @@ export function applyResponseSnapshot(rt: SessionRuntime, snap: import('../api/t
   }
   if (snap.usage) {
     rt.usage = snap.usage;
+    // 对账快照也并入前端累计(重开 App 后的恢复链路;同 respId 幂等定格)
+    accumUsage(rt, snap.id, snap.usage);
     changed = true;
   }
   for (const i of rt.items) {

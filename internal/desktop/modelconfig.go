@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -212,9 +213,19 @@ func (m *ModelConfig) writable(path string) bool {
 	return true
 }
 
+// DetectedModelDTO DetectModels 的单条结果,与前端 host/bridge.ts 对齐。
+type DetectedModelDTO struct {
+	ID string `json:"id"`
+	// CtxLen 上游回报的上下文窗口(token 数);0 = 上游未提供,
+	// 前端回落按模型名的估算表(token-hub / OpenRouter / SiliconFlow
+	// 等网关在模型对象上带 context_length)。
+	CtxLen int `json:"ctxLen"`
+}
+
 // DetectModels 询问供应商的模型列表接口(OpenAI 兼容 GET /models),
-// 返回探测到的模型 id;供设置页"自动检测"按钮合并进现有模型列表。
-func (m *ModelConfig) DetectModels(p ProviderDTO) ([]string, error) {
+// 返回模型 id 与可选的上下文窗口;供设置页"自动检测"合并模型列表,
+// 并为聊天面板的上下文占用圆环提供真实分母。
+func (m *ModelConfig) DetectModels(p ProviderDTO) ([]DetectedModelDTO, error) {
 	base := strings.TrimRight(strings.TrimSpace(p.BaseURL), "/")
 	if base == "" {
 		return nil, fmt.Errorf("未配置 Base URL")
@@ -239,31 +250,46 @@ func (m *ModelConfig) DetectModels(p ProviderDTO) ([]string, error) {
 		return nil, err
 	}
 	// OpenAI 形状 {data:[{id}]};兼容裸数组 [{id}]
-	var ids []string
+	var list []map[string]any
 	wrapped := struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+		Data []map[string]any `json:"data"`
 	}{}
 	if jerr := json.Unmarshal(body, &wrapped); jerr == nil && len(wrapped.Data) > 0 {
-		for _, d := range wrapped.Data {
-			if d.ID != "" {
-				ids = append(ids, d.ID)
-			}
-		}
+		list = wrapped.Data
 	} else {
-		var bare []struct {
-			ID string `json:"id"`
-		}
+		var bare []map[string]any
 		if jerr := json.Unmarshal(body, &bare); jerr != nil {
 			return nil, fmt.Errorf("响应不是可识别的模型列表 JSON")
 		}
-		for _, d := range bare {
-			if d.ID != "" {
-				ids = append(ids, d.ID)
+		list = bare
+	}
+	out := make([]DetectedModelDTO, 0, len(list))
+	for _, item := range list {
+		id, _ := item["id"].(string)
+		if id == "" {
+			continue
+		}
+		out = append(out, DetectedModelDTO{ID: id, CtxLen: modelCtxLen(item)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// modelCtxLen 从模型对象里取上下文窗口,按社区常见字段名依次尝试
+// (token-hub 三者同值;OpenRouter/SiliconFlow 用 context_length,
+// vLLM 用 max_model_len);数字或数字字符串均可,取首个 >0 的值。
+func modelCtxLen(item map[string]any) int {
+	for _, key := range []string{"context_length", "context_window", "max_model_len"} {
+		switch v := item[key].(type) {
+		case float64:
+			if v > 0 {
+				return int(v)
+			}
+		case string:
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+				return n
 			}
 		}
 	}
-	sort.Strings(ids)
-	return ids, nil
+	return 0
 }
