@@ -109,6 +109,10 @@ export interface ProviderDTO {
   hasKey?: boolean;
   /** 网页形态 PUT 专用:改名时指向改名前的供应商名,空 apiKey 从它继承 */
   keepKeyFrom?: string;
+  /** 平台托管(嵌入方反代在 GET 响应注入,gh 不持久化):界面只读展示——
+   * 名称/协议/baseUrl/apiKey 不显示不可改,模型列表只读;PUT 随整表
+   * 原样回传保真(gh 侧忽略未知字段) */
+  managed?: boolean;
 }
 
 export interface ModelConfigDTO {
@@ -706,6 +710,13 @@ export async function gitDiff(cwd: string, path: string, staged: boolean): Promi
   } catch {
     return null;
   }
+}
+
+/** 在用户主目录下确保存在同名子目录(自动化操作员工作区),返回绝对
+ * 路径;非桌面态返回 null,名字非法/建目录失败抛错。 */
+export async function ensureHomeDir(name: string): Promise<string | null> {
+  if (!inWails()) return null;
+  return call<string>(`${SVC}.Desktop.EnsureHomeDir`, name);
 }
 
 // ---------- 自动更新(Updater service,仅桌面) ----------

@@ -748,12 +748,16 @@ export class GrfSettingsPage extends GrfPanel {
 
   /** 已知内置插件的展示名;其余展示文件名。 */
   private pluginLabel(name: string): string {
-    const map: Record<string, string> = { 'grf-browser': '浏览器', 'grf-computer': '电脑操作' };
+    const map: Record<string, string> = {
+      'grf-browser': '浏览器',
+      'grf-computer': '电脑操作',
+      'goder-console': '界面控制',
+    };
     return map[name] ?? name;
   }
 
   private isBuiltinPlugin(name: string): boolean {
-    return name === 'grf-browser' || name === 'grf-computer';
+    return name === 'grf-browser' || name === 'grf-computer' || name === 'goder-console';
   }
 
   /** 插件分区:平铺卡片,只做安装与删除;内置(浏览器/电脑操作)不可删。 */
@@ -1396,6 +1400,7 @@ export class GrfSettingsPage extends GrfPanel {
             }}
           >
             <span class="pname">${p.name}</span>
+            ${p.managed ? html`<span class="cnt">托管</span>` : nothing}
             <span class="cnt">${n || '—'}</span>
           </div>
         `;
@@ -1406,20 +1411,22 @@ export class GrfSettingsPage extends GrfPanel {
     `;
   }
 
-  /** 右栏:选中供应商的详情(连接信息 + 模型列表)。 */
+  /** 右栏:选中供应商的详情(连接信息 + 模型列表)。平台托管项
+   * (p.managed,嵌入方反代注入)只读展示:连接信息不显示、模型不可增删。 */
   private renderProvDetail(readOnly: boolean) {
     const list = settingsStore.modelCfg?.providers ?? [];
     const p = list.find((x) => x.name === this.activeProvName);
     if (!p) {
       return html`<div class="hint">${list.length ? '从左侧选择一个供应商查看详情。' : '还没有供应商,点左下"添加供应商"新增一个。'}</div>`;
     }
+    const ro = readOnly || p.managed === true;
     return html`
       <div class="prov">
         <div class="prov-head" title="当前模型数">
           <span class="pname">${p.name}</span>
           <span class="tag">${p.type || '默认'}</span>
           <span class="meta">${(p.models ?? []).length} 个模型</span>
-          ${readOnly
+          ${ro
             ? nothing
             : html`<button
                 class="ghost ${this.pendingDelete === p.name ? 'danger' : ''}"
@@ -1430,13 +1437,18 @@ export class GrfSettingsPage extends GrfPanel {
               </button>`}
         </div>
         <div class="prov-body">
+          ${p.managed
+            ? html`<div class="hint" style="margin:0 0 8px">
+                平台托管供应商:由平台统一下发与更新(含连接信息与密钥代理),此处仅展示模型清单。
+              </div>`
+            : html`
           <div class="fields">
             <label>
               名称
               <input
                 type="text"
                 .value=${p.name}
-                ?disabled=${readOnly}
+                ?disabled=${ro}
                 @change=${(e: InputEvent) => this.renameProv(p.name, (e.target as HTMLInputElement).value)}
               />
             </label>
@@ -1444,7 +1456,7 @@ export class GrfSettingsPage extends GrfPanel {
               协议类型
               <select
                 .value=${p.type}
-                ?disabled=${readOnly}
+                ?disabled=${ro}
                 @change=${(e: Event) => this.field(p.name, { type: (e.target as HTMLSelectElement).value })}
               >
                 <option value="">默认(OpenAI 兼容)</option>
@@ -1457,7 +1469,7 @@ export class GrfSettingsPage extends GrfPanel {
                 type="text"
                 .value=${p.baseUrl}
                 placeholder="https://api.openai.com/v1"
-                ?disabled=${readOnly}
+                ?disabled=${ro}
                 @change=${(e: InputEvent) => this.field(p.name, { baseUrl: (e.target as HTMLInputElement).value })}
               />
             </label>
@@ -1467,11 +1479,12 @@ export class GrfSettingsPage extends GrfPanel {
                 type="password"
                 .value=${p.apiKey}
                 placeholder=${!inWails() && p.hasKey ? '已设置(留空保留,输入更换)' : 'sk-…(本地服务可留空)'}
-                ?disabled=${readOnly}
+                ?disabled=${ro}
                 @change=${(e: InputEvent) => this.field(p.name, { apiKey: (e.target as HTMLInputElement).value })}
               />
             </label>
           </div>
+          `}
           <div class="mlist">
             ${(p.models ?? []).map((m, i) => {
               return html`
@@ -1480,16 +1493,16 @@ export class GrfSettingsPage extends GrfPanel {
                     class="minput"
                     type="text"
                     .value=${m}
-                    ?disabled=${readOnly}
+                    ?disabled=${ro}
                     @change=${(e: InputEvent) => this.setModelAt(p.name, i, (e.target as HTMLInputElement).value)}
                   />
-                  ${readOnly
+                  ${ro
                     ? nothing
                     : html`<button class="ghost mdel" title="删除该模型" @click=${() => this.removeModelAt(p.name, i)}>×</button>`}
                 </div>
               `;
             })}
-            ${readOnly
+            ${ro
               ? nothing
               : html`
                   <div class="mrow add">
@@ -1507,7 +1520,7 @@ export class GrfSettingsPage extends GrfPanel {
                   </div>
                 `}
           </div>
-          ${readOnly
+          ${ro
             ? nothing
             : html`
                 <div class="prov-actions">
@@ -1583,6 +1596,11 @@ export class GrfSettingsPage extends GrfPanel {
   }
 
   private renameProv(oldName: string, raw: string): void {
+    // 托管项不可改名(UI 已隐藏输入框,此处兜底防程序化触发)
+    if (settingsStore.modelCfg?.providers.find((p) => p.name === oldName)?.managed) {
+      this.requestUpdate();
+      return;
+    }
     const to = raw.trim();
     if (!to || to === oldName) {
       this.requestUpdate(); // 非法输入:重渲染把输入框拉回原值
@@ -1596,6 +1614,8 @@ export class GrfSettingsPage extends GrfPanel {
 
   /** 删除需二次确认(3s 内再点一次),避免误删供应商。 */
   private askDelete(name: string): void {
+    // 托管项不可删(平台统一下发,UI 已隐藏按钮,此处兜底)
+    if (settingsStore.modelCfg?.providers.find((p) => p.name === name)?.managed) return;
     if (this.pendingDelete === name) {
       this.pendingDelete = null;
       if (this.deleteTimer) clearTimeout(this.deleteTimer);
