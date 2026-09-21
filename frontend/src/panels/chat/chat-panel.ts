@@ -1219,11 +1219,21 @@ export class GrfChat extends GrfPanel {
     if (!s) return;
     const alive = (sid: string) =>
       sid.startsWith('draft:') ? s.drafts.has(sid) : !!s.index.sessions[sid];
-    for (const sid of new Set([...this.bottomTabsBySid.keys(), ...this.sideElPool.keys()])) {
+    // 注意结构差异:bottomTabsBySid 键是会话 id;sideElPool 外层键是
+    // tab id('terminal'/'file:<路径>'…),会话 id 在内层 map —— 判活必须
+    // 遍历内层,否则会把 tab id 当会话 id 误判为已死,每次渲染清空侧栏
+    // 元素池(终端 PTY 随之被杀重启)。
+    for (const sid of this.bottomTabsBySid.keys()) {
       if (alive(sid) || sid === this.poolSid) continue;
       this.bottomTabsBySid.delete(sid);
       this.bottomActiveBySid.delete(sid);
-      this.sideElPool.delete(sid);
+    }
+    for (const [tabId, bySid] of this.sideElPool) {
+      for (const sid of bySid.keys()) {
+        if (alive(sid) || sid === this.poolSid) continue;
+        bySid.delete(sid);
+      }
+      if (bySid.size === 0) this.sideElPool.delete(tabId);
     }
   }
 
@@ -1635,11 +1645,20 @@ export class GrfChat extends GrfPanel {
         <div class="side-body">
           ${tabs.map((t) => {
             const def = defs.find((d) => d.id === t.defId)!;
-            const cls = on === sideTabId(t) ? 'on' : '';
-            // 池化条目:所有会话的元素常驻 DOM(隐藏保活),仅当前会话可见;
-            // 模板条目:每次渲染重建(轻量内容)
+            const active = on === sideTabId(t);
+            // 池化条目:与底栏同款会话隔离 —— 所有会话的元素常驻 DOM
+            // (隐藏保活,切会话不销毁,PTY/滚动位置都在),仅「当前会话 +
+            // 激活 tab」可见;模板条目轻量,按激活 tab 现渲染。
             const el = this.pooledSideEl(def, t.key, sid);
-            return html`<div class="pane ${cls}">${el ?? def.render(ctx, t.key)}</div>`;
+            if (el) {
+              const tabId = t.key !== undefined ? `${def.id}:${t.key}` : def.id;
+              const bySid = this.sideElPool.get(tabId) ?? new Map();
+              return [...bySid.entries()].map(
+                ([ownerSid, pel]) =>
+                  html`<div class="pane ${active && ownerSid === sid ? 'on' : ''}">${pel}</div>`,
+              );
+            }
+            return html`<div class="pane ${active ? 'on' : ''}">${def.render(ctx, t.key)}</div>`;
           })}
         </div>
       </aside>

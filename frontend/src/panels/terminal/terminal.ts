@@ -228,6 +228,15 @@ export class GrfTerminal extends GrfPanel {
         if (!s) throw new Error('无法启动终端(非桌面态)');
         sid = s.id;
       }
+      // adopt/readTerm/startTerm 都是 await,期间元素可能已卸载(tab 关
+      // 闭/池化重建):此时绝不能再注册 visible —— 否则迟到的注册让会话
+      // 永久挂在「界面可见」集合里(goder_terminal_new 会复用这个无面板
+      // 的僵尸会话)。立即终止会话并放弃本次 boot。
+      if (!this.isConnected) {
+        void killTerm(sid);
+        term.dispose();
+        return;
+      }
       this.sessionId = sid;
       this.term = term;
       this.fit = fit;

@@ -582,6 +582,67 @@ func (s *Server) registerBrowserTools() {
 
 // ---------- 终端面板工具 ----------
 
+// unescapeTermText 还原客户端把换行等控制字符按字面转义传入的情况:
+// 工具描述里的「以 \n 结尾」常被部分模型/客户端原样写成反斜杠+n 两个
+// 字符,打进终端的字面 "\n" 只会被回显、命令永远不执行。规则:
+//   - 文本已含真实换行/回车/制表符:说明转义链路正常,原样透传;
+//   - 否则且以字面 "\n" 结尾(典型:整条命令 + 字面换行)或整个就是
+//     字面 "\x03"(Ctrl+C):把文本中的字面 \n \r \t \xHH \\ 还原为真实字符;
+//   - 其余情况(不含字面换行,如 printf 'a\tb' 之类正当字面用法)不动。
+func unescapeTermText(s string) string {
+	if strings.ContainsAny(s, "\n\r\t") || (s != `\x03` && !strings.HasSuffix(s, `\n`)) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '\\' || i+1 >= len(s) {
+			b.WriteByte(c)
+			continue
+		}
+		switch n := s[i+1]; n {
+		case 'n':
+			b.WriteByte('\n')
+			i++
+		case 'r':
+			b.WriteByte('\r')
+			i++
+		case 't':
+			b.WriteByte('\t')
+			i++
+		case '\\':
+			b.WriteByte('\\')
+			i++
+		case 'x':
+			if i+3 < len(s) && isHexByte(s[i+2]) && isHexByte(s[i+3]) {
+				b.WriteByte(hexVal(s[i+2])<<4 | hexVal(s[i+3]))
+				i += 3
+			} else {
+				b.WriteByte(c)
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+func isHexByte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func hexVal(c byte) byte {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	default:
+		return c - 'A' + 10
+	}
+}
+
 const termDesc = "操作 goder 界面的终端面板(用户可见:输入与输出实时显示在终端 tab 里)。" +
 	"适合需要人工围观的长任务(构建/测试/dev server);静默执行命令用内置终端工具即可,不必占面板。"
 
@@ -620,8 +681,12 @@ func (s *Server) registerTerminalTools() {
 			_ = json.Unmarshal(args, &a)
 			// 界面上已挂载存活终端:直接复用——输入实时显示在面板,用户
 			// 可围观/接管,也避免会话增殖(新建的会话若组件正忙不会显示)。
+			// 复用也发 terminal_open(幂等):保证被复用的会话一定有
+			// 面板在显示——前端上报的 terminals 可能陈旧,复用一个无
+			// 面板的会话会让输入落入谁也看不见的暗终端。
 			if id := s.pickVisibleTerm(); id != "" {
-				return textOk("复用界面现有终端会话 %s(输入实时显示在终端面板)。goder_terminal_send 发命令(以 \\n 结尾),goder_terminal_read 读输出。", id)
+				s.emitUI("terminal_open", map[string]any{"id": id})
+				return textOk("复用界面现有终端会话 %s(已确保终端 tab 打开;输入实时显示在终端面板)。goder_terminal_send 发命令(以 \\n 结尾),goder_terminal_read 读输出。", id)
 			}
 			id, err := s.deps.Terminal.NewTerm(a.Cwd)
 			if err != nil {
@@ -634,10 +699,10 @@ func (s *Server) registerTerminalTools() {
 
 	s.add(Tool{
 		Name: "goder_terminal_send",
-		Description: termDesc + "向会话写入输入(键入即回显在面板)。命令须以 \\n 结尾才会执行;交互程序照常响应。",
+		Description: termDesc + "向会话写入输入(键入即回显在面板)。命令须以真实换行符结尾才会执行(工具参数里传 JSON \"\\n\");交互程序照常响应。若客户端把 \\n 转义成字面反斜杠+n 传入,服务端会自动还原,不必手工处理。",
 		Schema: obj(map[string]any{
 			"id":   pstr("会话 id(goder_terminal_list/new 的返回值)"),
-			"text": pstr("要写入的文本(命令 + \\n;Ctrl+C 写 \\x03)"),
+			"text": pstr("要写入的文本(命令 + 换行;Ctrl+C 写 \\x03)"),
 		}, "id", "text"),
 		Handler: func(s *Server, args json.RawMessage) ([]Content, bool) {
 			var a struct {
@@ -645,7 +710,7 @@ func (s *Server) registerTerminalTools() {
 				Text string `json:"text"`
 			}
 			_ = json.Unmarshal(args, &a)
-			if err := s.deps.Terminal.WriteTerm(a.ID, a.Text); err != nil {
+			if err := s.deps.Terminal.WriteTerm(a.ID, unescapeTermText(a.Text)); err != nil {
 				return textErr("%v(可用 goder_terminal_list 核对 id)", err)
 			}
 			return textOk("已写入。稍候用 goder_terminal_read 读取输出")
