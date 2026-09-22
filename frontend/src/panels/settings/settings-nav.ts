@@ -1,19 +1,26 @@
 // settings-nav.ts — <grf-settings-nav>:设置视图的左栏导航。
-// 顶部返回工作区,下方两级分组:基础(外观/模型)与智能体(Harness/插件/
-// MCP/技能);当前分区由宿主(app-shell)持有,经 section 属性下发,切换时
-// 冒泡 grf-settings-section 事件。底部身份区与 <grf-session-list> 一致。
+// 顶部返回工作区,下方分组列分区:条目一律经 registry.settings 装配
+// (内置「基础设置」「智能体」两组在 builtin-common 注册,三方自定义分区
+// 经 registry.settings.add 注入,缺省归入「扩展」分组)。当前分区由宿主
+// (app-shell)持有,经 section 属性下发,切换时冒泡 grf-settings-section
+// 事件。底部身份区与 <grf-session-list> 一致。
 import { css, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
-import { getSettingsConfig, onSettingsChange } from '../../registry/registry';
+import { inWails } from '../../host/bridge';
+import { registry, getSettingsConfig, onSettingsChange, type PanelContext, type SettingsSectionDef } from '../../registry/registry';
 import '../sessions/user-chip';
 
-export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills';
+/** 分区 id:内置六个 + 三方自定义(经 registry.settings.add 注册的任意 id) */
+export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills' | (string & {});
 
-/** 「智能体」分组的分区键(settings.agentGroup:false 时整组隐藏) */
-const AGENT_SECTIONS = new Set<SettingsSection>(['harness', 'plugins', 'mcp', 'skills']);
+/** 「智能体」分组的组名(settings.agentGroup:false 时整组隐藏) */
+const AGENT_GROUP = '智能体';
+
+/** 三方自定义分区缺省归入的分组标题 */
+const DEFAULT_GROUP = '扩展';
 
 @customElement('grf-settings-nav')
 export class GrfSettingsNav extends GrfPanel {
@@ -22,8 +29,9 @@ export class GrfSettingsNav extends GrfPanel {
   /** 与 session-list 对齐:嵌入态宿主自管身份区时可隐藏底部 */
   @property({ type: Boolean, attribute: 'no-connection' }) noConnectionFooter = false;
 
-  /** 设置页裁剪变更订阅(configure 的 settings) */
+  /** 设置页裁剪变更订阅(configure 的 settings)与分区注册表订阅 */
   private offSettings?: () => void;
+  private offRegistry?: () => void;
 
   static styles = [
     theme,
@@ -119,19 +127,24 @@ export class GrfSettingsNav extends GrfPanel {
   connectedCallback(): void {
     super.connectedCallback();
     this.offSettings = onSettingsChange(() => this.requestUpdate());
+    this.offRegistry = registry.settings.subscribe(() => this.requestUpdate());
   }
 
   disconnectedCallback(): void {
     this.offSettings?.();
     this.offSettings = undefined;
+    this.offRegistry?.();
+    this.offRegistry = undefined;
     super.disconnectedCallback();
   }
 
   protected updated(): void {
-    // 智能体分组被宿主隐藏时,当前分区若落在其中则退回外观
-    // (shell 的分区状态经事件驱动,这里纠正避免中央区渲染死角)
-    if (this.agentHidden && AGENT_SECTIONS.has(this.section)) {
-      this.fire('grf-settings-section', 'appearance');
+    // 当前分区不可见(被 hide / agentGroup 隐藏 / 定义被移除)时,退回
+    // 第一个可见分区(shell 的分区状态经事件驱动,这里纠正避免中央区
+    // 渲染死角)
+    const list = this.visibleDefs();
+    if (list.length && !list.some((d) => d.id === this.section)) {
+      this.fire('grf-settings-section', list[0].id);
     }
   }
 
@@ -140,41 +153,40 @@ export class GrfSettingsNav extends GrfPanel {
     return getSettingsConfig(this.scope)?.agentGroup === false;
   }
 
+  /** registry.settings 里当前可见的分区定义(按 order 排序;agentGroup
+   * 隐藏时滤掉「智能体」组)。 */
+  private visibleDefs(): SettingsSectionDef[] {
+    const ctx: PanelContext = { scope: this.scope, store: this.store, desktop: inWails() };
+    return registry.settings.visible(ctx).filter((d) => !(this.agentHidden && d.group === AGENT_GROUP));
+  }
+
   render() {
-    // 两组分区:基础(界面与模型)/ 智能体(harness 运行时扩展)
-    const groups: [string, [SettingsSection, string, string][]][] = [
-      [
-        '基础设置',
-        [
-          ['appearance', '外观', icon.palette],
-          ['models', '模型', icon.brain],
-        ],
-      ],
-      [
-        '智能体',
-        [
-          ['harness', 'Harness', icon.settings],
-          ['plugins', '插件', icon.zap],
-          ['mcp', 'MCP', icon.db],
-          ['skills', '技能', icon.wrench],
-        ],
-      ],
-    ];
-    const shown = this.agentHidden ? groups.filter(([, items]) => items.every(([k]) => !AGENT_SECTIONS.has(k))) : groups;
+    // 分区按 group 归组(内置:基础设置/智能体;三方缺省「扩展」),组间
+    // 顺序按组内首个条目的 order 决定(条目列表本身已按 order 排序)
+    const groups: [string, SettingsSectionDef[]][] = [];
+    for (const def of this.visibleDefs()) {
+      const glabel = def.group ?? DEFAULT_GROUP;
+      let g = groups.find(([l]) => l === glabel);
+      if (!g) {
+        g = [glabel, []];
+        groups.push(g);
+      }
+      g[1].push(def);
+    }
     return html`
       <div class="back" title="返回工作区" @click=${() => this.fire('grf-close-settings')}>
         ${unsafeHTML(icon.arrowLeft)}
         <span>返回工作区</span>
       </div>
       <div class="list">
-        ${shown.map(
+        ${groups.map(
           ([glabel, items]) => html`
             <div class="title">${glabel}</div>
             ${items.map(
-              ([key, label, ic]) => html`
-                <div class="item ${this.section === key ? 'on' : ''}" @click=${() => this.fire('grf-settings-section', key)}>
-                  ${unsafeHTML(ic)}
-                  <span>${label}</span>
+              (def) => html`
+                <div class="item ${this.section === def.id ? 'on' : ''}" @click=${() => this.fire('grf-settings-section', def.id)}>
+                  ${unsafeHTML(def.icon ?? icon.settings)}
+                  <span>${def.label}</span>
                 </div>
               `,
             )}

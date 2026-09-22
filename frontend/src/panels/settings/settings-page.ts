@@ -1,14 +1,18 @@
 // settings-page.ts — <grf-settings-page>:设置视图的主体工作面板(黑色
 // 圆角大卡,与 <grf-chat> 同视觉;头部空白区同为窗口拖拽/双击缩放区)。
-// 分区按左栏两级分组:基础(外观/模型)与智能体(Harness 服务与连接、
-// 插件、MCP、技能——后三者为占位)。改动即时生效并自动保存 —— 桌面态
-// 配置落 config.json,外观镜像 localStorage;左栏导航由 app-shell 提供。
+// 分区与左栏导航一致,一律经 registry.settings 装配:内置分区(render 留
+// 空,由本组件内部实现——外观/模型/Harness 服务与连接、插件、MCP、技能)
+// 与三方自定义分区(render 自绘,同 id 重复 add 可覆写内置分区页面)。
+// 改动即时生效并自动保存 —— 桌面态配置落 config.json,外观镜像
+// localStorage;左栏导航由 app-shell 提供。
 import { css, html, nothing } from 'lit';
+import type { TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { inWails } from '../../host/bridge';
+import { registry, type PanelContext, type SettingsSectionDef } from '../../registry/registry';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
 import { settingsStore, ACCENTS, FONT_MIN, FONT_MAX, type ThemeMode } from '../../core/settings/settings-store';
 import type { ProviderDTO, PluginDTO } from '../../host/bridge';
@@ -34,6 +38,11 @@ export class GrfSettingsPage extends GrfPanel {
   /** 常规分区下的服务状态轮询(仅桌面态) */
   private srvTimer?: ReturnType<typeof setInterval>;
   private storeUnsub?: () => void;
+  /** 分区注册表订阅(三方 add/hide/remove 时重渲;池中失效条目一并清掉) */
+  private offRegistry?: () => void;
+  /** 三方自定义分区的元素池:render 返回 HTMLElement 时跨分区切换保活
+   * (与右栏 tab 约定一致);def 被替换/移除时条目失效、重新构建 */
+  private customPool = new Map<string, { def: SettingsSectionDef; el: HTMLElement }>();
   /** 头部空白区为窗口拖拽区(移动/双击缩放;非桌面态静默) */
   private tdrag: TitleDrag | null = null;
   /** 模型分区:当前选中的供应商名(右侧展示其详情) */
@@ -524,6 +533,12 @@ export class GrfSettingsPage extends GrfPanel {
     super.connectedCallback();
     this.tdrag = makeTitleDrag('button');
     this.storeUnsub = settingsStore.subscribe(() => this.requestUpdate());
+    this.offRegistry = registry.settings.subscribe(() => {
+      for (const [id, entry] of this.customPool) {
+        if (registry.settings.get(id) !== entry.def) this.customPool.delete(id);
+      }
+      this.requestUpdate();
+    });
     if (this.section === 'models' || this.section === 'harness') void settingsStore.loadModelCfg();
     if (this.section === 'plugins' || this.section === 'mcp') void settingsStore.loadPluginsCfg();
     if (this.section === 'skills') void settingsStore.loadSkillsCfg();
@@ -539,6 +554,8 @@ export class GrfSettingsPage extends GrfPanel {
     this.tdrag = null;
     this.storeUnsub?.();
     this.storeUnsub = undefined;
+    this.offRegistry?.();
+    this.offRegistry = undefined;
     if (this.srvTimer) clearInterval(this.srvTimer);
     this.srvTimer = undefined;
     if (this.deleteTimer) clearTimeout(this.deleteTimer);
@@ -571,15 +588,11 @@ export class GrfSettingsPage extends GrfPanel {
   }
 
   render() {
-    const titles: Record<SettingsSection, [string, string]> = {
-      appearance: ['外观', icon.palette],
-      models: ['模型', icon.brain],
-      harness: ['Harness', icon.settings],
-      plugins: ['插件', icon.zap],
-      mcp: ['MCP', icon.db],
-      skills: ['技能', icon.wrench],
-    };
-    const [title, ic] = titles[this.section];
+    // 标题与图标取分区定义(三方自定义分区经 registry.settings.add 注册;
+    // 未注册的分区 id 回落通用设置图标 + 原始 id 展示)
+    const def = registry.settings.get(this.section);
+    const title = def?.label ?? this.section;
+    const ic = def?.icon ?? icon.settings;
     return html`
       <header
         class=${[this.leftLights && !this.leftOn ? 'lights' : '', this.winControls ? 'win' : ''].filter(Boolean).join(' ')}
@@ -594,21 +607,47 @@ export class GrfSettingsPage extends GrfPanel {
         <span class="saved ${this.savedFlash ? 'show' : ''}">${unsafeHTML(icon.check)} 已保存</span>
       </header>
       <div class="scroll">
-        <div class="body ${this.section === 'models' ? 'wide' : ''}">
-          ${this.section === 'appearance'
-            ? this.renderAppearance()
-            : this.section === 'models'
-              ? this.renderModels()
-              : this.section === 'harness'
-                ? this.renderHarness()
-                : this.section === 'plugins'
-                  ? this.renderPlugins()
-                  : this.section === 'mcp'
-                    ? this.renderMcp()
-                    : this.renderSkills()}
-        </div>
+        <div class="body ${this.section === 'models' || def?.wide ? 'wide' : ''}">${this.renderSection(def)}</div>
       </div>
     `;
+  }
+
+  /** 三方分区渲染上下文(与右栏 tab 同构;设置视图无会话上下文,
+   * sessionId 为空、shell 为 undefined)。 */
+  private get panelCtx(): PanelContext {
+    return { scope: this.scope, store: this.store, desktop: inWails() };
+  }
+
+  /** 分区主体:定义带 render(三方自定义,或对内置分区的覆写)时渲染之
+   * (返回 HTMLElement 进池保活);否则回落内置实现;未知分区给出占位。 */
+  private renderSection(def: SettingsSectionDef | undefined): TemplateResult | HTMLElement {
+    if (def?.render) {
+      const cached = this.customPool.get(def.id);
+      if (cached && cached.def === def) return cached.el;
+      const out = def.render(this.panelCtx);
+      if (out instanceof HTMLElement) {
+        this.customPool.set(def.id, { def, el: out });
+        return out;
+      }
+      this.customPool.delete(def.id);
+      return out;
+    }
+    switch (this.section) {
+      case 'appearance':
+        return this.renderAppearance();
+      case 'models':
+        return this.renderModels();
+      case 'harness':
+        return this.renderHarness();
+      case 'plugins':
+        return this.renderPlugins();
+      case 'mcp':
+        return this.renderMcp();
+      case 'skills':
+        return this.renderSkills();
+      default:
+        return html`<div class="sec"><div class="hint">分区「${def?.label ?? this.section}」不存在或已被移除。</div></div>`;
+    }
   }
 
   // ---------- Harness:服务与连接 + gh 常用设置 ----------

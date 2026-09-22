@@ -9,9 +9,7 @@ import '../panels/sessions/session-list';
 import '../panels/settings/settings-nav';
 import '../panels/settings/settings-page';
 import '../panels/inspector/browser';
-
-/** 会话列表导航设置分区的状态类型(shell 经 grf-nav-state 持有)。 */
-export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills';
+import type { SettingsSection } from '../panels/settings/settings-nav';
 
 let registered = false;
 
@@ -67,4 +65,15 @@ export function registerBuiltinCommon(): void {
     width: 560,
     render: (ctx) => html`<grf-browser scope=${ctx.scope}></grf-browser>`,
   });
+
+  // ---------- 设置分区 ----------
+  // 内置分区:render 留空,由 settings-page 内部实现;三方经
+  // registry.settings.add 注入自定义分区(或同 id 覆写内置分区页面)、
+  // hide/show 裁剪,与导航/右栏/底栏同一套 API。
+  registry.settings.add({ id: 'appearance', label: '外观', icon: icon.palette, group: '基础设置', order: 10 });
+  registry.settings.add({ id: 'models', label: '模型', icon: icon.brain, group: '基础设置', order: 20 });
+  registry.settings.add({ id: 'harness', label: 'Harness', icon: icon.settings, group: '智能体', order: 30 });
+  registry.settings.add({ id: 'plugins', label: '插件', icon: icon.zap, group: '智能体', order: 40 });
+  registry.settings.add({ id: 'mcp', label: 'MCP', icon: icon.db, group: '智能体', order: 50 });
+  registry.settings.add({ id: 'skills', label: '技能', icon: icon.wrench, group: '智能体', order: 60 });
 }

@@ -38,6 +38,7 @@ export type {
   SideTabDef,
   SideTabInstance,
   BottomTabDef,
+  SettingsSectionDef,
   UserConfig,
   SideTopConfig,
   SettingsConfig,

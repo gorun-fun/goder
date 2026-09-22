@@ -71,7 +71,7 @@
     <div class="host-nav">
       <span class="brand">三方应用 <em>Console</em></span>
       <span class="note"
-        >本页演示:宿主顶栏 + grf-app-shell(经 registry 裁剪/新增左栏、右栏、底栏条目;?panels=free 切换自由组合形态)</span
+        >本页演示:宿主顶栏 + grf-app-shell(经 registry 裁剪/新增左栏、右栏、底栏、设置分区条目;?panels=free 切换自由组合形态)</span
       >
     </div>
     <div class="embed-row" id="host-shell">
@@ -139,6 +139,32 @@
           </div>
         `,
       });
+
+      // 新增:自定义设置分区(设置左栏出现「宿主」分组,分区页面完全自绘)
+      registry.settings.add({
+        id: 'host-brand',
+        label: '平台设置',
+        group: '宿主',
+        order: 15, // 排在「基础设置」之前;缺省归入「扩展」分组、排在内置之后
+        render: () => {
+          // HTMLElement 形态:跨分区切换保活(有状态控件不丢状态)
+          const el = document.createElement('div');
+          el.style.cssText = 'display:grid;gap:10px;font-size:12.5px;line-height:1.7;color:#8b909c';
+          el.innerHTML =
+            '<div style="color:#d7dae0;font-weight:650">平台设置(宿主自定义分区)</div>' +
+            '<div>经 <code>registry.settings.add</code> 注册,页面由宿主自绘;同 id 重复 add 可覆写内置分区页面。</div>';
+          const row = document.createElement('label');
+          row.style.cssText = 'display:flex;align-items:center;gap:8px;color:#d7dae0;cursor:pointer';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = localStorage.getItem('demo-host-banner') === '1';
+          cb.onchange = () => localStorage.setItem('demo-host-banner', cb.checked ? '1' : '0');
+          row.append(cb, document.createTextNode('演示开关(存 localStorage)'));
+          el.append(row);
+          return el;
+        },
+      });
+
       const shellBtn = document.createElement('button');
       shellBtn.textContent = '切到「宿主帮助」';
       shellBtn.style.cssText = 'margin-left:auto;background:#1b1c22;border:1px solid #2a2d36;color:#8b909c;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer';

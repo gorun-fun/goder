@@ -1,7 +1,8 @@
-// registry.ts — UI 注册表:整个界面的三个可装配区域。
-//   nav    左栏导航视图(默认:会话列表 / 设置)
-//   side   右栏 tab(默认:详情 / 审查 / 终端 / 浏览器 / 文件 / 事件台)
-//   bottom 底栏 tab(默认:终端)
+// registry.ts — UI 注册表:整个界面的四个可装配区域。
+//   nav      左栏导航视图(默认:会话列表 / 设置)
+//   side     右栏 tab(默认:详情 / 审查 / 终端 / 浏览器 / 文件 / 事件台)
+//   bottom   底栏 tab(默认:终端)
+//   settings 设置分区(默认:外观/模型/Harness/插件/MCP/技能)
 //
 // 内置面板与三方自定义条目走同一条注册路径 —— 三方可以 hide/show 增删
 // 任意条目,或注册带自定义渲染的新条目(开放性的核心扩展点)。
@@ -110,6 +111,31 @@ export interface BottomTabDef {
   visible?: (ctx: PanelContext) => boolean;
 }
 
+/** 设置分区定义:设置左栏导航的一级条目 + 设置页中央的一个分区页面。
+ * 内置分区(外观/模型/Harness/插件/MCP/技能)在 builtin-common 注册且
+ * render 留空(由 settings-page 内部实现);三方条目给出 render 即自绘
+ * 分区页面,同 id 重复 add 可整体覆写内置分区(含页面)。 */
+export interface SettingsSectionDef {
+  id: string;
+  /** 展示名(左栏条目与设置页标题) */
+  label: string;
+  /** svg 字符串(缺省用通用设置图标) */
+  icon?: string;
+  /** 左栏分组标题;缺省归入「扩展」。内置分组为「基础设置」「智能体」,
+   * 三方条目可复用内置分组名并入其中 */
+  group?: string;
+  /** 排序权重,小在前;缺省按注册顺序追加在末尾(内置:外观 10 / 模型
+   * 20 / Harness 30 / 插件 40 / MCP 50 / 技能 60) */
+  order?: number;
+  /** 分区页面用宽画布(与内置模型分区同款 880px;默认 620px) */
+  wide?: boolean;
+  /** 分区页面内容。返回 HTMLElement 跨分区切换保活(由 settings-page
+   * 维护元素池);返回 TemplateResult 随渲染重建 */
+  render?: (ctx: PanelContext) => TemplateResult | HTMLElement;
+  /** 是否展示该分区(按上下文动态显隐,如仅桌面) */
+  visible?: (ctx: PanelContext) => boolean;
+}
+
 type Listener = () => void;
 
 /** Zone:一个区域内的条目定义集合 + 显隐覆写(带变更通知)。 */
@@ -183,9 +209,11 @@ class GrfRegistry {
   readonly side = new Zone<SideTabDef>();
   /** 底栏 tab */
   readonly bottom = new Zone<BottomTabDef>();
+  /** 设置分区(设置左栏条目 + 设置页分区) */
+  readonly settings = new Zone<SettingsSectionDef>();
 
   subscribe(fn: Listener): () => void {
-    const offs = [this.nav.subscribe(fn), this.side.subscribe(fn), this.bottom.subscribe(fn)];
+    const offs = [this.nav.subscribe(fn), this.side.subscribe(fn), this.bottom.subscribe(fn), this.settings.subscribe(fn)];
     return () => offs.forEach((off) => off());
   }
 }

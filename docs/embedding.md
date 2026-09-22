@@ -1,8 +1,8 @@
 # 三方 Web 集成指南
 
 把 grf-harness 的会话列表 / 聊天 / 详情栏 / 事件台嵌入你自己的 web 应用。
-与"裸 grf-harness 可配置开启哪些工具"对齐:界面的三个装配区域
-(左栏导航、右栏 tab、底栏 tab)全部经 **registry 注册表**装配 ——
+与"裸 grf-harness 可配置开启哪些工具"对齐:界面的四个装配区域
+(左栏导航、右栏 tab、底栏 tab、设置分区)全部经 **registry 注册表**装配 ——
 内置条目与你的自定义条目走同一条 API,可自由增删裁剪。
 
 ## 1. 引入
@@ -85,12 +85,14 @@ configure('myscope', {
 
 ## 4. registry:界面定制(核心扩展点)
 
-三个区域,各是一个条目集合(`add/remove/hide/show/items/visible`):
+四个区域,各是一个条目集合(`add/remove/hide/show/items/visible`):
 
 - `registry.nav` —— 左栏导航视图(内置:`sessions` 会话、`settings` 设置)
 - `registry.side` —— 右栏 tab(内置:`detail` `browser` `console` `review`
   `terminal` `file`,后三者仅桌面形态可见)
 - `registry.bottom` —— 底栏 tab(内置:`terminal`,仅桌面)
+- `registry.settings` —— 设置分区(内置:`appearance` 外观、`models` 模型、
+  `harness` `plugins` `mcp` `skills` 智能体组)
 
 ### 裁剪内置条目
 
@@ -140,6 +142,36 @@ registry.bottom.add({
 });
 ```
 
+### 自定义设置分区(registry.settings)
+
+设置页(左栏分区导航 + 中央分区页面)与三区同构:内置分区也是注册条目,
+第三方可新增自己的设置分区并自绘分区页面,也可裁剪或覆写内置分区。
+
+```js
+registry.settings.add({
+  id: 'brand',
+  label: '平台设置',
+  group: '平台',        // 左栏分组标题;缺省归入「扩展」。
+                        // 内置分组名「基础设置」「智能体」可复用(并入其中)
+  order: 15,            // 排序权重(内置:外观 10 / 模型 20 / Harness 30 /
+                        // 插件 40 / MCP 50 / 技能 60);缺省追加在内置之后
+  wide: true,           // 可选:分区页面用宽画布(880px,默认 620px)
+  icon: '<svg …>…</svg>', // 可选;缺省用通用设置图标
+  render: (ctx) => html`<div>…自绘分区页面…</div>`,
+});
+```
+
+- `render` 返回模板随渲染重建;返回 **HTMLElement 跨分区切换保活**(适合
+  有状态控件),页面在 shadow DOM 内、宿主样式进不去 —— 内容用内联样式,
+  颜色可复用会继承穿透的 `--grf-*` 变量
+- `ctx` 为 `PanelContext`(设置视图无会话上下文:`sessionId` 为空、
+  `shell` 为 undefined;`desktop` 可用来做形态降级)
+- **覆写内置分区**:同 id 重复 `add` 即整体替换(如 `id: 'appearance'`
+  带自定义 `render` = 换掉内置「外观」页)
+- **裁剪**:`registry.settings.hide('models')` 隐藏内置或自定义分区
+  (当前分区被隐藏时自动退回第一个可见分区),`show` 恢复
+- `visible(ctx)` 按上下文动态显隐
+
 **PanelContext**(渲染函数入参):`scope`(数据域名)、`store`(该 scope 的
 共享数据域:会话/事件流/连接状态,见类型 `GrfScope`)、`sessionId`(当前
 会话)、`desktop`(是否 wails 桌面态)、`shell`(app-shell 内装配时的布局
@@ -178,7 +210,7 @@ DOM 内渲染(宿主样式进不去,样式须内联),跨重渲保活,配置变�
 重建;未配置时该行保持原样。典型用途:嵌入平台在左上角放返回自家
 站点的入口按钮。
 
-### 设置页裁剪
+### 设置页裁剪与定制
 
 设置页的「智能体」分组(Harness/插件/MCP/技能)与「模型」供应商管理,
 网页形态经 gh server 的 `/v1/agent/*` 配置 API 读写(需较新版本 gh;
@@ -188,6 +220,8 @@ API Key/MCP Token 掩码——不下发明文,空值=保留)。多用户网关�
 播种的初始 settings.json(一次性快照,之后独立)。gh server 过旧或未
 启用隔离时这些分区回落为引导文案;平台不开放管理入口时仍可经
 `configure(scope, { settings: { agentGroup: false } })` 整组隐藏。
+新增自定义分区、覆写/隐藏内置分区见上文「自定义设置分区
+(registry.settings)」。
 
 ## 5. 服务端接入:grf-web-serve 网关
 

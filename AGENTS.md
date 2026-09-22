@@ -78,8 +78,10 @@ frontend/src/
            时模型)/ store(emitter 响应式基座、scope 编排、persistence、
            automation 操作员 system_prompt 与 <grf-task> 任务块解析)/
            settings(设置状态)
-  registry/ UI 注册表:nav(左栏导航)/ side(右栏 tab)/ bottom(底栏 tab)
-           三区条目 —— 内置与三方自定义同一条 add/remove/hide/show API
+  registry/ UI 注册表:nav(左栏导航)/ side(右栏 tab)/ bottom(底栏
+           tab)/ settings(设置分区,内置分区 render 留空、由 settings-page
+           内部实现)四区条目 —— 内置与三方自定义同一条
+           add/remove/hide/show API
   panels/  按功能分组:chat(chat-panel/messages/status-pop(含自动化任务
            执行入口)/composer/工具卡/ask/审批/任务卡)、sessions
            (session-list,桌面态含「自动化」操作员类别)、files(file-list/
@@ -104,12 +106,14 @@ frontend/src/
   `frontend/src/host/bridge.ts`,纯 web 态必须 no-op 回退。
 - 桌面态检测用 `inWails()`(协议/hostname + 真实调用探针),不能只看
   `window._wails`(浏览器懒加载 runtime 后也会置位)。
-- **registry 不变量**:界面三区(左导航/右栏/底栏)的条目一律经
-  `registry/registry.ts` 注册;新内置面板 = builtin-common(通用)或
-  builtin-desktop(桌面专属,visible 守卫 `ctx.desktop`)加条目,
-  不许在 chat-panel/app-shell 里硬编码新面板类型。桌面专属模块
-  (terminal/review/file-view)只能被 entries/desktop.ts 或
-  builtin-desktop 引用,嵌入产物不得包含。
+- **registry 不变量**:界面四个装配区(左导航/右栏/底栏/设置分区)的
+  条目一律经 `registry/registry.ts` 注册;新内置面板 = builtin-common
+  (通用)或 builtin-desktop(桌面专属,visible 守卫 `ctx.desktop`)加
+  条目,不许在 chat-panel/app-shell 里硬编码新面板类型。设置分区同理:
+  内置分区在 builtin-common 注册(render 留空、由 settings-page 内部
+  实现渲染),settings-nav/settings-page 只按 registry 装配,不硬编码
+  分区清单。桌面专属模块(terminal/review/file-view)只能被
+  entries/desktop.ts 或 builtin-desktop 引用,嵌入产物不得包含。
 - 嵌入库保持零外部依赖、shadow DOM 样式自隔离;换肤只经 `--grf-*` CSS 变量。
 - gh server 无 CORS 头:浏览器端一律走同源 `/grf-api`(桌面反代或网关),
   不要直连;web 形态默认 baseUrl 为同源 `/grf-api`(scope.ts 的
