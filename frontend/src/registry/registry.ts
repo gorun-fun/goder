@@ -354,3 +354,24 @@ export function onModelGuardChange(fn: Listener): () => void {
   modelGuardListeners.add(fn);
   return () => modelGuardListeners.delete(fn);
 }
+
+// ---------- 宿主文件打开路由(embed.configure 的 fileOpen 落点) ----------
+
+/** 文件打开钩子:工具卡文件名/文件树/console open_file 等「点文件 → 右栏」
+ * 的统一入口先问嵌入方,返回 true 表示已接管(典型如嵌入方把阶段文档
+ * 路由到自己的业务面板),goder 不再打开内置「文件」tab;返回 false/
+ * 未配置则走内置行为。默认无钩子 —— 行为与原生完全一致。 */
+export type FileOpenHook = (f: { path: string; name?: string; rel?: string }) => boolean;
+
+const fileOpens = new Map<string, FileOpenHook>();
+
+/** 配置某 scope 的文件打开钩子(undefined = 清除,恢复内置路由)。 */
+export function setFileOpen(scope: string, fn: FileOpenHook | undefined): void {
+  if (fn) fileOpens.set(scope, fn);
+  else fileOpens.delete(scope);
+}
+
+/** 读取某 scope 的文件打开钩子。 */
+export function getFileOpen(scope: string): FileOpenHook | undefined {
+  return fileOpens.get(scope);
+}

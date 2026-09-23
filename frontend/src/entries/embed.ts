@@ -31,7 +31,7 @@ export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settin
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
-export { registry, sideTabId, setUser, getUser, setSideTop, getSideTop, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard } from '../registry/registry';
+export { registry, sideTabId, setUser, getUser, setSideTop, getSideTop, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard, setFileOpen, getFileOpen } from '../registry/registry';
 export type {
   PanelContext,
   ShellState,
@@ -48,6 +48,7 @@ import { setUser } from '../registry/registry';
 import { setSideTop } from '../registry/registry';
 import { setSettingsConfig } from '../registry/registry';
 import { setModelGuard } from '../registry/registry';
+import { setFileOpen, type FileOpenHook } from '../registry/registry';
 import type { UserConfig } from '../registry/registry';
 import type { SideTopConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
@@ -83,7 +84,10 @@ registerBuiltinCommon();
  * default_skill/policy 等;草稿落定时展开在项目 defaults 之前,逐字段
  * 被其覆盖——有 defaults 的项目不受影响)。ungroupedSessions: false
  * 禁止未分组会话:无激活会话直接发送时兜底改绑最近使用的项目,左栏
- * 「未分组会话」分组不再渲染。 */
+ * 「未分组会话」分组不再渲染。fileOpen 供嵌入方接管「点文件 → 右栏」
+ * 的统一路由(工具卡文件名/文件树/console open_file):钩子返回 true
+ * 表示已接管(典型如把阶段文档路由到嵌入方自己的业务面板),goder 不
+ * 再打开内置「文件」tab;返回 false/未配置走内置行为。 */
 export function configure(
   scope: string,
   cfg: {
@@ -98,6 +102,7 @@ export function configure(
     modelGuard?: boolean;
     sessionDefaults?: Partial<GrfSessionConfig>;
     ungroupedSessions?: boolean;
+    fileOpen?: FileOpenHook;
   },
 ): void {
   if (cfg.user !== undefined) setUser(scope, cfg.user);
@@ -106,6 +111,7 @@ export function configure(
   if (cfg.modelGuard !== undefined) setModelGuard(scope, cfg.modelGuard);
   if (cfg.sessionDefaults !== undefined) setSessionDefaults(scope, cfg.sessionDefaults);
   if (cfg.ungroupedSessions !== undefined) setUngroupedSessions(scope, cfg.ungroupedSessions);
+  if (cfg.fileOpen !== undefined) setFileOpen(scope, cfg.fileOpen);
   configureScope(scope, cfg);
 }
 

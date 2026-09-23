@@ -409,7 +409,7 @@ export class GrfAskForm extends LitElement {
         if (q.multi_select) {
           answers[q.id] = [...(sel ?? []), ...(other ? [other] : [])];
         } else {
-          answers[q.id] = other || [...(sel ?? [])][0] ?? '';
+          answers[q.id] = other || ([...(sel ?? [])][0] ?? '');
         }
       } else {
         const input = this.renderRoot.querySelector<HTMLTextAreaElement>(

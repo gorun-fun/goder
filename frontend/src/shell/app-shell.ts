@@ -15,7 +15,7 @@ import { inWails } from '../host/bridge';
 import { isMacDesktop } from '../host/platform';
 import { closeWindow, isWindowMaximised, isFramelessDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
-import { registry, sideTabId, getModelGuard, onModelGuardChange, getSideTop, onSideTopChange, type PanelContext, type SideTabInstance } from '../registry/registry';
+import { registry, sideTabId, getModelGuard, onModelGuardChange, getSideTop, onSideTopChange, getFileOpen, type PanelContext, type SideTabInstance } from '../registry/registry';
 import { initConsoleUi, reportConsoleUi, visibleTermIds } from './console-ui';
 import { settingsStore } from '../core/settings/settings-store';
 import '../panels/files/file-list';
@@ -282,10 +282,12 @@ export class GrfAppShell extends GrfPanel {
     this.addEventListener('grf-close-files', () => (this.filesView = null));
     // 右栏确保展开(file-view html 眼睛开浏览器 tab 时;已开则无变化)
     this.addEventListener('grf-show-sidebar', () => (this.showSidebar = true));
-    // 左栏文件树点文件:右栏为该文件开一个独立 tab 预览(已开则激活)
+    // 左栏文件树点文件:右栏为该文件开一个独立 tab 预览(已开则激活)。
+    // 宿主 fileOpen 钩子优先(embed.configure 的 fileOpen 落点):返回 true
+    // = 嵌入方已接管(路由到自己的面板),不再打开内置「文件」tab。
     this.addEventListener('grf-open-file', (e: Event) => {
       const f = (e as CustomEvent).detail as { path: string; name: string; rel?: string };
-      this.openSideTab({ defId: 'file', key: f.path, title: f.rel ?? f.name });
+      this.hostOpenFile(f);
     });
     window.addEventListener('pointermove', this.onDrag);
     window.addEventListener('pointerup', this.stopDrag);
@@ -301,7 +303,7 @@ export class GrfAppShell extends GrfPanel {
       setSidebar: (on) => (this.showSidebar = on),
       setBottom: (on) => (this.showBottom = on),
       setSessions: (on) => (this.showSessions = on),
-      openFile: (f) => this.openSideTab({ defId: 'file', key: f.path, title: f.rel ?? f.name ?? f.path }),
+      openFile: (f) => this.hostOpenFile(f),
       focusSession: (id) => this.store?.selectSession(id),
       openBrowser: (url) => this.consoleOpenBrowser(url),
     },
@@ -327,6 +329,14 @@ export class GrfAppShell extends GrfPanel {
     window.removeEventListener('pointerup', this.stopDrag);
     window.removeEventListener('resize', this.syncMaximised);
     super.disconnectedCallback();
+  }
+
+  /** 「点文件 → 右栏」统一路由:宿主 fileOpen 钩子优先(返回 true = 已
+   *  接管),否则走内置「文件」tab(console 来源缺 name 时 title 退全路径)。 */
+  private hostOpenFile(f: { path: string; name?: string; rel?: string }): void {
+    const hook = getFileOpen(this.scope);
+    if (hook?.(f)) return;
+    this.openSideTab({ defId: 'file', key: f.path, title: f.rel ?? f.name ?? f.path });
   }
 
   /** 嵌入态启动模型守卫本体(见 connectedCallback 处注释;连接时与
