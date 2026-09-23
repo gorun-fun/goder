@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# start.sh — goder 桌面 App 生命周期管理。
-#   ./start.sh build [args]   构建并组装 .app(无参数默认 app 目标;透传 ./build.sh)
-#   ./start.sh install [目录] 构建 .app 并安装到本地(默认 /Applications)
-#   ./start.sh start          启动(缺二进制时自动构建;后台运行,PID 记录在 .run/)
-#   ./start.sh stop           停止(优雅退出;并回收 app 托管的 gh server)
-#   ./start.sh restart        重启
+# run.sh — goder 桌面 App 生命周期管理。
+#   ./run.sh build [args]   构建并组装 .app(无参数默认 app 目标;透传 ./build.sh)
+#   ./run.sh install [目录] 构建 .app 并安装到本地(默认 /Applications)
+#   ./run.sh start          启动(缺二进制时自动构建;后台运行,PID 记录在 .run/)
+#   ./run.sh stop           停止(优雅退出;并回收 app 托管的 gh server)
+#   ./run.sh restart        重启
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -52,7 +52,7 @@ running_pid() {
 }
 
 do_build() {
-  # 无参数默认 `app`:经 start.sh 触发的构建一律产出 .app 包
+  # 无参数默认 `app`:经 run.sh 触发的构建一律产出 .app 包
   if [ $# -eq 0 ]; then
     set -- app
   fi

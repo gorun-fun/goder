@@ -12,7 +12,7 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
 - `./build.sh embed` — 仅构建嵌入库 `frontend/dist-embed/grf-ui.js`
 - `./build.sh web` — 纯 web 形态(grf-web-serve 网关:静态 + `/grf-api`,
   http://127.0.0.1:7700;身份模式与多用户参数见 cmd/grf-web-serve 头注释)
-- `./start.sh start|stop|restart` — 桌面 App 生命周期(后台运行,PID/日志在 `.run/`)
+- `./run.sh start|stop|restart` — 桌面 App 生命周期(后台运行,PID/日志在 `.run/`)
 - 类型检查:`cd frontend && npx tsc --noEmit`;Go:`go build ./... && go vet ./...`
 - (无自动化测试;E2E 为真实 gh server + 真实模型的手动浏览器验证,
   playwright-cli 或浏览器驱动)

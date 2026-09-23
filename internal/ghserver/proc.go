@@ -284,7 +284,7 @@ func (p *Proc) cleanupLocked() {
 
 // probeAdopt 探测 addr 上是否已有健康实例且令牌已落盘(上次遗留可收养)。
 // 返回(令牌, 监听进程 pid, 是否可收养);pid 探测失败为 0(不影响收养,
-// 仅退出回收时按 pid 杀不到,由 start.sh stop 兜底)。
+// 仅退出回收时按 pid 杀不到,由 run.sh stop 兜底)。
 func probeAdopt(cfg ProcConfig) (string, int, bool) {
 	tokenPath := filepath.Join(cfg.DataDir, "token")
 	b, err := os.ReadFile(tokenPath)
