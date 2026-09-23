@@ -491,6 +491,18 @@ export class GrfScope extends Emitter {
     }
   }
 
+  /** 更新项目 path(嵌入方对账用):项目索引是浏览器本地持久化,服务端
+   *  工作区迁移/重部署后本地 path 可能陈旧,嵌入方按当前项目表逐个
+   *  校正,path 传 undefined 清除。 */
+  setProjectPath(pid: string, path: string | undefined): void {
+    const p = this.index.projects.find((x) => x.id === pid);
+    if (!p || p.path === path) return;
+    if (path) p.path = path;
+    else delete p.path;
+    this.persistIndex();
+    this.notify();
+  }
+
   deleteProject(pid: string, archiveSessions: boolean): void {
     if (pid === UNGROUPED) return;
     const sids = Object.entries(this.index.sessions)
