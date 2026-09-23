@@ -60,6 +60,9 @@ export class GrfSettingsPage extends GrfPanel {
   /** 待二次确认删除的供应商名 */
   private pendingDelete: string | null = null;
   private deleteTimer?: ReturnType<typeof setTimeout>;
+  /** 左栏供应商列表拖拽排序:拖动项 / 悬停目标项(仅可写配置启用) */
+  private dragProv: string | null = null;
+  @state() private dragOverProv: string | null = null;
 
   static styles = [
     theme,
@@ -329,6 +332,16 @@ export class GrfSettingsPage extends GrfPanel {
       .prov-item.on .cnt {
         color: inherit;
         opacity: 0.8;
+      }
+      /* 拖拽排序反馈:可写配置整行可抓取,悬停目标高亮、拖动项半透明 */
+      .prov-list .prov-item[draggable='true'] {
+        cursor: grab;
+      }
+      .prov-list .prov-item.dragging {
+        opacity: 0.45;
+      }
+      .prov-list .prov-item.over {
+        box-shadow: inset 0 2px 0 var(--grf-accent);
       }
       .add-prov {
         justify-content: flex-start;
@@ -799,6 +812,12 @@ export class GrfSettingsPage extends GrfPanel {
     return name === 'grf-browser' || name === 'grf-computer' || name === 'goder-console';
   }
 
+  /** 内置技能(与 Go 侧 agentconfig.go 的 builtinSkills 对齐,两边同改):
+   * 不可删/编辑,可禁用(禁用后启动烙写不再碰它)。 */
+  private isBuiltinSkill(name: string): boolean {
+    return name === 'grf-auto';
+  }
+
   /** 插件分区:平铺卡片,只做安装与删除;内置(浏览器/电脑操作)不可删。 */
   private renderPlugins() {
     const pc = settingsStore.pluginsCfg;
@@ -1117,16 +1136,17 @@ export class GrfSettingsPage extends GrfPanel {
                     <div class="tile ${s.disabled ? 'off' : ''} ${this.selSkill === s.name ? 'on' : ''}">
                       <div class="corner">
                         ${s.disabled ? html`<span class="tag">已禁用</span>` : nothing}
+                        ${this.isBuiltinSkill(s.name) ? html`<span class="tag">内置</span>` : nothing}
                         ${ro
                           ? nothing
                           : html`<button class="ghost" @click=${() => void this.toggleSkill(s.name, s.disabled)}>
                               ${s.disabled ? '启用' : '禁用'}
                             </button>`}
                       </div>
-                      <div class="tname" title="点击编辑" style="cursor:pointer" @click=${() => void this.openSkill(s.name)}>${s.name}</div>
+                      <div class="tname" title=${this.isBuiltinSkill(s.name) ? '点击查看' : '点击编辑'} style="cursor:pointer" @click=${() => void this.openSkill(s.name)}>${s.name}</div>
                       <div class="tsub" title=${s.description}>${s.description || '—'}</div>
                       <div class="tacts">
-                        ${ro
+                        ${ro || this.isBuiltinSkill(s.name)
                           ? nothing
                           : html`<button
                               class="ghost ${this.pendingDelete === s.name ? 'danger' : ''}"
@@ -1194,16 +1214,17 @@ export class GrfSettingsPage extends GrfPanel {
       ${this.selSkill
         ? html`
             <div class="sec">
-              <h4>编辑 ${this.selSkill}</h4>
+              <h4>${this.isBuiltinSkill(this.selSkill) ? '查看' : '编辑'} ${this.selSkill}${this.isBuiltinSkill(this.selSkill) ? '(内置,只读)' : ''}</h4>
               <textarea
                 style="min-height:220px;font-family:var(--grf-mono);font-size:var(--grf-font-size-sm)"
+                ?readonly=${this.isBuiltinSkill(this.selSkill)}
                 .value=${this.skillText}
                 @input=${(e: InputEvent) => (this.skillText = (e.target as HTMLTextAreaElement).value)}
               ></textarea>
               <div class="actions" style="margin-top:8px">
                 ${this.skillMsg ? html`<span class="hint">${this.skillMsg}</span>` : nothing}
                 <button class="ghost" @click=${() => this.closeSkill()}>关闭</button>
-                <button ?disabled=${ro} @click=${() => void this.saveSkillNow()}>保存</button>
+                <button ?disabled=${ro || this.isBuiltinSkill(this.selSkill)} @click=${() => void this.saveSkillNow()}>保存</button>
               </div>
             </div>
           `
@@ -1423,7 +1444,8 @@ export class GrfSettingsPage extends GrfPanel {
     `;
   }
 
-  /** 左栏:供应商列表(名称 + 模型数),底部"添加供应商"。 */
+  /** 左栏:供应商列表(名称 + 模型数),可写时整行可拖拽排序,
+   * 底部"添加供应商"。 */
   private renderProvList(list: ProviderDTO[], readOnly: boolean) {
     if (!list.length && readOnly) return html`<div class="hint">还没有供应商。</div>`;
     return html`
@@ -1431,10 +1453,47 @@ export class GrfSettingsPage extends GrfPanel {
         const n = (p.models ?? []).length;
         return html`
           <div
-            class="prov-item ${this.activeProvName === p.name ? 'on' : ''}"
+            class="prov-item ${this.activeProvName === p.name ? 'on' : ''} ${this.dragOverProv === p.name
+              ? 'over'
+              : ''} ${this.dragProv === p.name ? 'dragging' : ''}"
             title=${p.name}
+            draggable=${!readOnly}
             @click=${() => {
               this.selProv = p.name;
+              this.requestUpdate();
+            }}
+            @dragstart=${(e: DragEvent) => {
+              if (readOnly) return;
+              this.dragProv = p.name;
+              e.dataTransfer?.setData('text/plain', p.name);
+              if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+              this.requestUpdate();
+            }}
+            @dragover=${(e: DragEvent) => {
+              if (!this.dragProv || this.dragProv === p.name) return;
+              e.preventDefault();
+              if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+              if (this.dragOverProv !== p.name) {
+                this.dragOverProv = p.name;
+                this.requestUpdate();
+              }
+            }}
+            @dragleave=${() => {
+              if (this.dragOverProv === p.name) {
+                this.dragOverProv = null;
+                this.requestUpdate();
+              }
+            }}
+            @drop=${(e: DragEvent) => {
+              e.preventDefault();
+              if (this.dragProv && this.dragProv !== p.name) settingsStore.moveProvider(this.dragProv, p.name);
+              this.dragProv = null;
+              this.dragOverProv = null;
+              this.requestUpdate();
+            }}
+            @dragend=${() => {
+              this.dragProv = null;
+              this.dragOverProv = null;
               this.requestUpdate();
             }}
           >

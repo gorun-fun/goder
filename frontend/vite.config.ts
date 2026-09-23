@@ -17,5 +17,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: false,
+    // core/store/automation.ts 以 ?raw 引 internal/desktop/agentskills/
+    // 下的技能源文件(与 Go go:embed 同一份),dev server 需放行
+    // frontend 之外的仓库路径。
+    fs: { allow: [resolve(__dirname, '..')] },
   },
 });

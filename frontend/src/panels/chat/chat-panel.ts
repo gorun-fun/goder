@@ -13,7 +13,7 @@ import { GrfPanel, theme, controls } from '../../ui/panel';
 import { modelContextWindow } from '../../util/modelctx';
 import { icon } from '../../util/icons';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
-import { inWails, gitStatus, type GitStatusDTO } from '../../host/bridge';
+import { inWails, gitStatus, saveSkill, type GitStatusDTO } from '../../host/bridge';
 import { usageTotals, type AskItem } from '../../core/model/chat-model';
 import { settingsStore, displayFullModel } from '../../core/settings/settings-store';
 import { registry, sideTabId, type PanelContext, type SideTabDef, type SideTabInstance, type BottomTabDef } from '../../registry/registry';
@@ -91,6 +91,8 @@ export class GrfChat extends GrfPanel {
   private copiedTimer = 0;
   /** 显式展开过的思考块 id */
   private reasoningOpen = new Set<string>();
+  /** 本组件生命周期内已保存的技能目录名(技能卡已保存标记) */
+  private savedSkills = new Set<string>();
   /** 设置页模型配置订阅(模型下拉数据源) */
   private settingsUnsub?: () => void;
   /** registry 变更(三方增删条目)即时反映 */
@@ -1469,6 +1471,8 @@ export class GrfChat extends GrfPanel {
       onApprove: this.onApprove,
       onSaveTask: (name, instructions) => this.saveTaskFromCard(name, instructions),
       isTaskSaved: (name, instructions) => this.isTaskSaved(name, instructions),
+      onSaveSkill: (name, content) => void this.saveSkillFromCard(name, content),
+      isSkillSaved: (name) => this.savedSkills.has(skillDirName(name)),
     };
   }
 
@@ -1487,6 +1491,23 @@ export class GrfChat extends GrfPanel {
     const n = name.trim();
     const ins = instructions.trim();
     return s.automationTasksOf(opId).some((t) => t.name === n && t.instructions === ins);
+  }
+
+  /** 技能卡保存:技能名归一化为目录安全名,经桌面 bridge 落盘
+   * ~/.grf/skills/<名>/SKILL.md(仅桌面态;保存成功后本会话内标记已保存)。 */
+  private async saveSkillFromCard(name: string, content: string): Promise<void> {
+    const s = this.store;
+    const dir = skillDirName(name);
+    const body = content.trim();
+    if (!s || !dir || !body) return;
+    const err = await saveSkill(dir, body);
+    if (err) {
+      s.log('warn', `技能保存失败:${err}`);
+      return;
+    }
+    this.savedSkills.add(dir);
+    s.log('info', `技能已保存:${dir}(设置-技能区可查看)`);
+    this.requestUpdate();
   }
 
   private scrollToMsg(id: string): void {
@@ -1911,6 +1932,17 @@ export class GrfChat extends GrfPanel {
   private onApprove(e: CustomEvent<{ callId: string; approved: boolean; feedback?: string }>): void {
     void this.store!.answerApproval(e.detail.callId, e.detail.approved, e.detail.feedback);
   }
+}
+
+/** 技能名归一化为目录安全名:小写、空白与非法字符转连字符、去首尾连字符
+ * (~/.grf/skills 下的技能目录名);归一后为空返回空串。 */
+function skillDirName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 declare global {

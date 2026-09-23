@@ -122,7 +122,9 @@ func (u *Updater) Check() UpdateInfoDTO {
 		info.Gh = UpdateCompDTO{
 			Current: cur,
 			Latest:  v,
-			Update:  info.GhManaged && cur != "" && compareVersion(v, cur) > 0,
+			// compareGhVersion 含本地构建的开发后缀语义:运行中的
+			// "基线-N-ghash" 构建比同基线发布版新,不应提示"更新"。
+			Update: info.GhManaged && cur != "" && compareGhVersion(v, cur) > 0,
 		}
 		if info.Gh.Update {
 			info.GhNote = fetchGhNote(v)
@@ -492,7 +494,8 @@ func writeZipEntry(rc io.Reader, dst string, mode os.FileMode) error {
 }
 
 // ghBinaryVersion 执行 gh --version 解析当前版本(首行第二列,如
-// "grf-harness 0.0.1-alpha.14");失败返回空串。
+// "grf-harness 0.0.1-alpha.14");首列产物名不是 grf-harness(如 PATH 里
+// 的同名 GitHub CLI)或执行失败返回空串。
 func ghBinaryVersion(bin string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -507,7 +510,7 @@ func ghBinaryVersion(bin string) string {
 		line = line[:i]
 	}
 	fields := strings.Fields(line)
-	if len(fields) >= 2 {
+	if len(fields) >= 2 && strings.HasPrefix(fields[0], "grf-harness") {
 		return fields[1]
 	}
 	return ""

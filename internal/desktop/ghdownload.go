@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -423,3 +424,47 @@ func isDigitRun(s string) bool {
 
 // versionHrefRe 目录列表页中的版本目录链接(形如 href="v1.2.3/")。
 var versionHrefRe = regexp.MustCompile(`href="(v?[0-9][^"/]*)/"`)
+
+// ---------- 本地构建版本的择新比较 ----------
+
+// gh 本地构建(build.sh 经 git describe 注入)的版本带开发后缀:
+// "<基线tag>-<提交数>-g<hash>[-dirty]",表示基线发布版之上又有本地提交,
+// 应比基线新。compareVersion 会把该后缀当普通连字符段、排到基线之下,
+// 这里先剥掉再比较基线,基线相同时基线之上提交数多者新。
+//
+// 注意与"三处同套语义"的关系(version.sh / CI 只见发布版号):下载服务器
+// 与发布目录里的版本永不含开发后缀,本层只影响本地候选之间的择新
+// (resolveGh 的托管副本 vs 捆绑/本机副本)与 updater 的 gh 更新判定,
+// 发布版本之间的排序仍完全走 compareVersion,语义不变。
+
+// ghDevSuffixRe 版本尾部的 git describe 开发后缀。
+var ghDevSuffixRe = regexp.MustCompile(`(?:-(\d+)-g[0-9a-f]+)?(?:-dirty)?$`)
+
+// splitGhDevSuffix 剥掉开发后缀,返回基线与基线之上的提交数(无后缀为 0)。
+func splitGhDevSuffix(v string) (baseline string, commits int) {
+	m := ghDevSuffixRe.FindStringSubmatch(v)
+	if m == nil {
+		return v, 0
+	}
+	if m[1] != "" {
+		commits, _ = strconv.Atoi(m[1])
+	}
+	return v[:len(v)-len(m[0])], commits
+}
+
+// compareGhVersion 比较两个 gh 版本(含本地构建的开发后缀),语义:
+// 基线不同按 compareVersion;基线相同,基线之上提交数多者新。
+func compareGhVersion(a, b string) int {
+	ba, na := splitGhDevSuffix(a)
+	bb, nb := splitGhDevSuffix(b)
+	if c := compareVersion(ba, bb); c != 0 {
+		return c
+	}
+	switch {
+	case na < nb:
+		return -1
+	case na > nb:
+		return 1
+	}
+	return 0
+}

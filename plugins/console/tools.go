@@ -21,6 +21,11 @@ func obj(props map[string]any, required ...string) map[string]any {
 	for _, n := range required {
 		r = append(r, n)
 	}
+	// properties 为 nil 时必须序列化成 {} 而非 null:LM Studio 等严格
+	// 校验的 OpenAI 兼容端会因 function.parameters.properties 为 null 报 400。
+	if props == nil {
+		props = map[string]any{}
+	}
 	return map[string]any{"type": "object", "properties": props, "required": r}
 }
 

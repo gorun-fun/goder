@@ -8,9 +8,11 @@ package desktop
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // PluginDTO 与前端 host/bridge.ts 的 PluginDTO 对齐(settings.json plugins 项)。
@@ -295,10 +299,14 @@ func (a *AgentConfig) SkillGet(name string) (string, error) {
 	return string(raw), nil
 }
 
-// SkillSave 新建/覆盖技能(建目录 + 写 SKILL.md)。
+// SkillSave 新建/覆盖技能(建目录 + 写 SKILL.md)。内置技能由启动烙写
+// 管理,不接受编辑(前端设置页对内置技能只读)。
 func (a *AgentConfig) SkillSave(name, content string) error {
 	if err := validSkillName(name); err != nil {
 		return err
+	}
+	if _, ok := builtinSkills[name]; ok {
+		return fmt.Errorf("内置技能 %s 不可编辑", name)
 	}
 	dir := filepath.Join(skillsDir(), name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -307,10 +315,13 @@ func (a *AgentConfig) SkillSave(name, content string) error {
 	return os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o600)
 }
 
-// SkillDelete 删除技能目录(SKILL.md 所在目录整体移除)。
+// SkillDelete 删除技能目录(SKILL.md 所在目录整体移除);内置技能拒绝。
 func (a *AgentConfig) SkillDelete(name string) error {
 	if err := validSkillName(name); err != nil {
 		return err
+	}
+	if _, ok := builtinSkills[name]; ok {
+		return fmt.Errorf("内置技能 %s 不可删除", name)
 	}
 	dir := filepath.Join(skillsDir(), name)
 	if _, err := os.Stat(dir); err != nil {
@@ -330,6 +341,45 @@ func validSkillName(name string) error {
 type skillNameError struct{ name string }
 
 func (e *skillNameError) Error() string { return "非法技能名:" + e.name }
+
+// ---------- 内置技能(启动烙写,单一源文件) ----------
+
+//go:embed agentskills/grf-auto.md
+var grfAutoSkillMD string
+
+// builtinSkills 内置技能:name → SKILL.md 全文。grf-auto 是自动化操作员
+// 的创作指南:源文件 internal/desktop/agentskills/grf-auto.md 同时被前端
+// core/store/automation.ts 以 vite ?raw 引用(注入操作员 system_prompt,
+// 创建自动化会话即全文生效),改指南只改这一份,不要另建拷贝。
+var builtinSkills = map[string]string{"grf-auto": grfAutoSkillMD}
+
+// ServiceStartup wails 启动钩子:确保内置技能落盘(gh server 若已按旧
+// 清单起跑,重启 gh 后生效)。失败只降级告警,不阻断 app 启动。
+func (a *AgentConfig) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	for name, content := range builtinSkills {
+		if err := ensureBuiltinSkill(name, content); err != nil {
+			log.Printf("[agent] 内置技能 %s 落盘失败(重启后会重试): %v", name, err)
+		}
+	}
+	return nil
+}
+
+// ensureBuiltinSkill 幂等落盘一个内置技能:SKILL.md 缺失或内容与内置版
+// 不一致时写入;用户已禁用(SKILL.md.disabled)则尊重,不做任何改动。
+func ensureBuiltinSkill(name, content string) error {
+	dir := filepath.Join(skillsDir(), name)
+	on := filepath.Join(dir, "SKILL.md")
+	if raw, err := os.ReadFile(on); err == nil && string(raw) == content {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md.disabled")); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(on, []byte(content), 0o600)
+}
 
 // ---------- 在线安装:gh 官方下载服务器 ----------
 // 目录布局与 gh plugin/download.go 一致:{base}/{平台}/{版本}/plugins/,

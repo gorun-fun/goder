@@ -29,6 +29,7 @@ import {
   newRuntime,
   todosFromItems,
   textOfContent,
+  TOOL_RESULT_RE,
   type SessionRuntime,
 } from '../model/chat-model';
 import { emptyIndex, persistence, type AutomationTask, type ProjectsIndex, type ProjectRecord } from './persistence';
@@ -716,6 +717,21 @@ export class GrfScope extends Emitter {
     this.activeSessionId = sid;
     const rec = this.index.sessions[sid];
     if (rec) this.activeProjectId = rec.projectId;
+    // 还原该会话记录的模型/思考强度:scope.model 是唯一下发口径,不还原
+    // 会让上一会话切过的模型串进本会话(展示与发送沿用,回合结束还会把
+    // 串入值记进本会话的 model 字段)。空串 = 该会话未选模型,同样还原为
+    // 未选;旧索引无记录的会话保持当前选择。与 inheritProjectPrefs 同
+    // 口径,并同步本地持久化(重启后与恢复的会话一致)。
+    if (rec?.model !== undefined) {
+      this.model = fullModelName(rec.model);
+      this.reasoningEffort = rec.effort !== undefined ? rec.effort || 'high' : this.reasoningEffort ?? 'high';
+      saveConnLocal(this.name, {
+        baseUrl: this.client.config.baseUrl,
+        token: this.client.config.token,
+        ...(this.model ? { model: this.model } : {}),
+        ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
+      });
+    }
     if (!sid.startsWith('draft:')) {
       this.index.lastActiveSessionId = sid; // 记住上次所在会话(启动恢复用)
       this.markSessionSeen(sid);
@@ -788,7 +804,7 @@ export class GrfScope extends Emitter {
         }
         if (msg.role === 'user' && Array.isArray(msg.content)) {
           const text = textOfContent(msg.content);
-          const tr = text.match(/^\[tool result: ([^\]]+)\]/);
+          const tr = text.match(TOOL_RESULT_RE);
           if (!tr) continue;
           const urls = msg.content
             .filter((p) => p.type === 'image_url' && p.image_url?.url)
@@ -903,8 +919,7 @@ export class GrfScope extends Emitter {
   // 上游网关按后端负载均衡,部分后端没带 --enable-auto-tool-choice,重发通常
   // 会落到正常后端。该失败发生在生成之前(终态无输出),重发无副作用;重试
   // 前清掉这次失败物化的错误条目。超过上限仍失败则原样返回,由调用方展示。
-  private async requestWithRetry(rt: SessionRuntime, sid: string, opts: SendOptions): Promise<ResponseResource> {
-    const max = 3;
+  private async requestWithRetry(rt: SessionRuntime, sid: string, opts: SendOptions): Promise<ResponseResource> {    const max = 3;
     for (let attempt = 0; ; attempt++) {
       const final = await this.sendWithStreamRetry(rt, sid, opts);
       const msg = final.error?.message ?? '';
@@ -991,6 +1006,45 @@ export class GrfScope extends Emitter {
     }
   }
 
+  /** 采纳服务器链尾为本地链尾(运行时 + 索引)。停止取消回合后链尾变成
+   * 被取消回合的 id,不采纳的话重发会带着旧 previous_response_id 被
+   * gh 拒绝(forking history is not supported)。 */
+  private adoptChainTail(sid: string, respId: string): void {
+    const rt = this.runtimes.get(sid);
+    if (rt) rt.lastResponseId = respId;
+    const rec = this.index.sessions[sid];
+    if (rec && rec.lastResponseId !== respId) {
+      rec.lastResponseId = respId;
+      this.persistIndex();
+    }
+  }
+
+  // requestWithChainHeal 链尾失配自愈:gh 严格要求 previous_response_id 为
+  // 会话链尾。本地链尾落后于服务器(典型:停止后立刻重发——被取消回合已成
+  // 链尾而 lastResponseId 还停在上一回合;或多窗口并发推进)时,首轮请求被
+  // 400 拒且报错会被 recoverAfterStreamBreak 吞成"已恢复",用户消息就无声
+  // 丢失。这里识别该错误,对账服务器链尾后原样重试一次;重试仍失败则把
+  // 真实错误抛给调用方展示。
+  private async requestWithChainHeal(
+    rt: SessionRuntime,
+    sid: string,
+    opts: SendOptions,
+  ): Promise<ResponseResource> {
+    try {
+      return await this.requestWithRetry(rt, sid, opts);
+    } catch (err) {
+      const mismatch =
+        err instanceof GrfApiError && /not the latest response|forking history/i.test(err.message);
+      if (!mismatch || opts.signal?.aborted) throw err;
+      const detail = await this.client.getConversation(sid).catch(() => null);
+      const tail = detail?.last_response_id;
+      if (!tail || tail === opts.previousResponseId) throw err;
+      this.log('warn', '会话链尾已前移(停止/多窗口并发),对账后自动重发');
+      this.adoptChainTail(sid, tail);
+      return await this.requestWithRetry(rt, sid, { ...opts, previousResponseId: tail });
+    }
+  }
+
   async send(
     text: string,
     images?: string[],
@@ -1036,19 +1090,21 @@ export class GrfScope extends Emitter {
       if (idx >= 0) {
         try {
           const hist = await this.client.conversationItems(sid);
-          // 被编辑消息 = 视图里第 nth 条用户消息 → 截到服务端历史同一条之前
+          // 被编辑消息 = 视图里第 nth 条用户消息 → 截到服务端历史同一条之前。
+          // "[tool result]" 伪 user 消息不是用户输入(视图侧折叠进工具卡),
+          // 计入对位会让截断点向前漂移、把截断落在工具调用序列中间。
           let nth = 0;
           for (let i = 0; i < idx; i++) if (rt.items[i].kind === 'user') nth++;
           let seen = 0;
           let cut = hist.length;
           for (let i = 0; i < hist.length; i++) {
-            if (hist[i].role === 'user') {
-              if (seen === nth) {
-                cut = i;
-                break;
-              }
-              seen++;
+            if (hist[i].role !== 'user') continue;
+            if (TOOL_RESULT_RE.test(textOfContent(hist[i].content))) continue;
+            if (seen === nth) {
+              cut = i;
+              break;
             }
+            seen++;
           }
           grfHistory = hist.slice(0, cut);
           rt.items = rt.items.slice(0, idx);
@@ -1168,7 +1224,7 @@ export class GrfScope extends Emitter {
       if (d?.last_response_id) previousFinal = d.last_response_id;
     }
 
-    const final = await this.requestWithRetry(rt, realSid, {
+    const final = await this.requestWithChainHeal(rt, realSid, {
       model: this.model,
       reasoningEffort: this.reasoningEffort,
       // 恢复请求只含 function_call_output(暂停会话拒绝混入用户消息)。
@@ -1396,7 +1452,7 @@ export class GrfScope extends Emitter {
     this.streamDoneAt.delete(sid);
     const input: InputItem = { type: 'grf:input_result', call_id: callId, ...payload };
     try {
-      const final = await this.requestWithRetry(rt, sid, {
+      const final = await this.requestWithChainHeal(rt, sid, {
         model: this.model,
         reasoningEffort: this.reasoningEffort,
         input: [input],
@@ -1451,28 +1507,72 @@ export class GrfScope extends Emitter {
     const sid = this.activeSessionId;
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
-    // 回合进行中 lastResponseId 还停留在上一回合(当前回合的 id 要等回合
-    // 结束才写入),直接用它取消的是已结束的旧 response——表现为点停止
-    // 没反应。运行中优先用当前流的 response id(curRespId,SSE 事件随到
-    // 随记);流刚建立还没有 id 时,先掐断本地流让 UI 收口,等下一次
-    // tick 探测到服务器终态再对账。
-    let respId = rt.lastResponseId;
     if (this.inflightSends.has(sid)) {
-      respId = rt.curRespId ?? rt.lastResponseId;
+      // 回合进行中 lastResponseId 还停留在上一回合(当前回合的 id 要等
+      // 回合结束才写入),优先用当前流的 response id(curRespId,SSE 事件
+      // 随到随记)。
+      const respId = rt.curRespId ?? rt.lastResponseId;
       if (!respId) {
         this.log('info', '回合尚未建立,已中断本地事件流');
         this.activeAborts.get(sid)?.abort();
         return;
       }
+      // 停止必须立即生效:cancel 端点最长会阻塞 5s 等服务端落终态,若把
+      // UI 挂在这个 await 上,请求迟迟不返回时界面看起来就是「点了没反应,
+      // 要等会话自然结束」。这里请求发出后立刻掐断本地事件流让 UI 收口,
+      // 终态由 send() 收尾里的 syncRunningState 对账补齐:取消成功则
+      // running 归假;取消没送达(仍 running)则停止按钮仍在,可再点一次。
+      // 排队消息一并丢弃:停止后再被排队消息顶上新回合,观感上就是停不下来。
+      const queued = this.sendQueues.get(sid)?.length ?? 0;
+      if (queued > 0) {
+        this.sendQueues.delete(sid);
+        this.log('info', `已停止本回合(丢弃 ${queued} 条排队消息)`);
+      } else {
+        this.log('info', '已停止本回合');
+      }
+      void this.client
+        .cancelResponse(respId)
+        .then((snap) => {
+          // 取消成功:被取消回合即成为服务器链尾,立即采纳(否则重发带旧
+          // previous_response_id 会被 gh 拒绝,见 requestWithChainHeal)。
+          if (snap) this.adoptChainTail(sid, respId);
+        })
+        .catch((err: unknown) => {
+          // 404 = 回合已结束;其余失败交由 syncRunningState 对账兜底。
+          if (!(err instanceof GrfApiError && err.status === 404)) {
+            this.log('warn', `中断请求失败:${errText(err)}`);
+          }
+        });
+      this.activeAborts.get(sid)?.abort();
+      return;
     }
-    if (!respId) return;
+    // 本地没有在跑的流,但 rt.running 可能仍为真(跨窗口/重载/本地流已断,
+    // tick 的 syncRunningState 把服务器运行态同步了进来)。此时
+    // rt.lastResponseId 是上一回合的旧 id,拿它 cancel 只会 404 被静默
+    // 吞掉——表现为「点停止没反应,怎么点都停不了」。必须先向服务器
+    // 对账:仍在跑就用服务器回报的当前回合 id(conversations 详情的
+    // last_response_id 即在跑回合)取消;已不跑就顺手把本地 running 归假。
     try {
-      await this.client.cancelResponse(respId);
-      this.log('info', '已发送中断请求');
+      const detail = await this.client.getConversation(sid);
+      if (!detail.running) {
+        if (rt.running) {
+          rt.running = false;
+          this.notify();
+        }
+        return;
+      }
+      const cur = detail.last_response_id;
+      if (!cur) return;
+      await this.client.cancelResponse(cur);
+      this.adoptChainTail(sid, cur);
+      rt.running = false;
+      this.log('info', '已停止本回合(远端运行中)');
+      this.notify();
     } catch (err) {
-      // 404 = 回合已结束或蒸发,视为成功。
-      if (err instanceof GrfApiError && err.status === 404) return;
-      this.log('warn', `中断失败:${errText(err)}`);
+      // 404 = 回合刚好结束。
+      if (!(err instanceof GrfApiError && err.status === 404)) {
+        this.log('warn', `中断失败:${errText(err)}`);
+      }
     }
   }
 

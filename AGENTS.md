@@ -151,6 +151,18 @@ frontend/src/
   `<grf-task>` 块同样在 automation.ts 解析、由 chat 任务卡保存进
   `index.automation`(migrateIndex 必须保留该字段,漏拷 web 态重载即
   清空);执行入口在 status-pop,点击即在该操作员下新建 run 变体会话。
+  执行会话(run 变体)成功跑通后按 runnerSystemPrompt 的指引输出
+  `<grf-skill>` 块沉淀技能(automation.ts 解析、chat/skill-card.ts 渲染
+  保存卡),保存走 host/bridge 的 saveSkill 落盘 `~/.grf/skills/<名>/
+  SKILL.md`,仅桌面态可写、web 态卡片禁用保存。
+  内置技能 grf-auto(自动化任务创作指南,指导用户完成操作并沉淀为
+  可点击执行的指令)的正文单一源文件在
+  `internal/desktop/agentskills/grf-auto.md`:Go 侧 go:embed 由
+  AgentConfig.ServiceStartup 幂等烙写 `~/.grf/skills/grf-auto`
+  (内容不一致才写;用户已禁用则尊重;内置技能不可删/编辑),前端
+  automation.ts 以 vite `?raw` 引同一文件把全文注入操作员
+  system_prompt(创建自动化会话即自动加载)—— 改指南只改这一份,
+  跨树引用的 dev 放行靠 vite.config.ts 的 `server.fs.allow`。
 
 ## 运行时环境
 

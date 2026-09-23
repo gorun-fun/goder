@@ -406,7 +406,8 @@ class SettingsStore {
 
   /**
    * 自动检测:询问供应商 /models 接口,把探测到的模型合并进该供应商
-   * 的列表(去重保序),并缓存模型上下文窗口。返回探测到的数量;失败返回 -1。
+   * 的列表(去重后按字母排序),并缓存模型上下文窗口。返回探测到的
+   * 数量;失败返回 -1。
    */
   async detectProviderModels(name: string): Promise<number> {
     if (!this.modelCfg) return -1;
@@ -425,7 +426,10 @@ class SettingsStore {
       ids = await detectModelsRemote(this.conn.baseUrl, this.conn.token, p);
     }
     if (!ids) return -1;
-    const merged = Array.from(new Set([...(p.models ?? []), ...ids]));
+    // 合并去重后按字母排序,检测出来的长列表才好找
+    const merged = Array.from(new Set([...(p.models ?? []), ...ids])).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
+    );
     this.updateProvider(name, { models: merged });
     return ids.length;
   }
@@ -517,6 +521,24 @@ class SettingsStore {
       const oldIdx = l.findIndex((x) => x.name === oldName);
       const out = [...rest];
       out.splice(oldIdx < 0 ? out.length : Math.min(oldIdx, out.length), 0, item);
+      return out;
+    });
+    void this.saveModelCfg();
+  }
+
+  /** 拖拽排序:把 name 移到 target 的位置(从上往下拖落在其后,
+   * 从下往上拖落在其前)。非法目标(含同名)静默忽略。 */
+  moveProvider(name: string, target: string): void {
+    if (!this.modelCfg || name === target) return;
+    const l = this.modelCfg.providers;
+    const from = l.findIndex((x) => x.name === name);
+    const to = l.findIndex((x) => x.name === target);
+    if (from < 0 || to < 0) return;
+    this.patchProviders((list) => {
+      const out = [...list];
+      const [item] = out.splice(from, 1);
+      const ti = out.findIndex((x) => x.name === target);
+      out.splice(from < to ? ti + 1 : ti, 0, item);
       return out;
     });
     void this.saveModelCfg();

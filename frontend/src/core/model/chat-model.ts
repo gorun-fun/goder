@@ -323,6 +323,10 @@ export function shotUrlsOfFile(text: string): string[] {
   const re = /(\/[^\s（()'"`，。]+?\.(?:png|jpe?g|webp|gif))/gi;
   return (text.match(re) ?? []).map((p) => `/grf-api/local-file?path=${encodeURIComponent(p)}`);
 }
+// gh 带图工具结果的伪 user 消息("[tool result: <名>] …" + image_url part;
+// 捕获组 = 工具名)。识别这类消息用:不进用户气泡,只回填工具卡。
+export const TOOL_RESULT_RE = /^\[tool result: ([^\]]+)\]/;
+
 export function historyToItems(hist: HistMessage[]): ChatItem[] {
   const items: ChatItem[] = [];
   const byCallId = new Map<string, ToolItem>();
@@ -336,15 +340,17 @@ export function historyToItems(hist: HistMessage[]): ChatItem[] {
         // 截图类工具的结果被 gh server 记成 "[tool result: <名>]…" 的 user
         // 消息(带 image_url part):回填到最近的同名工具卡,不进用户气泡
         // ——只有用户亲手发的消息才允许出现在右侧。
-        const tr = text.match(/^\[tool result: ([^\]]+)\]/);
+        const tr = text.match(TOOL_RESULT_RE);
         if (tr) {
           for (let k = items.length - 1; k >= 0; k--) {
             const t = items[k];
-            if (t.kind === 'tool' && t.name === tr[1] && !t.output) {
-              t.output = text;
-              if (images.length) t.images = images;
-              break;
-            }
+            // gh 新版历史带图结果是两条消息:tool 文本消息先回填了正文,
+            // 这里只补图;旧版历史伪消息是唯一结果载体,连同正文一起回填。
+            // 按"最近一张缺图同名卡"配对,同名多次截图不错位。
+            if (t.kind !== 'tool' || t.name !== tr[1] || t.images) continue;
+            if (!t.output) t.output = text;
+            if (images.length) t.images = images;
+            break;
           }
           break;
         }

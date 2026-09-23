@@ -70,27 +70,36 @@ func (s *ServerManager) Status() ghserver.Status {
 }
 
 // resolveGh 解析 gh 二进制路径,未显式配置且缺失时弹下载 UI(仅 Windows
-// 有 UI,其余平台静默失败)。调用方无须持锁。
+// 有 UI,其余平台静默失败)。自动检测时托管副本与解析链候选(捆绑/常见
+// 目录/PATH)择新:优先自报版本更新者,版本相同或探测失败维持托管目录
+// 优先。调用方无须持锁。
 func (s *ServerManager) resolveGh() string {
 	cfg, _ := (&AppConfig{}).Load()
 	// 显式配置:只认配置(含其捆绑/PATH 回退链),自动更新不接管。
 	if cfg.GhBinary != "" && cfg.GhBinary != "gh" {
 		return ghserver.ResolveGhBin(cfg.GhBinary)
 	}
-	// 未显式配置:托管下载目录(<配置目录>/bin)优先 —— gh 首启自动下载
-	// 与自动更新(updater)都落在这里,存在即接管 App 捆绑副本/常见目录/
-	// PATH 里的旧版本;首次启动无此目录,行为与原先一致。
+	// 解析链候选:App 捆绑副本 → 常见安装目录 → PATH。
+	cand := ghserver.ResolveGhBin("")
+	// 托管下载目录(<配置目录>/bin):gh 首启自动下载与自动更新(updater)
+	// 都落在这里;但本地按 build.sh 构建安装的捆绑副本可能更新(dev 构建
+	// 版本带 git describe 开发后缀),两者择新,避免旧托管副本无条件
+	// 遮挡新装副本。
 	if p, err := managedGhPath(); err == nil {
 		// 可执行位只对类 Unix 有意义:Windows 的 os.Stat 对普通文件
 		// 恒报 0666(无执行位),按执行位过滤会把已下载的 gh.exe
 		// 判成不可用,导致每次启动都重新弹下载框。
 		if st, serr := os.Stat(p); serr == nil && !st.IsDir() &&
 			(runtime.GOOS == "windows" || st.Mode()&0o111 != 0) {
+			if cand != "" && cand != p && ghBinNewer(cand, p) {
+				log.Printf("[servermanager] gh 解析:%s 版本更新,优先于托管副本 %s", cand, p)
+				return cand
+			}
 			return p
 		}
 	}
-	if bin := ghserver.ResolveGhBin(""); bin != "" {
-		return bin
+	if cand != "" {
+		return cand
 	}
 	// 仍未找到:Windows 弹框检查环境并自动下载(macOS/Linux 发行包已捆绑
 	// gh,此路径不会触发)。
@@ -100,6 +109,21 @@ func (s *ServerManager) resolveGh() string {
 		log.Printf("[servermanager] gh 自动下载未完成: %v", derr)
 	}
 	return ""
+}
+
+// ghBinNewer 探测两个 gh 候选的自报版本,报告 candidate 是否严格新于
+// managed。任一探测失败(非 grf-harness 程序/不可执行)不认为更新,
+// 调用方据此维持既有优先级(托管目录优先)。
+func ghBinNewer(candidate, managed string) bool {
+	vc := ghBinaryVersion(candidate)
+	if vc == "" {
+		return false
+	}
+	vm := ghBinaryVersion(managed)
+	if vm == "" {
+		return false
+	}
+	return compareGhVersion(vc, vm) > 0
 }
 
 // EnsureGh 环境检查门:确认 gh 可解析(Windows 缺失时同步弹下载 UI 走完
