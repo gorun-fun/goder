@@ -380,3 +380,38 @@ export function setFileOpen(scope: string, fn: FileOpenHook | undefined): void {
 export function getFileOpen(scope: string): FileOpenHook | undefined {
   return fileOpens.get(scope);
 }
+
+// ---------- UI 事件总线(embed.configure 的 uiEvents 落点) ----------
+
+/** 壳层页面变化事件:导航切换/右栏 tab 开·关·激活/左右底三栏显隐/
+ *  设置分区/文件打开/文件树下钻。app-shell 在**执行变更前**先派发给
+ *  集成方——一个钩子同时覆盖「消费(观测)」与「自定义行为(拦截)」。
+ *  底栏(终端)tab 组、聊天面板内部状态属会话级内部细节,不在总线内。 */
+export type UiEvent =
+  | { type: 'nav'; id: string }
+  | { type: 'side-tab-open'; tab: SideTabInstance }
+  | { type: 'side-tab-activate'; id: string }
+  | { type: 'side-tab-close'; id: string }
+  | { type: 'sidebar'; on: boolean }
+  | { type: 'bottom'; on: boolean }
+  | { type: 'sessions'; on: boolean }
+  | { type: 'settings-section'; section: unknown }
+  | { type: 'file-open'; file: { path: string; name?: string; rel?: string } }
+  | { type: 'files-view'; view: unknown };
+
+/** 返回 true = 已接管(本次变更不再执行,集成方自定义行为);返回
+ *  false/undefined = 放行,goder 按原生行为执行。 */
+export type UiEventHandler = (e: UiEvent) => boolean;
+
+const uiEventHandlers = new Map<string, UiEventHandler>();
+
+/** 配置某 scope 的 UI 事件处理器(undefined = 清除,全部放行)。 */
+export function setUiEventHandler(scope: string, fn: UiEventHandler | undefined): void {
+  if (fn) uiEventHandlers.set(scope, fn);
+  else uiEventHandlers.delete(scope);
+}
+
+/** 读取某 scope 的 UI 事件处理器。 */
+export function getUiEventHandler(scope: string): UiEventHandler | undefined {
+  return uiEventHandlers.get(scope);
+}

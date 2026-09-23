@@ -15,7 +15,7 @@ import { inWails } from '../host/bridge';
 import { isMacDesktop } from '../host/platform';
 import { closeWindow, isWindowMaximised, isFramelessDesktop, minimiseWindow, toggleMaximiseWindow } from '../host/winctl';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
-import { registry, sideTabId, getModelGuard, onModelGuardChange, getSideTop, onSideTopChange, getFileOpen, type PanelContext, type SideTabInstance } from '../registry/registry';
+import { registry, sideTabId, getModelGuard, onModelGuardChange, getSideTop, onSideTopChange, getFileOpen, getUiEventHandler, type PanelContext, type SideTabInstance, type UiEvent } from '../registry/registry';
 import { initConsoleUi, reportConsoleUi, visibleTermIds } from './console-ui';
 import { settingsStore } from '../core/settings/settings-store';
 import '../panels/files/file-list';
@@ -270,18 +270,25 @@ export class GrfAppShell extends GrfPanel {
       const id = nav ?? this.activeNavId;
       this.navStates = new Map(this.navStates).set(id, state);
     });
-    // 内置设置导航的分区切换事件(字符串载荷)映射为 nav state
+    // 内置设置导航的分区切换事件(字符串载荷)映射为 nav state;经 UI
+    // 事件总线先问集成方(接管则不变更)
     this.addEventListener('grf-settings-section', (e: Event) => {
+      if (this.uiGate({ type: 'settings-section', section: (e as CustomEvent).detail })) return;
       this.navStates = new Map(this.navStates).set('settings', (e as CustomEvent).detail);
     });
     // 会话导航的下钻:项目文件树(session-list「查看文件」进入 / 返回退出)
     this.addEventListener('grf-open-files', (e: Event) => {
+      const view = (e as CustomEvent).detail;
+      if (this.uiGate({ type: 'files-view', view })) return;
       this.navTo('sessions'); // navTo 会清空 filesView(下钻随导航切换退出),须先切再设
-      this.filesView = (e as CustomEvent).detail;
+      this.filesView = view;
     });
-    this.addEventListener('grf-close-files', () => (this.filesView = null));
+    this.addEventListener('grf-close-files', () => {
+      if (this.uiGate({ type: 'files-view', view: null })) return;
+      this.filesView = null;
+    });
     // 右栏确保展开(file-view html 眼睛开浏览器 tab 时;已开则无变化)
-    this.addEventListener('grf-show-sidebar', () => (this.showSidebar = true));
+    this.addEventListener('grf-show-sidebar', () => this.setSidebar(true));
     // 左栏文件树点文件:右栏为该文件开一个独立 tab 预览(已开则激活)。
     // 宿主 fileOpen 钩子优先(embed.configure 的 fileOpen 落点):返回 true
     // = 嵌入方已接管(路由到自己的面板),不再打开内置「文件」tab。
@@ -296,13 +303,10 @@ export class GrfAppShell extends GrfPanel {
     initConsoleUi({
       navTo: (id) => this.navTo(id),
       openSideTab: (t) => this.openSideTab(t),
-      activateSideTab: (id) => {
-        this.activeSideTab = id;
-        this.showSidebar = true;
-      },
-      setSidebar: (on) => (this.showSidebar = on),
-      setBottom: (on) => (this.showBottom = on),
-      setSessions: (on) => (this.showSessions = on),
+      activateSideTab: (id) => this.activateSideTab(id),
+      setSidebar: (on) => this.setSidebar(on),
+      setBottom: (on) => this.setBottom(on),
+      setSessions: (on) => this.setSessions(on),
       openFile: (f) => this.hostOpenFile(f),
       focusSession: (id) => this.store?.selectSession(id),
       openBrowser: (url) => this.consoleOpenBrowser(url),
@@ -331,9 +335,18 @@ export class GrfAppShell extends GrfPanel {
     super.disconnectedCallback();
   }
 
-  /** 「点文件 → 右栏」统一路由:宿主 fileOpen 钩子优先(返回 true = 已
-   *  接管),否则走内置「文件」tab(console 来源缺 name 时 title 退全路径)。 */
+  /** UI 事件总线闸门:壳层页面变更执行前派发给集成方(uiEvents 钩子),
+   *  返回 true = 已接管,本次变更不再执行;未配置/返回 false = 放行。 */
+  private uiGate(e: UiEvent): boolean {
+    const h = getUiEventHandler(this.scope);
+    return h ? h(e) === true : false;
+  }
+
+  /** 「点文件 → 右栏」统一路由:UI 事件总线优先,宿主 fileOpen 钩子
+   *  次之(均返回 true = 已接管),否则走内置「文件」tab(console 来源
+   *  缺 name 时 title 退全路径)。 */
   private hostOpenFile(f: { path: string; name?: string; rel?: string }): void {
+    if (this.uiGate({ type: 'file-open', file: f })) return;
     const hook = getFileOpen(this.scope);
     if (hook?.(f)) return;
     this.openSideTab({ defId: 'file', key: f.path, title: f.rel ?? f.name ?? f.path });
@@ -369,11 +382,12 @@ export class GrfAppShell extends GrfPanel {
 
   // ---------- 对外 API(宿主编程控制) ----------
 
-  /** 切换到某个导航条目(不可见条目忽略)。 */
+  /** 切换到某个导航条目(不可见条目忽略;经 UI 事件总线,集成方可接管)。 */
   navTo(id: string): void {
     const def = registry.nav.get(id);
     if (!def) return;
     if (!(def.visible?.(this.renderCtx()) ?? true)) return;
+    if (this.uiGate({ type: 'nav', id })) return;
     this.activeNavId = id;
     this.filesView = null; // 下钻视图随导航切换退出
   }
@@ -384,15 +398,39 @@ export class GrfAppShell extends GrfPanel {
     this.navTo(def?.exitTo ?? this.firstNavId());
   }
 
-  /** 打开右栏 tab(单例已开则激活;多实例按 key 去重)。 */
+  /** 打开右栏 tab(单例已开则激活;多实例按 key 去重;经 UI 事件总线)。 */
   openSideTab(tab: SideTabInstance): void {
     const def = registry.side.get(tab.defId);
     if (!def) return;
+    if (this.uiGate({ type: 'side-tab-open', tab })) return;
     const id = sideTabId(tab);
     const exists = this.sideTabs.some((t) => sideTabId(t) === id);
     if (!exists) this.sideTabs = [...this.sideTabs, tab];
     this.activeSideTab = id;
     this.showSidebar = true;
+  }
+
+  /** 激活已打开的右栏 tab(经 UI 事件总线,集成方可接管)。 */
+  activateSideTab(id: string): void {
+    if (this.uiGate({ type: 'side-tab-activate', id })) return;
+    this.activeSideTab = id;
+    this.showSidebar = true;
+  }
+
+  /** 三栏显隐(经 UI 事件总线,集成方可接管)。 */
+  setSidebar(on: boolean): void {
+    if (this.uiGate({ type: 'sidebar', on })) return;
+    this.showSidebar = on;
+  }
+
+  setBottom(on: boolean): void {
+    if (this.uiGate({ type: 'bottom', on })) return;
+    this.showBottom = on;
+  }
+
+  setSessions(on: boolean): void {
+    if (this.uiGate({ type: 'sessions', on })) return;
+    this.showSessions = on;
   }
 
   /** 当前激活导航条目 id。 */
@@ -418,7 +456,7 @@ export class GrfAppShell extends GrfPanel {
           leftOn: this.showSessions,
           desktopLights: this.nativeLights,
           desktopWinControls: this.nativeWinControls,
-          toggleLeft: () => (this.showSessions = !this.showSessions),
+          toggleLeft: () => this.setSessions(!this.showSessions),
         },
       };
     }
@@ -435,6 +473,8 @@ export class GrfAppShell extends GrfPanel {
 
   private parseLayout(): void {
     if (!this.layout) return;
+    // 初始布局还原(boot 一次性),不经 UI 事件总线——总线面向「变更」,
+    // 初始化时集成方尚未 configure 完成也无从拦截
     for (const kv of this.layout.split(',')) {
       const [k, v] = kv.split('=').map((x) => x?.trim());
       if (k === 'sidebar') this.showSidebar = v !== 'false';
@@ -498,6 +538,7 @@ export class GrfAppShell extends GrfPanel {
   // ---------- 右栏 tab 状态(chat 面板经事件上抛,这里受控维护) ----------
 
   private closeSideTab(id: string): void {
+    if (this.uiGate({ type: 'side-tab-close', id })) return;
     const next = this.sideTabs.filter((t) => sideTabId(t) !== id);
     this.sideTabs = next;
     if (this.activeSideTab === id) {
@@ -535,7 +576,7 @@ export class GrfAppShell extends GrfPanel {
                 >
                   ${getSideTop(this.scope)?.leading ? html`${this.sideTopEl('leading')}` : nothing}
                   <span class="toggler">
-                    <button class="on" title="收起侧栏" @click=${() => (this.showSessions = false)}>${unsafeHTML(icon.panelLeft)}</button>
+                    <button class="on" title="收起侧栏" @click=${() => this.setSessions(false)}>${unsafeHTML(icon.panelLeft)}</button>
                   </span>
                   ${ctx.desktop && panelRegistered('grf-update-chip')
                     ? html`<grf-update-chip></grf-update-chip>`
@@ -569,12 +610,12 @@ export class GrfAppShell extends GrfPanel {
                   .leftOn=${this.showSessions}
                   .leftLights=${this.nativeLights}
                   .winControls=${this.nativeWinControls}
-                  @grf-toggle-bottom=${() => (this.showBottom = !this.showBottom)}
-                  @grf-toggle-sidebar=${() => (this.showSidebar = !this.showSidebar)}
-                  @grf-toggle-sessions=${() => (this.showSessions = !this.showSessions)}
+                  @grf-toggle-bottom=${() => this.setBottom(!this.showBottom)}
+                  @grf-toggle-sidebar=${() => this.setSidebar(!this.showSidebar)}
+                  @grf-toggle-sessions=${() => this.setSessions(!this.showSessions)}
                   @grf-side-tab-open=${(e: Event) => this.openSideTab((e as CustomEvent<SideTabInstance>).detail)}
                   @grf-side-tab-close=${(e: Event) => this.closeSideTab((e as CustomEvent<string>).detail)}
-                  @grf-side-tab-activate=${(e: Event) => (this.activeSideTab = (e as CustomEvent<string>).detail)}
+                  @grf-side-tab-activate=${(e: Event) => this.activateSideTab((e as CustomEvent<string>).detail)}
                 ></grf-chat>`
               : nothing}
         </div>

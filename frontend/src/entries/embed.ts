@@ -31,7 +31,7 @@ export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settin
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
-export { registry, sideTabId, setUser, getUser, setSideTop, getSideTop, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard, setFileOpen, getFileOpen } from '../registry/registry';
+export { registry, sideTabId, setUser, getUser, setSideTop, getSideTop, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard, setFileOpen, getFileOpen, setUiEventHandler, getUiEventHandler } from '../registry/registry';
 export type {
   PanelContext,
   ShellState,
@@ -48,7 +48,7 @@ import { setUser } from '../registry/registry';
 import { setSideTop } from '../registry/registry';
 import { setSettingsConfig } from '../registry/registry';
 import { setModelGuard } from '../registry/registry';
-import { setFileOpen, type FileOpenHook } from '../registry/registry';
+import { setFileOpen, type FileOpenHook, type UiEventHandler, setUiEventHandler } from '../registry/registry';
 import type { UserConfig } from '../registry/registry';
 import type { SideTopConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
@@ -87,7 +87,10 @@ registerBuiltinCommon();
  * 「未分组会话」分组不再渲染。fileOpen 供嵌入方接管「点文件 → 右栏」
  * 的统一路由(工具卡文件名/文件树/console open_file):钩子返回 true
  * 表示已接管(典型如把阶段文档路由到嵌入方自己的业务面板),goder 不
- * 再打开内置「文件」tab;返回 false/未配置走内置行为。 */
+ * 再打开内置「文件」tab;返回 false/未配置走内置行为。uiEvents 供集成方
+ * 消费壳层页面变化事件总线:导航/右栏 tab 开·关·激活/三栏显隐/设置
+ * 分区/文件打开/文件下钻,在 goder 执行变更**之前**回调(返回 true =
+ * 已接管自定义行为,false = 放行走原生)——一个钩子同时覆盖观测与拦截。 */
 export function configure(
   scope: string,
   cfg: {
@@ -103,6 +106,7 @@ export function configure(
     sessionDefaults?: Partial<GrfSessionConfig>;
     ungroupedSessions?: boolean;
     fileOpen?: FileOpenHook;
+    uiEvents?: UiEventHandler;
   },
 ): void {
   if (cfg.user !== undefined) setUser(scope, cfg.user);
@@ -112,6 +116,7 @@ export function configure(
   if (cfg.sessionDefaults !== undefined) setSessionDefaults(scope, cfg.sessionDefaults);
   if (cfg.ungroupedSessions !== undefined) setUngroupedSessions(scope, cfg.ungroupedSessions);
   if (cfg.fileOpen !== undefined) setFileOpen(scope, cfg.fileOpen);
+  if (cfg.uiEvents !== undefined) setUiEventHandler(scope, cfg.uiEvents);
   configureScope(scope, cfg);
 }
 
