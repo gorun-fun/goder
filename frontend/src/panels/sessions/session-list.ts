@@ -18,7 +18,7 @@ import { repeat } from 'lit/directives/repeat.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtRelative } from '../../util/fmt';
-import { UNGROUPED } from '../../core/store/scope';
+import { UNGROUPED, ungroupedAllowed } from '../../core/store/scope';
 import type { ProjectRecord } from '../../core/store/persistence';
 import { inWails, pickFolder } from '../../host/bridge';
 import './user-chip';
@@ -351,6 +351,9 @@ export class GrfSessionList extends GrfPanel {
     const operators = desktop ? s.operatorGroups() : [];
     const projects = [...s.index.projects]
       .filter((p) => p.kind !== 'operator')
+      // 嵌入方禁未分组(configure ungroupedSessions:false):「未分组会话」
+      // 分组不再渲染(索引伪项目保留,兜底逻辑仍以 UNGROUPED 兜底)。
+      .filter((p) => p.id !== UNGROUPED || ungroupedAllowed(s.name))
       .sort((a, b) => (a.id === UNGROUPED ? 1 : b.id === UNGROUPED ? -1 : a.createdAt < b.createdAt ? 1 : -1));
     return html`
       ${desktop

@@ -710,6 +710,23 @@ export class GrfScope extends Emitter {
     return did;
   }
 
+  /** 无激活会话直接发送时的兜底项目:允许未分组取 活动项目→UNGROUPED;
+   * 嵌入方禁未分组时取 活动项目→最近会话所属项目→最早的真实项目,
+   * 一个项目都没有时仍回 UNGROUPED(嵌入方动线通常 boot 即建项目,
+   * 此为最终兜底,不静默丢弃用户输入)。 */
+  private newSessionProjectId(): string {
+    if (this.activeProjectId) return this.activeProjectId;
+    if (ungroupedAllowed(this.name)) return UNGROUPED;
+    const latest = Object.values(this.index.sessions)
+      .filter((r) => r.projectId && r.projectId !== UNGROUPED)
+      .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))[0];
+    return (
+      latest?.projectId ??
+      this.index.projects.find((p) => p.id !== UNGROUPED && p.kind !== 'operator')?.id ??
+      UNGROUPED
+    );
+  }
+
   /** 新会话继承偏好:模型与思考强度优先取同项目最近一次会话的取值;
    * 该项目尚无记录时回落到全部项目里最近一次对话的会话(新开项目沿用
    * 用户最近在用的模型)。都没有时:模型保持当前值(localStorage 里上次
@@ -1082,10 +1099,11 @@ export class GrfScope extends Emitter {
   ): Promise<void> {
     let sid = opts?.sid ?? this.activeSessionId;
     if (!sid) {
-      // 无激活会话时直接发送不再静默丢弃:自动落一个草稿(当前项目,
-      // 未选则未分组)接住输入,随首条消息转正为真实会话。
+      // 无激活会话时直接发送不再静默丢弃:自动落一个草稿接住输入,随首条
+      // 消息转正为真实会话。嵌入方禁未分组时(ungroupedSessions:false)
+      // 兜底项目改绑最近使用的项目,不落 UNGROUPED。
       if (!text.trim() && !images?.length) return;
-      sid = this.newDraft(this.activeProjectId || UNGROUPED);
+      sid = this.newDraft(this.newSessionProjectId());
     }
     const rt = this.ensureRuntime(sid);
     if (this.inflightSends.has(sid) || rt.running) {
@@ -1177,11 +1195,16 @@ export class GrfScope extends Emitter {
     // 恒定追加,不受它影响):操作员项目注入操作员/执行版提示词,
     // 其余项目 defaults 未自带 system_prompt 时兜底 goder 默认提示词。
     // defaults 亦可带 default_skill(默认技能全文注入,如 grf-play 的
-    // grf-start)——经下方展开直接透传,无需在此特判。
+    // grf-start)——经下方展开直接透传,无需在此特判。嵌入方另可经
+    // configure 的 sessionDefaults 给「无 defaults 项目/未分组」会话兜底
+    // (展开在项目 defaults 之前,逐字段被其覆盖;workspace 优先级为
+    // 项目路径 > homeDir > sessionDefaults.workspace)。
     let grfSession: GrfSessionConfig | undefined;
     if (isDraft) {
+      const sd = sessionDefaultsMap.get(this.name);
       grfSession = {
-        workspace: draftProject?.path || this.homeDir || undefined,
+        ...(sd ?? {}),
+        workspace: draftProject?.path || this.homeDir || sd?.workspace,
         ...draftProject?.defaults,
         ...(this.draftPolicy ? { policy: this.draftPolicy } : {}),
       };
@@ -1767,6 +1790,33 @@ export function errText(err: unknown): string {
 
 const scopes = new Map<string, GrfScope>();
 export const scopeConfigs = new Map<string, ConnectionConfig>();
+
+// 嵌入方会话级兜底配置(configure 的 sessionDefaults 注入,不持久化——
+// 宿主每次加载自行下发):草稿落定时展开在项目 defaults 之前,项目
+// defaults 逐字段覆盖之;两者都缺 system_prompt 才回落 goder 默认提示词。
+// workspace 特殊:项目自身路径 > homeDir > sessionDefaults.workspace
+// (兜底顺序见 grfSession 组装处)。
+const sessionDefaultsMap = new Map<string, Partial<GrfSessionConfig>>();
+export function setSessionDefaults(
+  scope: string,
+  defaults: Partial<GrfSessionConfig> | undefined,
+): void {
+  if (defaults && Object.keys(defaults).length > 0) sessionDefaultsMap.set(scope, defaults);
+  else sessionDefaultsMap.delete(scope);
+}
+
+// 嵌入方禁止未分组会话(configure 的 ungroupedSessions:false 注入):
+// 无激活会话直接发送的兜底项目不再落 UNGROUPED,改绑最近使用的项目;
+// 左栏「未分组会话」分组不再渲染(索引里的伪项目保留,兼容既有逻辑)。
+const ungroupedDenied = new Set<string>();
+export function setUngroupedSessions(scope: string, allow: boolean): void {
+  if (allow) ungroupedDenied.delete(scope);
+  else ungroupedDenied.add(scope);
+}
+/** 未分组会话是否允许(嵌入形态默认允许;session-list 据此隐藏分组)。 */
+export function ungroupedAllowed(scope: string): boolean {
+  return !ungroupedDenied.has(scope);
+}
 
 // 连接配置持久化(纯 web 态;桌面态由 wails AppConfig 托管,但本地副本
 // 也能让 webview 冷启动更快连上)。

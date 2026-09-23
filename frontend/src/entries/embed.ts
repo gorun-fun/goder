@@ -22,9 +22,10 @@ export { GrfToolCard } from '../panels/chat/tool-card';
 export { GrfAskForm } from '../panels/chat/ask-form';
 export { GrfApprovalCard } from '../panels/chat/approval-card';
 
-export { configureScope, getScope, UNGROUPED } from '../core/store/scope';
+export { configureScope, getScope, UNGROUPED, setSessionDefaults, setUngroupedSessions } from '../core/store/scope';
 export type { GrfScope, ConnectionConfig, AuthConfig } from '../core/store/scope';
 import type { AuthConfig } from '../core/store/scope';
+import type { GrfSessionConfig } from '../core/api/types';
 export { settingsStore, ACCENTS } from '../core/settings/settings-store';
 export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settings-store';
 export { GrfClient, GrfApiError } from '../core/api/client';
@@ -51,7 +52,7 @@ import type { UserConfig } from '../registry/registry';
 import type { SideTopConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
 
-import { configureScope } from '../core/store/scope';
+import { configureScope, setSessionDefaults, setUngroupedSessions } from '../core/store/scope';
 import { registerBuiltinCommon } from '../shell/builtin-common';
 import '../shell/app-shell';
 import '../panels/chat/chat-panel';
@@ -77,7 +78,12 @@ registerBuiltinCommon();
  * (Harness/插件/MCP/技能,浏览器形态本就只读引导)。modelGuard: true
  * 供「模型由使用者自行配置」的嵌入方(零配置起步平台)开启启动模型
  * 守卫:gh 侧没有任何可用模型时自动进入设置-模型页引导完成配置
- * (下发过 model 的 scope 不适用)。 */
+ * (下发过 model 的 scope 不适用)。sessionDefaults 供嵌入方给「项目
+ * 无 defaults/未分组」的会话兜底 grf:session 配置(system_prompt/
+ * default_skill/policy 等;草稿落定时展开在项目 defaults 之前,逐字段
+ * 被其覆盖——有 defaults 的项目不受影响)。ungroupedSessions: false
+ * 禁止未分组会话:无激活会话直接发送时兜底改绑最近使用的项目,左栏
+ * 「未分组会话」分组不再渲染。 */
 export function configure(
   scope: string,
   cfg: {
@@ -90,12 +96,16 @@ export function configure(
     sideTop?: SideTopConfig;
     settings?: SettingsConfig;
     modelGuard?: boolean;
+    sessionDefaults?: Partial<GrfSessionConfig>;
+    ungroupedSessions?: boolean;
   },
 ): void {
   if (cfg.user !== undefined) setUser(scope, cfg.user);
   if (cfg.sideTop !== undefined) setSideTop(scope, cfg.sideTop);
   if (cfg.settings !== undefined) setSettingsConfig(scope, cfg.settings);
   if (cfg.modelGuard !== undefined) setModelGuard(scope, cfg.modelGuard);
+  if (cfg.sessionDefaults !== undefined) setSessionDefaults(scope, cfg.sessionDefaults);
+  if (cfg.ungroupedSessions !== undefined) setUngroupedSessions(scope, cfg.ungroupedSessions);
   configureScope(scope, cfg);
 }
 

@@ -54,6 +54,17 @@ configure('myscope', {
       return el;
     },
   },
+  sessionDefaults: {     // 可选:项目无 defaults/未分组会话的 grf:session
+                         // 兜底(system_prompt/default_skill/policy 等;
+                         // 草稿落定时展开在项目 defaults 之前,逐字段被其
+                         // 覆盖——有 defaults 的项目不受影响;不持久化,
+                         // 宿主每次加载自行下发)
+    system_prompt: '…',  // custom 段(身份+工作方式;gh 内置工具说明恒定追加)
+    default_skill: 'grf-start', // 默认技能全文注入(目录存在该技能时)
+  },
+  ungroupedSessions: false, // 可选:false 禁止未分组会话——无激活会话直接
+                         // 发送时兜底改绑最近使用的项目,左栏「未分组
+                         // 会话」分组不再渲染
 });
 ```
 
