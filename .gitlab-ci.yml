@@ -221,7 +221,10 @@ build:
         cp bin/gh-darwin-${ARCH} .appstage/goder.app/Contents/MacOS/gh
         chmod +x .appstage/goder.app/Contents/MacOS/*
         (cd .appstage && zip -qry ../bin/goder-macos-${ARCH}.zip goder.app)
-        echo "macos-${ARCH} goder-macos-${ARCH}.zip" >> bin/PUBLISH_MANIFEST
+        # 目录名与 gh 下载侧一致:arm64 → macos-arm64,amd64 → macos
+        # (不能直接拼 macos-${ARCH}:amd64 会写成 macos-amd64,自动更新按
+        # macos/ 找不到新版本)
+        echo "$([ "$ARCH" = amd64 ] && echo macos || echo macos-${ARCH}) goder-macos-${ARCH}.zip" >> bin/PUBLISH_MANIFEST
       done
       rm -rf .appstage
       # linux/windows 产物目录名与 gh 下载侧一致
