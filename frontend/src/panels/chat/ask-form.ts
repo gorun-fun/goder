@@ -1,7 +1,8 @@
 // ask-form.ts — ask_user_question 暂停回合的交互表单卡片。
 // 选项题(单选/多选)渲染为可点选项:单选点击即提交,多选勾选后经
-// "提交回答"提交;无选项的题渲染加高文本框;提交后走 grf:input_result
-// 续交。
+// "提交回答"提交;选项题每题附「自定义答案」入口(选项都不合意时点击
+// 展开文本框自由输入,提交时并入该题答案);无选项的题直接渲染文本框;
+// 提交后走 grf:input_result 续交。
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { theme, controls } from '../../ui/panel';
@@ -132,6 +133,32 @@ export class GrfAskForm extends LitElement {
         font-size: var(--grf-font-size);
         line-height: 1.6;
       }
+      /* 「自定义答案」入口行:样式贴近选项但视觉弱化,区分于常规选项 */
+      .other-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border: 1px dashed var(--grf-border);
+        border-radius: var(--grf-radius-sm);
+        color: var(--grf-text-faint);
+        font-size: var(--grf-font-size-xs);
+        cursor: pointer;
+        user-select: none;
+      }
+      .other-row:hover {
+        color: var(--grf-text-dim);
+        background: var(--grf-bg-hover);
+      }
+      .other-row svg {
+        width: 12px;
+        height: 12px;
+        flex: none;
+      }
+      /* 展开的自定义输入框:高度比纯输入题矮 */
+      .q textarea.other {
+        min-height: 48px;
+      }
       .actions {
         display: flex;
         gap: 8px;
@@ -191,6 +218,9 @@ export class GrfAskForm extends LitElement {
 
   private selection = new Map<string, Set<string>>(); // qid → 选中的 option label
 
+  /** 展开了「自定义答案」输入框的 qid 集合 */
+  @state() private otherOpen = new Set<string>();
+
   /** 已应答行的展开态(默认折叠成一行灰字) */
   @state() private openDone = false;
 
@@ -216,9 +246,11 @@ export class GrfAskForm extends LitElement {
           : nothing}
       `;
     }
-    // 全部为选项题(单选/多选)时:逐题选择,选完最后一题自动提交;
-    // 含输入题时保留"提交回答"按钮(无法判定用户何时输完)。
+    // 全部为选项题(单选/多选)且无人展开自定义输入时:逐题选择,
+    // 选完最后一题自动提交;含输入题或展开了自定义输入时保留
+    // "提交回答"按钮(无法判定用户何时输完)。
     const allOptions = it.questions.every((q) => !!q.options?.length);
+    const hasOther = it.questions.some((q) => q.options?.length && this.otherOpen.has(q.id));
     return html`
       <div class="card ${this.flat ? 'flat' : ''}">
         <div class="banner">
@@ -229,13 +261,13 @@ export class GrfAskForm extends LitElement {
         </div>
         ${it.questions.map((q, qi) => this.renderQuestion(q, qi))}
         <div class="actions">
-          ${allOptions
+          ${allOptions && !hasOther
             ? html`<span class="hint">每题选择后自动提交</span>`
             : html`<span class="hint">逐题选择/填写后点"提交回答"</span>`}
           ${this.showDismiss
             ? html`<button class="ghost" @click=${() => this.fire('dismiss', { callId: it.callId })}>取消提问</button>`
             : nothing}
-          ${allOptions
+          ${allOptions && !hasOther
             ? nothing
             : html`<button class="primary" @click=${this.submit}>提交回答</button>`}
         </div>
@@ -284,6 +316,28 @@ export class GrfAskForm extends LitElement {
                   `,
                 )}
               </div>
+              <div
+                class="other-row"
+                title="选项中没有想要的答案?点击输入自定义答案"
+                @click=${() => this.toggleOther(q.id, q.multi_select === true)}
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <path d="M10.5 2.5l3 3-7.5 7.5L2.5 14l1-3.5z" stroke-linejoin="round" />
+                </svg>
+                ${this.otherOpen.has(q.id) ? '收起自定义答案' : '没有想要的答案?输入自定义答案'}
+              </div>
+              ${this.otherOpen.has(q.id)
+                ? html`
+                    <textarea
+                      class="other"
+                      data-other=${q.id}
+                      placeholder="输入自定义回答…(Enter 换行)"
+                      @keydown=${(e: KeyboardEvent) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) this.submit();
+                      }}
+                    ></textarea>
+                  `
+                : nothing}
             `
           : html`
               <textarea
@@ -311,6 +365,8 @@ export class GrfAskForm extends LitElement {
     if (!multi) set.clear();
     if (set.has(label)) set.delete(label);
     else set.add(label);
+    // 单选:改选常规选项即弃用自定义输入(二者互斥)
+    if (!multi && set.size > 0) this.otherOpen.delete(qid);
     this.requestUpdate();
     this.maybeAutoSubmit();
   }
@@ -318,13 +374,27 @@ export class GrfAskForm extends LitElement {
   // pickSingle 单选:记录选择;全选项题的表单在每题都有答案时自动提交。
   private pickSingle(qid: string, label: string): void {
     this.selection.set(qid, new Set([label]));
+    this.otherOpen.delete(qid);
     this.requestUpdate();
     this.maybeAutoSubmit();
   }
 
-  // maybeAutoSubmit 全部为选项题且每题都已选 → 自动提交(单题单选的
-  // "点击即提交"也是这条规则;多选题取消勾选到空则不提交)。
+  // toggleOther 展开/收起自定义输入框。单选展开时清掉已选选项
+  // (自定义与常规选项互斥);多选可与勾选项并存,提交时一并回传。
+  private toggleOther(qid: string, multi: boolean): void {
+    if (this.otherOpen.has(qid)) this.otherOpen.delete(qid);
+    else {
+      this.otherOpen.add(qid);
+      if (!multi) this.selection.delete(qid);
+    }
+    this.requestUpdate();
+  }
+
+  // maybeAutoSubmit 全部为选项题、无人展开自定义输入且每题都已选 →
+  // 自动提交(单题单选的"点击即提交"也是这条规则;多选题取消勾选到
+  // 空则不提交)。展开了自定义输入就必须等用户手动提交。
   private maybeAutoSubmit(): void {
+    if (this.otherOpen.size) return;
     const qs = this.item.questions;
     if (!qs.length || !qs.every((q) => q.options?.length)) return;
     if (qs.every((q) => (this.selection.get(q.id)?.size ?? 0) > 0)) this.submit();
@@ -335,7 +405,12 @@ export class GrfAskForm extends LitElement {
     for (const q of this.item.questions) {
       const sel = this.selection.get(q.id);
       if (q.options?.length) {
-        answers[q.id] = q.multi_select ? [...(sel ?? [])] : [...(sel ?? [])][0] ?? '';
+        const other = this.otherText(q.id);
+        if (q.multi_select) {
+          answers[q.id] = [...(sel ?? []), ...(other ? [other] : [])];
+        } else {
+          answers[q.id] = other || [...(sel ?? [])][0] ?? '';
+        }
       } else {
         const input = this.renderRoot.querySelector<HTMLTextAreaElement>(
           `textarea[data-qid="${CSS.escape(q.id)}"]`,
@@ -344,6 +419,15 @@ export class GrfAskForm extends LitElement {
       }
     }
     this.fire('answer', { callId: this.item.callId, answers });
+  }
+
+  // otherText 读取某题展开的自定义输入框内容(未展开/空白返回空串)。
+  private otherText(qid: string): string {
+    if (!this.otherOpen.has(qid)) return '';
+    const ta = this.renderRoot.querySelector<HTMLTextAreaElement>(
+      `textarea[data-other="${CSS.escape(qid)}"]`,
+    );
+    return ta?.value.trim() ?? '';
   }
 
   private fire(type: string, detail: unknown): void {
