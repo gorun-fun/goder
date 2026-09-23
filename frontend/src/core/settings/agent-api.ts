@@ -4,7 +4,7 @@
 //
 // 密钥安全往返(掩码语义):GET 只回空 apiKey/token + hasKey/hasToken;
 // PUT 空值 = 保留现值(改名经 keepKeyFrom 指回旧条目),非空 = 更换。
-import type { ModelConfigDTO, PluginsDTO, ProviderDTO, SkillsDTO } from '../../host/bridge';
+import type { DetectedModelDTO, ModelConfigDTO, PluginsDTO, ProviderDTO, SkillsDTO } from '../../host/bridge';
 
 /** agent API 不可用(404 = gh server 过旧/未启用)时抛出,调用方回落引导文案 */
 export class AgentApiUnsupportedError extends Error {
@@ -47,15 +47,26 @@ export function putModelCfg(baseUrl: string, token: string, cfg: ModelConfigDTO)
   return req<void>(baseUrl, token, 'PUT', 'models', cfg);
 }
 
-/** 探测供应商模型列表(服务端代理请求,OpenAI 兼容 /models)。 */
+/** 探测供应商模型列表(服务端代理请求,OpenAI 兼容 /models)。
+ * 返回富结果(id + ctxLen):新版 gh 的 modelsRich 带 ctxLen,旧版只有
+ * models 纯 id 数组(ctxLen 回 0,调用方回落估算表)。失败返回 null。 */
 export async function detectModelsRemote(
   baseUrl: string,
   token: string,
   p: Pick<ProviderDTO, 'name' | 'baseUrl' | 'apiKey'>,
-): Promise<string[] | null> {
+): Promise<DetectedModelDTO[] | null> {
   try {
-    const out = await req<{ models: string[] }>(baseUrl, token, 'POST', 'models/detect', p);
-    return out.models ?? [];
+    const out = await req<{ models?: string[]; modelsRich?: { id: string; ctxLen?: number }[] }>(
+      baseUrl,
+      token,
+      'POST',
+      'models/detect',
+      p,
+    );
+    if (Array.isArray(out.modelsRich)) {
+      return out.modelsRich.map((m) => ({ id: m.id, ctxLen: m.ctxLen && m.ctxLen > 0 ? m.ctxLen : 0 }));
+    }
+    return (out.models ?? []).map((id) => ({ id, ctxLen: 0 }));
   } catch {
     return null;
   }

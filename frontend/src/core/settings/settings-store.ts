@@ -406,32 +406,32 @@ class SettingsStore {
 
   /**
    * 自动检测:询问供应商 /models 接口,把探测到的模型合并进该供应商
-   * 的列表(去重后按字母排序),并缓存模型上下文窗口。返回探测到的
-   * 数量;失败返回 -1。
+   * 的列表(去重后按字母排序),并缓存模型上下文窗口。双形态同构:
+   * 桌面态经 wails、网页态经 gh server 代理(models/detect),均拿
+   * id + ctxLen 富结果。返回探测到的数量;失败返回 -1。
    */
   async detectProviderModels(name: string): Promise<number> {
     if (!this.modelCfg) return -1;
     const p = this.modelCfg.providers.find((x) => x.name === name);
     if (!p) return -1;
-    let ids: string[] | null = null;
-    if (inWails()) {
-      // 桌面态拿富结果(id + ctxLen)顺带缓存上下文窗口
-      const rich = await detectModels(p);
-      if (!rich) return -1;
-      this.setProviderCtx(p.name, p.baseUrl, rich);
-      ids = rich.map((x) => x.id);
-    } else {
-      // 网页形态 gh server 的 detect 端点只回 ids,上下文窗口待 gh
-      // 扩展后接入(回落估算表,不阻塞功能)
-      ids = await detectModelsRemote(this.conn.baseUrl, this.conn.token, p);
-    }
-    if (!ids) return -1;
+    const rich = await this.detectProviderRich(p);
+    if (!rich) return -1;
+    this.setProviderCtx(p.name, p.baseUrl, rich);
     // 合并去重后按字母排序,检测出来的长列表才好找
-    const merged = Array.from(new Set([...(p.models ?? []), ...ids])).sort((a, b) =>
+    const merged = Array.from(new Set([...(p.models ?? []), ...rich.map((x) => x.id)])).sort((a, b) =>
       a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
     );
     this.updateProvider(name, { models: merged });
-    return ids.length;
+    return rich.length;
+  }
+
+  /** 探测某供应商的模型(富结果):桌面态走 wails,网页态走 gh server
+   * 的 models/detect 代理通道(旧版 gh 无 modelsRich 时 ctxLen 为 0,
+   * 回落估算表)。失败/不适用返回 null。 */
+  private detectProviderRich(p: ProviderDTO): Promise<DetectedModelDTO[] | null> {
+    if (inWails()) return detectModels(p);
+    if (this.agentApi !== 'ok') return Promise.resolve(null);
+    return detectModelsRemote(this.conn.baseUrl, this.conn.token, p);
   }
 
   /** 从 "provider/model" 全名或裸模型名(含自带 / 的裸名)定位所属供应商。 */
@@ -479,18 +479,23 @@ class SettingsStore {
   }
 
   /**
-   * 惰性探测当前模型的真实上下文窗口(聊天圆环分母):桌面态经 wails
-   * 问供应商 /models;已有缓存、探测中或已探测过(含失败)则跳过,
-   * 成功后 bump() 触发界面重渲染。网页形态暂无探测通道,直接跳过。
+   * 惰性探测当前模型的真实上下文窗口(聊天圆环分母):桌面态经 wails、
+   * 网页态经 gh server 代理问供应商 /models(双形态同构);已有缓存、
+   * 探测中或已探测过(含失败)则跳过,成功后 bump() 触发界面重渲染。
+   * 网页形态 agent API 不可用(旧版 gh)时跳过,回落估算表。
    */
   probeProviderCtx(model: string): void {
-    if (!inWails() || !model) return;
+    if (!model) return;
+    // 网页形态评估结论:gh server 的 models/detect 代理通道可承载
+    // (桌面/网页双形态同构),不再用 !inWails() 一刀切关闭;仅旧版
+    // gh(无 modelsRich)拿不到 ctxLen,回落估算表。
+    if (!inWails() && this.agentApi !== 'ok') return;
     const prov = this.providerOf(model);
     if (!prov || !prov.baseUrl || this.ctxProbed.has(prov.name)) return;
     const c = this.ctxLens[prov.name];
     if (c && c.url === prov.baseUrl) return;
     this.ctxProbed.add(prov.name);
-    void detectModels(prov).then((rich) => {
+    void this.detectProviderRich(prov).then((rich) => {
       if (rich) this.setProviderCtx(prov.name, prov.baseUrl, rich);
     });
   }
