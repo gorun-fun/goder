@@ -104,6 +104,10 @@ export class GrfChat extends GrfPanel {
   /** 返回 HTMLElement 的右栏条目(终端等有状态内容)按 (tab id, 会话)
    * 池化保活:跨 tab 开关与会话切换不销毁元素 */
   private sideElPool = new Map<string, Map<string, HTMLElement>>();
+  /** shared 条目(SideTabDef.shared,内容属于项目/工作区而非会话)的
+   * scope 级单例池:按 tab id 一份,切会话不动元素(防 DOM 移动致
+   * iframe 重载等副作用),也不随会话存活清理 */
+  private sharedSideEls = new Map<string, HTMLElement>();
   /** sid → 底栏 tab 组(各会话独立,常驻 DOM 保活) */
   private bottomTabsBySid = new Map<string, BottomTabInstance[]>();
   /** sid → 底栏当前激活的 tab uid */
@@ -1158,6 +1162,7 @@ export class GrfChat extends GrfPanel {
     this.bottomTabsBySid.clear();
     this.bottomActiveBySid.clear();
     this.sideElPool.clear();
+    this.sharedSideEls.clear();
     this.poolSid = '';
     super.disconnectedCallback();
   }
@@ -1656,9 +1661,20 @@ export class GrfChat extends GrfPanel {
   }
 
   /** 取(懒建)某会话、某 tab 的保活元素;仅 render 返回 HTMLElement 的
-   * 条目走池化(终端等有状态内容),模板条目返回 null。 */
+   * 条目走池化(终端等有状态内容),模板条目返回 null。shared 条目走
+   * scope 级单例池,与会话无关。 */
   private pooledSideEl(def: SideTabDef, key: string | undefined, sid: string): HTMLElement | null {
     const tabId = key !== undefined ? `${def.id}:${key}` : def.id;
+    if (def.shared) {
+      let el = this.sharedSideEls.get(tabId);
+      if (!el) {
+        const out = def.render(this.refreshCtx(), key);
+        if (!(out instanceof HTMLElement)) return null; // 模板条目不走池化
+        el = out;
+        this.sharedSideEls.set(tabId, el);
+      }
+      return el;
+    }
     let bySid = this.sideElPool.get(tabId);
     if (!bySid) {
       bySid = new Map();
@@ -1698,6 +1714,10 @@ export class GrfChat extends GrfPanel {
             // 激活 tab」可见;模板条目轻量,按激活 tab 现渲染。
             const el = this.pooledSideEl(def, t.key, sid);
             if (el) {
+              if (def.shared) {
+                // shared 条目:scope 级单例,激活即见,不随会话切换换元素
+                return html`<div class="pane ${active ? 'on' : ''}">${el}</div>`;
+              }
               const tabId = t.key !== undefined ? `${def.id}:${t.key}` : def.id;
               const bySid = this.sideElPool.get(tabId) ?? new Map();
               return [...bySid.entries()].map(

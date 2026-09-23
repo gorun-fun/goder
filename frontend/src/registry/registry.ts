@@ -79,6 +79,11 @@ export interface SideTabDef {
    * 菜单),只在别处带 key 打开(如文件 tab 由左栏文件树/聊天工具卡点击
    * 打开才有意义,主动打开只见空态) */
   passive?: boolean;
+  /** 元素跨会话共享(scope 级单例,不按会话池化):适合内容不属于某个
+   * 会话、而属于整个项目/工作区的面板(嵌入方如 grf-play 的游戏面板——
+   * 切会话不该动它)。默认 false = 按会话隔离(终端等会话级有状态内容
+   * 的标准行为)。 */
+  shared?: boolean;
   /** 是否可用(内置条目用它做形态降级,如终端仅桌面) */
   visible?: (ctx: PanelContext) => boolean;
 }
