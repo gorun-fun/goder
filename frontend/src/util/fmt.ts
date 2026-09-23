@@ -467,5 +467,8 @@ export function friendlyError(msg: string): string {
   if (/paused awaiting interaction/i.test(msg)) {
     return '会话正在等待上一次的提问/审批应答,请先完成输入框中的交互再发新消息。';
   }
+  if (/a turn is already running/i.test(msg)) {
+    return '本会话仍有一个回合在服务端运行(可能未能停止)。请再点一次「停止」,或稍候片刻重试。';
+  }
   return msg;
 }

@@ -109,6 +109,15 @@ export class GrfScope extends Emitter {
   private activeAborts = new Map<string, AbortController>(); // sid → 当前流的中断器
   private streamDoneAt = new Map<string, number>(); // sid → 服务器已结束的时刻
   private watchdogHits = new Set<string>(); // 看门狗掐断的 sid(非用户取消)
+  /** 用户已点停止、但服务器可能仍在跑的 sid(停止重试机制用)。
+   * cancel 未必真能停掉回合:首抢时 respId 可能过时(回合尚未建立)被
+   * 404 静默吞掉,或服务端工具执行阻塞无视取消(老 gh 的 job_output),
+   * 会话就此进入"僵尸运行"——本地 inflight 已清而服务器 running 恒真,
+   * 后续消息全部排队、界面永远转圈。syncRunningState 据此标记有界重发
+   * cancel,直到服务器归假或重试上限。 */
+  private stopRequested = new Set<string>();
+  private stopRetries = new Map<string, number>(); // sid → 已重发停止的次数
+  private static STOP_RETRY_MAX = 12; // ≈1 分钟(每次 sync 间隔约 5s)
   /** sid → 排队待发消息(回合运行中用户发送的,回合结束自动发出) */
   private sendQueues = new Map<
     string,
@@ -407,8 +416,20 @@ export class GrfScope extends Emitter {
       const detail = await this.client.getConversation(sid);
       const rt = this.ensureRuntime(sid);
       rt.running = detail.running;
-      // 服务器已结束而本地还有排队消息(多窗口结束/挂死自愈后):自动发出。
-      if (!detail.running && !this.inflightSends.has(sid)) this.flushSendQueue(sid);
+      if (detail.running) {
+        // 服务器仍在跑而本地已无在途流:若用户点过停止,说明 cancel 没真正
+        // 停掉回合(respId 过时被 404 吞掉/服务端工具阻塞无视取消),有界
+        // 重发 cancel——否则会话僵尸运行,新消息永远排队转圈。
+        // 本地仍有在途流时不动作(取消刚发出、收尾未完成的窗口,保留标记)。
+        if (!this.inflightSends.has(sid) && this.stopRequested.has(sid)) {
+          this.retryStop(sid, detail.last_response_id);
+        }
+      } else {
+        this.stopRequested.delete(sid);
+        this.stopRetries.delete(sid);
+        // 服务器已结束而本地还有排队消息(多窗口结束/挂死自愈后):自动发出。
+        if (!this.inflightSends.has(sid)) this.flushSendQueue(sid);
+      }
       // 会话累计统计(速度/缓存命中率)与当前访问策略(composer 圆环/策略按钮用)
       if (detail.stats) rt.stats = detail.stats;
       if (detail.policy) rt.policy = detail.policy;
@@ -865,6 +886,8 @@ export class GrfScope extends Emitter {
     delete this.index.sessions[sid];
     this.runtimes.delete(sid);
     this.sendQueues.delete(sid);
+    this.stopRequested.delete(sid);
+    this.stopRetries.delete(sid);
     forgetUsage(sid); // 前端 usage 累计随会话清理
     if (this.index.lastActiveSessionId === sid) this.index.lastActiveSessionId = undefined;
     if (this.activeSessionId === sid) this.activeSessionId = undefined;
@@ -1506,10 +1529,43 @@ export class GrfScope extends Emitter {
     }
   }
 
+  /** 重发停止(有界):用户已点停止但服务器仍在跑该会话时,由
+   * syncRunningState 周期调用。cancel 端点最长阻塞 5s 等终态,fire-and-
+   * forget 即可,落定由下一次 sync 对账。用服务器回报的当前回合 id(比
+   * 点停止时本地记的可能更新——首抢时回合尚未建立、respId 过时会被 404
+   * 静默吞掉)。已知的取舍:停止后 ~1 分钟内若另一窗口在同会话开了新回合,
+   * 会被一并取消——同会话多窗口本就是竞态使用,且有界重试把窗口压到最小。 */
+  private retryStop(sid: string, respId?: string): void {
+    if (!respId) return;
+    const n = (this.stopRetries.get(sid) ?? 0) + 1;
+    this.stopRetries.set(sid, n);
+    if (n > GrfScope.STOP_RETRY_MAX) {
+      this.stopRequested.delete(sid);
+      this.log(
+        'error',
+        '停止未生效:服务端仍有阻塞中的工具执行,本会话暂时无法接收新消息;该回合结束后自动恢复(升级 gh 可根治)',
+      );
+      return;
+    }
+    if (n === 1) this.log('warn', '回合未能立即停止,正在重试…');
+    void this.client
+      .cancelResponse(respId)
+      .then((snap) => {
+        // 取消成功:被取消回合即链尾,立即采纳(与 cancelActive 同由)。
+        if (snap) this.adoptChainTail(sid, respId);
+      })
+      .catch(() => {
+        /* 404 = 回合刚好结束;其余失败交由下一次 sync 再试 */
+      });
+  }
+
   async cancelActive(): Promise<void> {
     const sid = this.activeSessionId;
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
+    // 记录停止意图并清零重试计数(再次点击停止 = 重新开始有界重试)。
+    this.stopRequested.add(sid);
+    this.stopRetries.delete(sid);
     if (this.inflightSends.has(sid)) {
       // 回合进行中 lastResponseId 还停留在上一回合(当前回合的 id 要等
       // 回合结束才写入),优先用当前流的 response id(curRespId,SSE 事件
