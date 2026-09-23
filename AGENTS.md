@@ -106,6 +106,15 @@ frontend/src/
   `frontend/src/host/bridge.ts`,纯 web 态必须 no-op 回退。
 - 桌面态检测用 `inWails()`(协议/hostname + 真实调用探针),不能只看
   `window._wails`(浏览器懒加载 runtime 后也会置位)。
+- **新增功能必须先做网页形态评估**:同一份代码跑双形态,新功能默认
+  桌面/网页都要可用;实现前先评估网页形态(嵌入库 / grf-web-serve)
+  是否有等价通道——密钥、文件系统等桌面专属资源,网页形态往往可经
+  gh server `/v1/agent/*` 服务端代理承载。**确有等价通道的必须实现
+  网页路径,不得用 `inWails()` 一刀切关闭**;只有确认网页端确实无
+  通道(纯桌面原生能力,如终端/浏览器面板)才允许桌面守卫跳过,并在
+  守卫处注释注明评估结论与依据。反例:供应商上下文窗口探测曾被
+  `!inWails()` 整体跳过,而 gh server 代理通道(`models/detect`)
+  实际可承载,导致网页端长期只显示按名估算值。
 - **registry 不变量**:界面四个装配区(左导航/右栏/底栏/设置分区)的
   条目一律经 `registry/registry.ts` 注册;新内置面板 = builtin-common
   (通用)或 builtin-desktop(桌面专属,visible 守卫 `ctx.desktop`)加
