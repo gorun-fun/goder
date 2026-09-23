@@ -351,7 +351,6 @@ export class GrfComposer extends LitElement {
         cursor: pointer;
         flex: 0 1 auto; /* 允许收缩(.cur 省略号截断),不够放才按优先级隐藏 */
         min-width: 0;
-        max-width: 180px;
       }
       .bar-btn:hover,
       .bar-btn.open {
@@ -446,9 +445,7 @@ export class GrfComposer extends LitElement {
         font-weight: 500;
         color: var(--grf-text);
         font-size: var(--grf-font-size-sm);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        overflow-wrap: anywhere; /* 模型 ID 可能很长:换行完整显示,不省略截断 */
       }
       .pop-item .tx i {
         display: block;
