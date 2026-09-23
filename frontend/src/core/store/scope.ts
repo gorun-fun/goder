@@ -707,6 +707,10 @@ export class GrfScope extends Emitter {
     this.activeSessionId = did;
     this.activeProjectId = projectId;
     this.notify();
+    // 与 selectSession 同口径发激活事件:嵌入方(grf-play 等)靠它跟随
+    // 「会话 → 所属项目」;不发则新建草稿(左栏「+」/嵌入方直驱)对
+    // 订阅方不可见
+    this.emitDom('grf:session-selected', { sessionId: did });
     return did;
   }
 
@@ -755,7 +759,11 @@ export class GrfScope extends Emitter {
   selectSession(sid: string): void {
     this.activeSessionId = sid;
     const rec = this.index.sessions[sid];
-    if (rec) this.activeProjectId = rec.projectId;
+    // 草稿不在 index.sessions:项目归属从 drafts 表取,否则点回草稿时
+    // activeProjectId 停在上一个真实会话的项目上(嵌入方跟随会错游戏)
+    const draft = sid.startsWith('draft:') ? this.drafts.get(sid) : undefined;
+    const pid = rec?.projectId ?? draft?.projectId;
+    if (pid) this.activeProjectId = pid;
     // 还原该会话记录的模型/思考强度:scope.model 是唯一下发口径,不还原
     // 会让上一会话切过的模型串进本会话(展示与发送沿用,回合结束还会把
     // 串入值记进本会话的 model 字段)。空串 = 该会话未选模型,同样还原为
