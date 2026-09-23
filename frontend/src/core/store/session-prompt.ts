@@ -4,7 +4,9 @@
 // system_prompt 只替换 custom 段,不会丢掉内置工具说明——因此本提示词
 // 刻意只写 goder 自身的身份与工作方式,不描述任何内置工具的用法。
 // 项目 defaults 自带 system_prompt 的项目(如 grf-play 登记的游戏项目)
-// 与自动化操作员(automation.ts 的操作员/执行版提示词)不使用本默认值。
+// 与自动化操作员(automation.ts 的操作员/执行版提示词)不使用本默认值;
+// defaults 另可带 default_skill 指定默认技能全文注入(经 grf:session
+// 透传,与 system_prompt 同一开放通道)。
 
 /** goder 普通会话的默认 custom 提示词(草稿落定为首条消息时注入)。 */
 export function goderSessionPrompt(): string {

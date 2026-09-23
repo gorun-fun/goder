@@ -80,7 +80,8 @@ frontend/src/
            session-prompt 普通会话默认 custom 提示词——gh 系统提示词为
            「custom 段 + inner prompt(内置工具说明,按可用工具恒定拼装)」
            叠加结构,草稿落定时项目 defaults 与操作员提示词均未带
-           system_prompt 则注入该默认值)/
+           system_prompt 则注入该默认值;defaults 另可带 default_skill
+           指定默认技能全文注入,经 grf:session 透传、同为嵌入方开放通道)/
            settings(设置状态)
   registry/ UI 注册表:nav(左栏导航)/ side(右栏 tab)/ bottom(底栏
            tab)/ settings(设置分区,内置分区 render 留空、由 settings-page

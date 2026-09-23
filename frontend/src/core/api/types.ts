@@ -191,7 +191,15 @@ export interface HistMessage {
 export interface GrfSessionConfig {
   policy?: string; // write-workspace|read-workspace 组合 | off
   auto_approve?: boolean;
+  /** 会话级 custom 提示词(身份定义+工作方式);gh 的内置工具说明段
+   * (inner prompt)恒定追加,不被它替换。goder 普通会话未配置时兜底
+   * session-prompt.ts 的默认值;嵌入方/项目 defaults 可自带覆盖。 */
   system_prompt?: string;
+  /** 默认技能名:技能目录(workspace/.grf/skills 两级)中存在该名字时,
+   * 其 SKILL.md 全文注入系统提示词,无需模型调 skill 工具;空 = 不注入
+   * 任何默认技能(gh 侧已取消 grf-usage 回落)。经项目 defaults 开放给
+   * 嵌入方(如 grf-play 配 grf-start 总纲)。 */
+  default_skill?: string;
   max_steps?: number;
   disabled_tools?: string[];
   /** 会话工作区(项目本地路径;桌面态新建项目时选择的目录) */

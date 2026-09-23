@@ -9,7 +9,9 @@ export interface ProjectRecord {
   collapsed?: boolean;
   /** 本地目录路径(桌面态新建项目时选择) */
   path?: string;
-  defaults?: GrfSessionConfig; // 新会话继承的 grf:session 配置
+  /** 新会话继承的 grf:session 配置(含 system_prompt/custom、
+   * default_skill 默认技能等,经 updateProjectDefaults 开放给嵌入方) */
+  defaults?: GrfSessionConfig;
   /** 'operator' = 自动化操作员分组(home 下的专属目录作工作区,
    * 会话注入操作员 system prompt;显示在左栏「自动化」类别) */
   kind?: 'operator';

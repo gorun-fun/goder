@@ -1176,6 +1176,8 @@ export class GrfScope extends Emitter {
     // system_prompt 是 custom 段(身份+工作方式;gh 的内置工具说明段
     // 恒定追加,不受它影响):操作员项目注入操作员/执行版提示词,
     // 其余项目 defaults 未自带 system_prompt 时兜底 goder 默认提示词。
+    // defaults 亦可带 default_skill(默认技能全文注入,如 grf-play 的
+    // grf-start)——经下方展开直接透传,无需在此特判。
     let grfSession: GrfSessionConfig | undefined;
     if (isDraft) {
       grfSession = {
