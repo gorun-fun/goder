@@ -34,6 +34,7 @@ import {
 } from '../model/chat-model';
 import { emptyIndex, persistence, type AutomationTask, type ProjectsIndex, type ProjectRecord } from './persistence';
 import { operatorSystemPrompt, runnerSystemPrompt, runnerMessage } from './automation';
+import { goderSessionPrompt } from './session-prompt';
 import { desktopHomeDir, ensureHomeDir } from '../../host/bridge';
 import { Emitter } from './emitter';
 
@@ -1149,23 +1150,25 @@ export class GrfScope extends Emitter {
     // 让 agent 的文件/终端工具直接落在项目里;未选工作区时默认用户
     // 主目录 —— 直接聊天不必先建项目)。
     // composer 的策略选择(draftPolicy)优先于项目默认。
-    // 操作员项目额外注入操作员/执行版 system_prompt(放最后,覆盖
-    // defaults 里的同名字段)。
-    const grfSession = isDraft
-      ? {
-          workspace: draftProject?.path || this.homeDir || undefined,
-          ...draftProject?.defaults,
-          ...(this.draftPolicy ? { policy: this.draftPolicy } : {}),
-          ...(draftProject?.kind === 'operator'
-            ? {
-                system_prompt:
-                  draftInfo?.variant === 'run'
-                    ? runnerSystemPrompt()
-                    : operatorSystemPrompt(this.automationTasksOf(draftProject.id)),
-              }
-            : {}),
-        }
-      : undefined;
+    // system_prompt 是 custom 段(身份+工作方式;gh 的内置工具说明段
+    // 恒定追加,不受它影响):操作员项目注入操作员/执行版提示词,
+    // 其余项目 defaults 未自带 system_prompt 时兜底 goder 默认提示词。
+    let grfSession: GrfSessionConfig | undefined;
+    if (isDraft) {
+      grfSession = {
+        workspace: draftProject?.path || this.homeDir || undefined,
+        ...draftProject?.defaults,
+        ...(this.draftPolicy ? { policy: this.draftPolicy } : {}),
+      };
+      if (draftProject?.kind === 'operator') {
+        grfSession.system_prompt =
+          draftInfo?.variant === 'run'
+            ? runnerSystemPrompt()
+            : operatorSystemPrompt(this.automationTasksOf(draftProject.id));
+      } else if (!grfSession.system_prompt?.trim()) {
+        grfSession.system_prompt = goderSessionPrompt();
+      }
+    }
 
     const ac = new AbortController();
     this.inflightSends.add(sid);

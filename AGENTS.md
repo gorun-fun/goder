@@ -76,7 +76,11 @@ cmd/grf-web-serve/       多用户网关 CLI(GRF_IDENTITY=single|header|sso)
 frontend/src/
   core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗)/ model(会话运行
            时模型)/ store(emitter 响应式基座、scope 编排、persistence、
-           automation 操作员 system_prompt 与 <grf-task> 任务块解析)/
+           automation 操作员 system_prompt 与 <grf-task> 任务块解析、
+           session-prompt 普通会话默认 custom 提示词——gh 系统提示词为
+           「custom 段 + inner prompt(内置工具说明,按可用工具恒定拼装)」
+           叠加结构,草稿落定时项目 defaults 与操作员提示词均未带
+           system_prompt 则注入该默认值)/
            settings(设置状态)
   registry/ UI 注册表:nav(左栏导航)/ side(右栏 tab)/ bottom(底栏
            tab)/ settings(设置分区,内置分区 render 留空、由 settings-page
