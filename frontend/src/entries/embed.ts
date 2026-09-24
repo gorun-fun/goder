@@ -31,7 +31,7 @@ export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settin
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
-export { registry, sideTabId, setUser, getUser, setSideTop, getSideTop, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard, setFileOpen, getFileOpen, setUiEventHandler, getUiEventHandler } from '../registry/registry';
+export { registry, sideTabId, setUser, getUser, setSideTop, getSideTop, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard, setFileOpen, getFileOpen, setUiEventHandler, getUiEventHandler, setNewProject, getNewProject } from '../registry/registry';
 export type {
   PanelContext,
   ShellState,
@@ -48,7 +48,7 @@ import { setUser } from '../registry/registry';
 import { setSideTop } from '../registry/registry';
 import { setSettingsConfig } from '../registry/registry';
 import { setModelGuard } from '../registry/registry';
-import { setFileOpen, type FileOpenHook, type UiEventHandler, setUiEventHandler } from '../registry/registry';
+import { setFileOpen, type FileOpenHook, type UiEventHandler, setUiEventHandler, setNewProject, type NewProjectHook } from '../registry/registry';
 import type { UserConfig } from '../registry/registry';
 import type { SideTopConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
@@ -107,6 +107,7 @@ export function configure(
     ungroupedSessions?: boolean;
     fileOpen?: FileOpenHook;
     uiEvents?: UiEventHandler;
+    newProject?: NewProjectHook;
   },
 ): void {
   if (cfg.user !== undefined) setUser(scope, cfg.user);
@@ -117,6 +118,7 @@ export function configure(
   if (cfg.ungroupedSessions !== undefined) setUngroupedSessions(scope, cfg.ungroupedSessions);
   if (cfg.fileOpen !== undefined) setFileOpen(scope, cfg.fileOpen);
   if (cfg.uiEvents !== undefined) setUiEventHandler(scope, cfg.uiEvents);
+  if (cfg.newProject !== undefined) setNewProject(scope, cfg.newProject);
   configureScope(scope, cfg);
 }
 

@@ -19,6 +19,7 @@ import { GrfPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtRelative } from '../../util/fmt';
 import { UNGROUPED, ungroupedAllowed } from '../../core/store/scope';
+import { getNewProject } from '../../registry/registry';
 import type { ProjectRecord } from '../../core/store/persistence';
 import { inWails, pickFolder } from '../../host/bridge';
 import './user-chip';
@@ -619,9 +620,25 @@ export class GrfSessionList extends GrfPanel {
   private commitNewProject(): void {
     if (!this.newProject) return;
     const name = this.draftName.trim();
-    if (name) this.store.createProject(name);
     this.newProject = false;
     this.draftName = '';
+    if (!name) {
+      this.requestUpdate();
+      return;
+    }
+    // 宿主 newProject 钩子优先(embed.configure 的 newProject 落点):
+    // 嵌入方创建自己的项目实体后返回根目录路径,goder 据此登记带 path
+    // 的项目;返回 null = 嵌入方已处理/拒绝,不落原生项目。异步期间输入
+    // 态先收起,结果回来再登记(store.createProject 自带 notify 刷新)。
+    const hook = this.store ? getNewProject(this.store.name) : undefined;
+    if (hook) {
+      void Promise.resolve(hook(name)).then((path) => {
+        if (path) this.store.createProject(name, path);
+      });
+      this.requestUpdate();
+      return;
+    }
+    this.store.createProject(name);
     this.requestUpdate();
   }
 

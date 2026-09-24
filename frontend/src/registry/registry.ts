@@ -415,3 +415,25 @@ export function setUiEventHandler(scope: string, fn: UiEventHandler | undefined)
 export function getUiEventHandler(scope: string): UiEventHandler | undefined {
   return uiEventHandlers.get(scope);
 }
+
+// ---------- 宿主新建项目路由(embed.configure 的 newProject 落点) ----------
+
+/** 新建项目钩子:左栏「新建项目」提交名称时先问嵌入方——由嵌入方创建
+ *  自己的项目实体(工作区目录/服务端记录),返回项目根目录绝对路径,
+ *  goder 据此登记带 path 的项目(会话/文件树/嵌入方对齐键全链路可用);
+ *  返回 null/undefined = 嵌入方已自行处理或拒绝,goder 不再落原生项目
+ *  (无 path 的裸项目嵌入方通常无法管理)。未配置走原生行为(裸项目)。 */
+export type NewProjectHook = (name: string) => Promise<string | null> | string | null;
+
+const newProjectHooks = new Map<string, NewProjectHook>();
+
+/** 配置某 scope 的新建项目钩子(undefined = 清除,恢复原生行为)。 */
+export function setNewProject(scope: string, fn: NewProjectHook | undefined): void {
+  if (fn) newProjectHooks.set(scope, fn);
+  else newProjectHooks.delete(scope);
+}
+
+/** 读取某 scope 的新建项目钩子。 */
+export function getNewProject(scope: string): NewProjectHook | undefined {
+  return newProjectHooks.get(scope);
+}
