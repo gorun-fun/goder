@@ -33,6 +33,10 @@ import (
 // 自更新检查跳过 —— 开发构建不与发布版本比较)。
 var appVersion = "dev"
 
+// AppVersion 返回当前 goder 版本号(build 时注入,本地构建为 "dev";
+// test-serve 测试指导端点的元数据等二进制内消费方使用)。
+func AppVersion() string { return appVersion }
+
 // goderDlBase goder 已发布产物的下载基地址(与 gh 同一服务器、同一目录
 // 结构 {base}/{平台}/{版本}/)。
 const goderDlBase = "https://download.gorun.fun/goder"

@@ -6,7 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { theme } from '../ui/theme';
 import { configureScope } from '../core/store/scope';
 import { settingsStore } from '../core/settings/settings-store';
-import { inWails } from '../host/bridge';
+import { inWails, detectDesktopHost } from '../host/bridge';
 import '../shell/app-shell';
 import '../shell/builtin-common';
 import '../shell/builtin-desktop';
@@ -119,10 +119,14 @@ export class GrfDesktop extends LitElement {
   }
 }
 
-// 挂载
+// 挂载。挂载前先做桌面宿主探测(test-serve 无头测试态的 127.0.0.1
+// origin 由此识别;wails/goder.localhost origin 探测即时返回,不发请求)
+// —— 必须先于 UI 挂载完成,否则面板可见性守卫(inWails)会取到 false。
 const mount = () => {
-  const el = document.createElement('grf-desktop');
-  document.body.appendChild(el);
+  void detectDesktopHost().then(() => {
+    const el = document.createElement('grf-desktop');
+    document.body.appendChild(el);
+  });
 };
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', mount);

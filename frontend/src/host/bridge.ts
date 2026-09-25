@@ -6,11 +6,14 @@ import type { ProjectsIndex } from '../core/store/persistence';
 // wails v3 桌面态检测。注意:不能只看 window._wails —— 该属性由
 // @wailsio/runtime 包加载时自设,普通浏览器懒加载后也会有;也不能依赖
 // 注入 runtime(它可能跑在独立 JS world)。可靠信号是"真的调通了 wails
-// 服务"(initHostBridge 探针)与桌面 origin 形态。
+// 服务"(initHostBridge 探针)与桌面 origin 形态;test-serve 无头测试态
+// (http://127.0.0.1:<port>)经 /grf-host-probe 标记端点识别
+// (detectDesktopHost,见 main.go testserve.go)。
 let wailsProbe = false;
+let hostProbe = false;
 
 export function inWails(): boolean {
-  if (wailsProbe) return true;
+  if (wailsProbe || hostProbe) return true;
   if (typeof window === 'undefined') return false;
   if (typeof location !== 'undefined') {
     if (location.protocol === 'wails:' || location.protocol === 'wails-capabilities:') return true;
@@ -20,6 +23,53 @@ export function inWails(): boolean {
     if (/^(wails\.localhost|app\.localhost|goder\.localhost)$/.test(location.hostname)) return true;
   }
   return false;
+}
+
+/** 探测当前 origin 是否 goder test-serve 宿主(无头测试形态)。
+ * 命中 /grf-host-probe 标记端点(204)即视为桌面形态:界面按桌面装配
+ * (终端等桌面面板),wails 调用通道就绪由 initHostBridge 的带重试探针
+ * 兜底;同时启动事件 SSE 中继(无头形态没有窗口,Go 侧 ExecJS 推送不
+ * 存在,事件经 /test-serve/events 回流)。
+ * 注意:即便 origin 已命中桌面形态(wails://localhost、goder.localhost)
+ * 也要探一次 —— 经 goder.localhost 访问 test-serve 时 inWails 虽为真,
+ * 事件链同样不存在;生产形态该请求 404 即止,开销一次 HEAD。
+ * 须在任何 UI 挂载前调用(entries/desktop.ts 的 mount),避免面板可见性
+ * 守卫在探针完成前取到 false。 */
+export async function detectDesktopHost(): Promise<boolean> {
+  const originDesktop = inWails();
+  try {
+    const r = await fetch('/grf-host-probe', { method: 'HEAD' });
+    if (r.status === 204) {
+      hostProbe = true;
+      startEventRelay();
+      return true;
+    }
+  } catch {
+    /* 非本地宿主:纯 web/嵌入形态 */
+  }
+  return originDesktop;
+}
+
+let eventRelayStarted = false;
+
+/** test-serve 事件中继:订阅 /test-serve/events SSE,把 wails 自定义事件
+ * (grf:term-* / grf:console-ui / grf:update-progress)喂回
+ * window._wails.dispatchWailsEvent —— 与官方 server 模式 custom.js 的
+ * WebSocket 中继同一机制,Events.On 订阅者无感复用。 */
+function startEventRelay(): void {
+  if (eventRelayStarted) return;
+  eventRelayStarted = true;
+  const es = new EventSource('/test-serve/events');
+  es.onmessage = (m: MessageEvent<string>) => {
+    const w = window as unknown as {
+      _wails?: { dispatchWailsEvent?: (ev: unknown) => void };
+    };
+    try {
+      w._wails?.dispatchWailsEvent?.(JSON.parse(m.data));
+    } catch {
+      /* 坏帧忽略 */
+    }
+  };
 }
 
 interface WailsCall {

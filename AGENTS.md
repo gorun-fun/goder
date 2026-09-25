@@ -13,9 +13,17 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
 - `./build.sh web` — 纯 web 形态(grf-web-serve 网关:静态 + `/grf-api`,
   http://127.0.0.1:7700;身份模式与多用户参数见 cmd/grf-web-serve 头注释)
 - `./run.sh start|stop|restart` — 桌面 App 生命周期(后台运行,PID/日志在 `.run/`)
+- `./goder test-serve [--port 7460]` — 无头测试形态:同一份二进制不建窗口,
+  经本地 HTTP 服务器(令牌门槛)把完整桌面 UI 暴露给浏览器,wails 服务
+  调用走 `/wails/runtime`、自定义事件经 `/test-serve/events` SSE 回传
+  (testserve.go/localserv.go;前端探针 bridge.ts detectDesktopHost)。
+  测试指导全文内嵌二进制、经 `/test-serve/guide` 端点分发(docs/
+  testing.md 为源,响应头带版本/平台元数据)。AI/发布版 E2E 主战场;
+  勿与桌面 App 同时运行(goder-console 烙写互踩)
 - 类型检查:`cd frontend && npx tsc --noEmit`;Go:`go build ./... && go vet ./...`
-- (无自动化测试;E2E 为真实 gh server + 真实模型的手动浏览器验证,
-  playwright-cli 或浏览器驱动)
+- (自动化测试以 test-serve + 浏览器驱动为主,指导见 `docs/testing.md`;
+  人工 E2E 为真实 gh server + 真实模型的手动浏览器验证,playwright-cli
+  或浏览器驱动)
 - **发版(打版)规则**:推送 tag 触发 GitLab CI(`.gitlab-ci.yml`,
   仅 tag 触发)。tag 与产物版本号 = gh(grf-harness)最新发布 tag;
   gh 未更新而本程序再次发版时追加 `.postN`(N 从 0 递增,

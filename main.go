@@ -27,6 +27,14 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "console-shim" {
 		os.Exit(console.RunShim(os.Args[1:]))
 	}
+	// 无头测试形态:同一份应用经本地 HTTP 服务器暴露给浏览器(AI/发布版
+	// E2E 用,见 testserve.go 与 docs/testing.md)。
+	if len(os.Args) > 1 && os.Args[1] == "test-serve" {
+		if err := runTestServe(os.Args[1:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	sm := desktop.GetServerManager()
 
@@ -47,18 +55,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "Goder",
 		Description: "grf-harness 图形界面(项目会话 · 聊天 · 详情 · 事件台)",
-		Services: []application.Service{
-			application.NewService(&desktop.AppConfig{}),
-			application.NewService(sm),
-			application.NewService(&desktop.ModelConfig{}),
-			application.NewService(&desktop.AgentConfig{}),
-			application.NewService(&desktop.Desktop{}),
-			application.NewService(desktop.GetTerminalManager()),
-			application.NewService(desktop.GetBrowserManager()),
-			// ConsoleMCP 依赖 BrowserManager 的 Manager,注册须在其后
-			application.NewService(desktop.GetConsoleMCP()),
-			application.NewService(desktop.GetUpdater()),
-		},
+		Services:    appServices(),
 		Assets: application.AssetOptions{
 			Handler: rootHandler,
 			// 代理与静态资源都由我们接管,关掉逐请求日志噪音
@@ -123,5 +120,21 @@ func main() {
 func coldStart(sm *desktop.ServerManager) {
 	if cfg, err := (&desktop.AppConfig{}).Load(); err != nil || cfg.ServerMode == "managed" {
 		_ = sm.Start()
+	}
+}
+
+// appServices wails 服务注册表(桌面主窗体与 test-serve 无头形态共用)。
+// 顺序敏感:ConsoleMCP 依赖 BrowserManager 的 Manager,注册须在其后。
+func appServices() []application.Service {
+	return []application.Service{
+		application.NewService(&desktop.AppConfig{}),
+		application.NewService(desktop.GetServerManager()),
+		application.NewService(&desktop.ModelConfig{}),
+		application.NewService(&desktop.AgentConfig{}),
+		application.NewService(&desktop.Desktop{}),
+		application.NewService(desktop.GetTerminalManager()),
+		application.NewService(desktop.GetBrowserManager()),
+		application.NewService(desktop.GetConsoleMCP()),
+		application.NewService(desktop.GetUpdater()),
 	}
 }
