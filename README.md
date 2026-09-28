@@ -5,7 +5,7 @@
 | 形态 | 说明 | 入口 |
 |------|------|------|
 | **桌面 App**(wails v3) | 可直接安装的本地应用:左边项目级会话列表、中间聊天、右栏 tab 化(详情/审查/终端/浏览器/文件)、底栏内嵌终端(进入当前项目目录);自动托管 `gh server` 子进程 | `./build.sh app` → `dist/goder.app` |
-| **三方 Web 集成** | 会话列表 / 聊天 / 详情 / 审查 / 浏览器 / 事件台等均为独立 web components,可嵌入任意第三方页面;左栏导航、右栏 tab、底栏 tab 全部经 registry 注册表装配,内置条目与三方自定义条目走同一条 API,可自由增删 | `frontend/dist-embed/grf-ui.js`(ESM,零外部依赖) |
+| **三方 Web 集成** | 会话列表 / 聊天 / 详情 / 审查 / 浏览器 / 事件台等均为独立 web components,可嵌入任意第三方页面;左栏导航、右栏 tab、底栏 tab 全部经 registry 注册表装配(条目可按 scope 归属),内置条目与三方自定义条目走同一条 API;消息内容层开放定制(registry.chat:自定义消息渲染器、工具展示元数据、markdown 渲染覆写);发送钩子(onBeforeSend)与工具审批钩子(onApproval)可接管出站消息与审批决策;i18n 文案覆盖;`GRF_UI_VERSION` 版本常量 + 完整 .d.ts 类型产物 | `frontend/dist-embed/grf-ui.js` + `types/`(ESM,零外部依赖) |
 | **多用户 Web 网关** | `cmd/grf-web-serve`:静态托管 + `/grf-api` 多用户路由 —— **一个登录用户一个独立 gh server 进程**(独立端口与数据目录,令牌由网关注入,不下发浏览器) | `./build.sh web` |
 
 与 gh 的对接完全走 `gh server`(ORS 兼容 Responses API):SSE 流式、
@@ -144,6 +144,12 @@ registry.side.hide('console');                  // 裁剪内置右栏条目
 registry.nav.add({ id: 'help', label: '帮助', view: () => html`…` });   // 自定义左栏导航
 registry.side.add({ id: 'metrics', label: '指标', icon, render: (ctx) => html`…` }); // 自定义右栏 tab
 registry.bottom.add({ id: 'logs', label: '日志', icon, create: (ctx) => el });       // 自定义底栏 tab
+registry.chat.addRenderer({ id: 'mytool', toolName: 'mcp__mine__q', render: … });     // 接管自家工具的消息卡片
+configure('app', {                                                                   // 发送/审批钩子 + i18n + markdown 覆写
+  onBeforeSend: (p) => banned(p.text) ? null : p,   // null 取消(输入保留)
+  onApproval: (req) => (req.toolName === 'bash' ? null : { approved: true }),
+  locale: 'en', messages: { '新会话': 'New chat' },
+});
 ```
 
 要点:
@@ -167,33 +173,50 @@ registry.bottom.add({ id: 'logs', label: '日志', icon, create: (ctx) => el });
 ## 结构
 
 ```
-internal/                Go 共享层(桌面壳与 web 网关复用)
-  ghserver/              gh server 进程管理:Proc(单进程生命周期)+
-                         Manager(uid → 进程注册表:端口池、懒启动、空闲回收)
-                         + 反代核心(去前缀/注入令牌/SSE flush/body 补长)
-  appcfg/                桌面配置与项目索引的文件持久化
-  identity/              用户身份解析:single / header(被集成)/ sso(Casdoor)
-  gateway/               多用户 web 网关:静态托管 + /grf-api 按用户路由 + auth
-main.go / *.go           wails v3 桌面壳(服务薄壳:引用 internal,保留
-                         /grf-api/token 冷启动端点、Desktop/ModelConfig/Terminal)
-cmd/grf-web-serve/       多用户 web 网关 CLI(环境变量驱动三种身份模式)
+pkg/                     Go 公开层(三方 Go module 可 import 的基座面)
+  ghserver/              gh server 进程管理:Proc(单进程生命周期)+ Manager
+                         (uid → 进程注册表:端口池、懒启动、空闲回收、崩溃
+                         重启冷却)+ 反代核心(按上游缓存复用/注入令牌/SSE
+                         flush/body 补长/请求体上限)+ 类型化错误
+  identity/              用户身份解析:single / header(被集成)/ sso(Casdoor,
+                         会话可文件持久化)
+  gateway/               多用户 web 网关:静态托管 + /grf-api 按用户路由 +
+                         auth + CORS(通配/白名单)+ /healthz/ready +
+                         /admin/* 管理 API + webhook + 请求日志
+internal/                Go 桌面专属层
+  appcfg/                桌面配置与项目索引的文件持久化(原子写)
+  desktop/ browser/      wails 服务薄壳、右栏内嵌浏览器原生实现
+main.go / *.go           wails v3 桌面入口(服务注册/窗口/embed 资源)
+cmd/grf-web-serve/       多用户网关 CLI(环境变量驱动三种身份模式)
 frontend/src/
-  core/                  无 UI 的核心层:api(ORS 客户端+SSE)、model(会话
-                         运行时)、store(scope 编排/持久化/响应式基座)、
-                         settings(设置状态)
-  registry/              UI 注册表:nav/side/bottom 三区条目(定制扩展点)
+  core/                  无 UI 的核心层:api(ORS 客户端+SSE+超时)、model
+                         (会话运行时)、store(scope 编排/持久化/响应式基座/
+                         可注入键值存储/恢复策略/嵌入方运行时策略钩子)、
+                         settings(设置状态)、i18n(文案定制通道)
+  registry/              UI 注册表:nav/side/bottom/settings 四区条目 +
+                         chat 消息内容层(渲染器/工具元数据/markdown 覆写);
+                         内置设置分区为 sections/ 目录的分区组件(render
+                         返回池化元素,与三方自定义分区同一通道)
   panels/                按功能分组:chat(消息流/composer/状态浮窗)、
                          sessions、files、inspector(详情/审查/浏览器)、
-                         console、terminal(仅桌面)、settings
-  shell/                 app-shell 布局 + 内置条目注册(builtin-common/desktop)
+                         console、terminal(仅桌面)、settings(nav/page
+                         壳层 + sections/ 六分区组件)、updater
+                         (桌面自动更新 UI:左栏「更新」入口 + 更新对话框)
+  shell/                 app-shell 布局 + side/bottom dock(通用布局容器,
+                         从 chat 面板剥离)+ 内置条目注册
   ui/                    GrfPanel 基类与 --grf-* 主题令牌
   host/                  wails 宿主桥(纯 web 态 no-op 回退)
   entries/               desktop.ts(桌面)/ embed.ts(嵌入库)入口
-docs/                    embedding.md(三方集成)
-```
+docs/                    embedding.md(三方集成)· testing.md(E2E)
+``````
 
 ## 测试
 
+- `cd frontend && npm test`:vitest 单元测试,按模块拆分在 tests/ 下
+  (registry 协议/markdown 安全/SSE 归约器/协议块解析/i18n/存储/
+  恢复策略/发送管线三层自愈/工具词典与流式容错提取/scope 生命周期);
+  Go 侧另有 pkg 基座面单测(ghserver 进程管理/反代/identity/gateway)
+  与 bridge FQN 对齐守护(internal/desktop,反射服务方法 vs bridge.ts 引用)
 - `cd frontend && npx tsc --noEmit`:类型检查
 - `go build ./... && go vet ./...`:Go 侧
 - 端到端(真实 gh server + 真实模型):`gh server` 起在 7401 或直接用
@@ -222,5 +245,6 @@ docs/                    embedding.md(三方集成)
   文件」),正规入口是应用菜单/桌面图标。Linux zip 附 `install.sh`
   (含 .desktop 模板与图标):解压后 `./install.sh` 一次,即装进
   `~/.local/bin` 与应用概览(搜索「Goder」启动);终端运行照旧
-- sso 身份模式的本地会话表在内存中(默认实现),网关重启需重新登录;
-  `identity.SessionStore` 接口预留给持久化实现
+- sso 身份模式的本地会话表默认在内存中;设 `GRF_SESSIONS_FILE` 可启用
+  文件持久化(重启免重登,单实例定位;分布式部署需自换
+  `identity.SessionStore` 实现)

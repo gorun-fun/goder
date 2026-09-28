@@ -2,7 +2,6 @@
 export const icon = {
   chat: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2.5 3.5h11v7.5h-6L4 13.5V11H2.5z" stroke-linejoin="round"/></svg>',
   send: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 2l12 6-12 6 2.6-6L2 2zm2.9 5L4 4.4 5.6 7H4.9z"/></svg>',
-  stop: '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="4" width="8" height="8" rx="1.2"/></svg>',
   plus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10" stroke-linecap="round"/></svg>',
   folder: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1.8 4.2c0-.6.5-1.1 1.1-1.1h3l1.4 1.6h5.8c.6 0 1.1.5 1.1 1.1v6c0 .6-.5 1.1-1.1 1.1H2.9c-.6 0-1.1-.5-1.1-1.1v-7.6z" stroke-linejoin="round"/></svg>',
   folderOpen: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 12.6V4.2c0-.6.5-1.1 1.1-1.1h3l1.3 1.5h4.6" stroke-linejoin="round"/><path d="M3.6 12.8l-1.2-4c-.2-.6.3-1.2.9-1.2h9.8c.5 0 .9.3 1 .8l1.1 4c.2.6-.3 1.2-.9 1.2H4.6c-.5 0-.9-.3-1-.8z" fill="currentColor" fill-opacity="0.18" stroke-linejoin="round"/></svg>',
@@ -15,7 +14,6 @@ export const icon = {
   info: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.8"/><path d="M8 7.2v3.6" stroke-linecap="round"/><circle cx="8" cy="5.1" r=".7" fill="currentColor" stroke="none"/></svg>',
   settings: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M7.32 1.54A6.5 6.5 0 0 1 8.68 1.54L9.39 3.3A4.9 4.9 0 0 1 10.34 3.69L12.09 2.95A6.5 6.5 0 0 1 13.05 3.91L12.31 5.66A4.9 4.9 0 0 1 12.7 6.61L14.46 7.32A6.5 6.5 0 0 1 14.46 8.68L12.7 9.39A4.9 4.9 0 0 1 12.31 10.34L13.05 12.09A6.5 6.5 0 0 1 12.09 13.05L10.34 12.31A4.9 4.9 0 0 1 9.39 12.7L8.68 14.46A6.5 6.5 0 0 1 7.32 14.46L6.61 12.7A4.9 4.9 0 0 1 5.66 12.31L3.91 13.05A6.5 6.5 0 0 1 2.95 12.09L3.69 10.34A4.9 4.9 0 0 1 3.3 9.39L1.54 8.68A6.5 6.5 0 0 1 1.54 7.32L3.3 6.61A4.9 4.9 0 0 1 3.69 5.66L2.95 3.91A6.5 6.5 0 0 1 3.91 2.95L5.66 3.69A4.9 4.9 0 0 1 6.61 3.3L7.32 1.54Z"/><circle cx="8" cy="8" r="2.1"/></svg>',
   refresh: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" stroke-linecap="round"/><path d="M13.7 1.8v3h-3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  archive: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 3.5h12v2.5H2zM3.2 6v6.5h9.6V6M6.4 8.8h3.2" stroke-linejoin="round"/></svg>',
   compact: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 5.5h10M3 10.5h10" stroke-linecap="round"/><path d="M6.5 8h3" stroke-linecap="round"/></svg>',
   image: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1" stroke-linejoin="round"/><circle cx="6" cy="6.6" r="1.1"/><path d="M2.8 11.5l3.4-3 2.4 2.2 2.2-2 2.4 2.6" stroke-linejoin="round"/></svg>',
   close: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg>',
@@ -26,12 +24,9 @@ export const icon = {
   brain: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M6.5 2.8c-1.6 0-2.6 1-2.6 2.3-1 .3-1.6 1.1-1.6 2 0 .7.4 1.4 1 1.7-.2 1.5.9 2.7 2.5 2.7.6.8 1.5 1.2 2.4 1V2.9c-.5-.1-1.1-.1-1.7-.1z"/><path d="M9.5 2.8c1.6 0 2.6 1 2.6 2.3 1 .3 1.6 1.1 1.6 2 0 .7-.4 1.4-1 1.7.2 1.5-.9 2.7-2.5 2.7-.6.8-1.5 1.2-2.4 1V2.9c.5-.1 1.1-.1 1.7-.1z"/></svg>',
   wrench: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M9.6 3.2a3.4 3.4 0 0 0-4.3 4.3L2 10.8l3.2 3.2 3.3-3.3a3.4 3.4 0 0 0 4.3-4.3l-2 2-2.2-2.2 2-2z" stroke-linejoin="round"/></svg>',
   check: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3.5 8.5l3 3 6-7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  x: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke-linecap="round"/></svg>',
-  warn: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2.2l6 11H2l6-11z" stroke-linejoin="round"/><path d="M8 6.4v3.2" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".7" fill="currentColor" stroke="none"/></svg>',
   user: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="5.4" r="2.6"/><path d="M2.8 13.6c.6-2.6 2.7-4 5.2-4s4.6 1.4 5.2 4" stroke-linecap="round"/></svg>',
   bot: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3.2" y="5.2" width="9.6" height="7" rx="1.4" stroke-linejoin="round"/><path d="M8 2.4v2.8" stroke-linecap="round"/><circle cx="8" cy="2" r=".8"/><circle cx="6" cy="8.6" r=".8" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r=".8" fill="currentColor" stroke="none"/></svg>',
   play: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5.2 3.6l7 4.4-7 4.4z" fill="currentColor" fill-opacity="0.2" stroke-linejoin="round"/></svg>',
-  clock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.4 1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   db: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><ellipse cx="8" cy="4" rx="5.2" ry="2"/><path d="M2.8 4v8c0 1.1 2.3 2 5.2 2s5.2-.9 5.2-2V4M2.8 8c0 1.1 2.3 2 5.2 2s5.2-.9 5.2-2" stroke-linejoin="round"/></svg>',
   zap: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9 1.8L3.5 9H7l-.8 5.2L12 7H8.4L9 1.8z" stroke-linejoin="round"/></svg>',
   gitBranch: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4.5" cy="3.8" r="1.6"/><circle cx="4.5" cy="12.2" r="1.6"/><circle cx="11.5" cy="6" r="1.6"/><path d="M4.5 5.4v5.2M11.5 7.6c0 1.9-2 1.9-4 2.5M6.1 3.8h3.8" stroke-linecap="round"/></svg>',
@@ -47,38 +42,3 @@ export const icon = {
 };
 
 export type IconName = keyof typeof icon;
-
-// 工具名 → 图标(粗分类,未知工具用扳手)。
-const toolIcons: Record<string, IconName> = {
-  bash: 'terminal',
-  read: 'info',
-  write: 'edit',
-  edit: 'edit',
-  glob: 'info',
-  grep: 'info',
-  read_image: 'image',
-  web_search: 'info',
-  ask_user_question: 'user',
-  todo_write: 'check',
-  skill: 'info',
-  subagent: 'bot',
-  subagent_fork: 'bot',
-  send_message: 'chat',
-  interrupt_agent: 'stop',
-  list_agents: 'bot',
-  workflow: 'zap',
-  ralph: 'zap',
-  create_goal: 'check',
-  update_goal: 'check',
-  get_goal: 'check',
-  enter_plan_mode: 'info',
-  exit_plan_mode: 'info',
-  set_policy: 'settings',
-  job_list: 'clock',
-  job_output: 'terminal',
-  job_kill: 'stop',
-};
-
-export function toolIcon(name: string): string {
-  return icon[toolIcons[name] ?? 'wrench'];
-}

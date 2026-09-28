@@ -79,32 +79,59 @@ main.go                  wails v3 桌面入口(仅装配:服务注册、窗口�
 internal/desktop/        桌面 wails 服务薄壳(AppConfig/ServerManager/
                          ModelConfig/Desktop/TerminalManager/BrowserManager/
                          ConsoleMCP + rootHandler /grf-api 反代与 /grf-api/token
-                         冷启动端点;引用 internal/appcfg、internal/ghserver)
-cmd/grf-web-serve/       多用户网关 CLI(GRF_IDENTITY=single|header|sso)
+                         冷启动端点;引用 internal/appcfg、pkg/ghserver)
+cmd/grf-web-serve/       多用户网关 CLI(GRF_IDENTITY=single|header|sso;
+                         运维 env:GRF_ADMIN_TOKEN/GRF_WEBHOOK_URL/
+                         GRF_CORS_ORIGINS/GRF_ACCESS_LOG/GRF_SESSIONS_FILE)
 frontend/src/
-  core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗)/ model(会话运行
-           时模型)/ store(emitter 响应式基座、scope 编排、persistence、
+  core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗+非流式超时;
+           agent-dto 为 gh 智能体配置 DTO,桌面桥与网页 agent-api 共用)/
+           model(会话运行时模型)/ store(emitter 响应式基座——subscribe
+           全量 + subscribeSession 会话定向,流式 delta 只唤醒关注该会话
+           的面板、scope 编排、persistence、storage(可注入键值存储,
+           core 全部 localStorage 落点的统一通道,setKeyValueStorage 整体
+           替换)、retry-policy(流恢复策略,可注入)、host-config(嵌入方
+           按 scope 注入的运行时策略:sessionDefaults/ungroupedSessions/
+           disableDefaultPrompt/onBeforeSend 发送钩子/onApproval 审批钩子)、
            automation 操作员 system_prompt 与 <grf-task> 任务块解析、
            session-prompt 普通会话默认 custom 提示词——gh 系统提示词为
            「custom 段 + inner prompt(内置工具说明,按可用工具恒定拼装)」
            叠加结构,草稿落定时项目 defaults 与操作员提示词均未带
-           system_prompt 则注入该默认值;defaults 另可带 default_skill
-           指定默认技能全文注入,经 grf:session 透传、同为嵌入方开放通道)/
-           settings(设置状态)
+           system_prompt 则注入该默认值(disableDefaultPrompt 可关闭);
+           defaults 另可带 default_skill 指定默认技能全文注入,经
+           grf:session 透传、同为嵌入方开放通道)/ settings(设置状态)/
+           i18n.ts(gettext 风格文案通道:key 即中文默认文案,嵌入方经
+           configure({locale,messages}) 覆盖;GrfPanel.t() 与 core 文案
+           均过它,收口持续推进)
   registry/ UI 注册表:nav(左栏导航)/ side(右栏 tab)/ bottom(底栏
-           tab)/ settings(设置分区,内置分区 render 留空、由 settings-page
-           内部实现)四区条目 —— 内置与三方自定义同一条
-           add/remove/hide/show API
-  panels/  按功能分组:chat(chat-panel/messages/status-pop(含自动化任务
-           执行入口)/composer/工具卡/ask/审批/任务卡)、sessions
-           (session-list,桌面态含「自动化」操作员类别)、files(file-list/
-           file-view)、inspector(session-detail/review/browser)、console、
-           terminal(仅桌面入口注册,含 xterm)、settings(settings-nav/page)
-  shell/   app-shell 布局(registry 驱动)+ builtin-common / builtin-desktop
-           (内置条目注册:模块加载即注册,幂等)
-  ui/      GrfPanel 基类(panel.ts,同时转出 theme)+ theme.ts(--grf-* 令牌)
+           tab)/ settings(设置分区,内置六分区为 panels/settings/
+           sections/ 的分区组件,render 返回池化元素)四区条目 +
+           chat(消息内容层:ItemRendererDef 按
+           kind/工具名接管单条消息渲染、ToolMetaDef 工具展示知识、
+           setMarkdownRenderer per-scope markdown 覆写)—— 内置与三方
+           自定义同一条 add/remove/hide/show API;条目可带 scopes 字段
+           限定只对哪些 scope 可见(同页多实例各装各的)
+  panels/  按功能分组:chat(chat-panel——消息流+composer+头部,右栏/
+           底栏 dock 已剥离到 shell;messages 渲染管线三层:自定义渲染器
+           →内置 kind switch→未知 kind 通用通知卡、status-pop(含自动化任务
+           执行入口,configure({statusPop:false}) 可整体隐藏)/composer
+           (send 事件 cancelable + onBeforeSend 钩子消费)/工具卡/ask/
+           审批/任务卡)、sessions(session-list,桌面态含「自动化」操作员
+           类别)、files(file-list/file-view)、inspector(session-detail/
+           review/browser)、console、terminal(仅桌面入口注册,含
+           xterm)、settings(settings-nav/page 壳层 +
+           sections/ 六分区组件)
+  shell/   app-shell 布局(registry 驱动;workcard 容器承载卡片视觉,
+           中央=自定义 center 或 chat(flat),cols = col-main + side-dock)+
+           side-dock.ts(右栏 dock:tab 行+元素池,panelEl 公开取池内元素)/
+           bottom-dock.ts(底栏 dock:按会话分组 tab 组)+ builtin-common /
+           builtin-desktop(内置条目注册:模块加载即注册,幂等)
+  ui/      GrfPanel 基类(panel.ts——scope 订阅+会话定向订阅+fire+t()
+           i18n 帮助方法,同时转出 theme)+ theme.ts(--grf-* 令牌)
   host/    wails 宿主桥(纯 web 态 no-op 回退)
-  entries/ desktop.ts(桌面入口,注册桌面条目)/ embed.ts(嵌入库入口)
+  entries/ desktop.ts(桌面入口,注册桌面条目)/ embed.ts(嵌入库入口:
+           全部钩子类型导出 + GRF_UI_VERSION 版本常量;构建产出
+           dist-embed/grf-ui.js + types/ 的 .d.ts)
 ```
 
 依赖方向:panels/shell → registry/core;core 不依赖 UI;桌面专属能力只经
@@ -132,11 +159,31 @@ frontend/src/
   条目一律经 `registry/registry.ts` 注册;新内置面板 = builtin-common
   (通用)或 builtin-desktop(桌面专属,visible 守卫 `ctx.desktop`)加
   条目,不许在 chat-panel/app-shell 里硬编码新面板类型。设置分区同理:
-  内置分区在 builtin-common 注册(render 留空、由 settings-page 内部
-  实现渲染),settings-nav/settings-page 只按 registry 装配,不硬编码
-  分区清单。桌面专属模块(terminal/review/file-view)只能被
+  内置分区在 builtin-common 注册(render 返回 sections/ 分区组件的
+  池化元素,sections/index.ts 的 builtinSettingsRender),settings-page
+  只做壳层装配与保活,不硬编码分区清单。桌面专属模块
+  (terminal/review/file-view)只能被
   entries/desktop.ts 或 builtin-desktop 引用,嵌入产物不得包含。
 - 嵌入库保持零外部依赖、shadow DOM 样式自隔离;换肤只经 `--grf-*` CSS 变量。
+- **dock 不变量**:右栏/底栏 dock(`shell/side-dock.ts`、`bottom-dock.ts`)
+  是壳层通用布局容器,由 app-shell 的 workcard 结构装配;chat-panel 不再
+  渲染任何 dock —— 新的面板内容一律经 registry.side/bottom 注册,不许往
+  dock 组件里硬编码面板类型。shell 装配的 chat 传 `flat`(卡片视觉由
+  workcard 承担);对池内元素的编程访问经 side-dock 的 `panelEl(defId)`
+  公开方法,不许跨 shadow DOM 摸内部标签名。
+- **消息渲染管线不变量**:messages.ts 的 renderItem 三层分发(自定义渲染
+  器(registry.chat,工具名优先于 kind)→ 内置 kind switch → 未知 kind
+  通用通知卡兜底);markdown 走 `chatMarkdown(scope, text)`(per-scope
+  覆写优先),不得直接 import renderMarkdown 绕过覆写。工具展示名/明细
+  先查 registry.chat 的 ToolMetaDef 再落内置词典(fmt.ts)。
+- **core 持久化与策略注入不变量**:core 的一切 localStorage 读写必须经
+  `core/store/storage.ts` 的 KeyValueStorage(嵌入方可整体替换),不许
+  再新增裸 localStorage 调用;连接副本默认不落 token(`persistToken: true`
+  显式开启,桌面入口已开)。嵌入方运行时策略(发送/审批钩子等)一律经
+  `core/store/host-config.ts` 按 scope 注入;流恢复参数经 retry-policy.ts。
+  automation 的 grf-auto 技能正文经 vite define(`__GRF_AUTO_SKILL_MD__`,
+  两个 vite 配置同源读 internal/desktop/agentskills/grf-auto.md)注入,
+  core 不跨树 ?raw 引 Go 源码 —— core 目录保持可整体拷出独立成包。
 - gh server 无 CORS 头:浏览器端一律走同源 `/grf-api`(桌面反代或网关),
   不要直连;web 形态默认 baseUrl 为同源 `/grf-api`(scope.ts 的
   locationDefaultBase)。
@@ -144,7 +191,7 @@ frontend/src/
   api client 的 Authorization 仅在配置了 token 时携带。
 - header 身份模式信任请求头:只可用于可信上级反代之后(内网),文档已
   注明;改动 identity/gateway 时保持该约束的说明同步。
-- `internal/ghserver/proxy.go`:WKWebView 自定义 scheme 请求不带
+- `pkg/ghserver/proxy.go`:WKWebView 自定义 scheme 请求不带
   Content-Length,转发前必须整体缓冲 body 并补齐长度(Go#16036),
   否则 POST body 丢失。
 - **goder-console 接入不变量**:gh 的 plugins 配置「settings.json 无
@@ -162,7 +209,7 @@ frontend/src/
   `frontend/src/host/bridge.ts` 手工对齐,两边同改保持同步;wails
   `Call.ByName` 按完整包路径 FQN(`bridge.ts` 的 SVC 常量)匹配,挪包时
   两边同步;AppConfig/ServerManager 是薄壳,逻辑改动应落在
-  internal/appcfg、internal/ghserver。
+  internal/appcfg、pkg/ghserver。
 - 前端 web 默认 baseUrl、桌面 bootstrap 顺序(先同源代理再补 token)与
   `/grf-api/token` 端点是冷启动链路的一部分,改动需回归桌面+web 两形态。
 - **自动化操作员不变量**:操作员 = ProjectsIndex 里 `kind:'operator'` 的
@@ -181,10 +228,10 @@ frontend/src/
   可点击执行的指令)的正文单一源文件在
   `internal/desktop/agentskills/grf-auto.md`:Go 侧 go:embed 由
   AgentConfig.ServiceStartup 幂等烙写 `~/.grf/skills/grf-auto`
-  (内容不一致才写;用户已禁用则尊重;内置技能不可删/编辑),前端
-  automation.ts 以 vite `?raw` 引同一文件把全文注入操作员
-  system_prompt(创建自动化会话即自动加载)—— 改指南只改这一份,
-  跨树引用的 dev 放行靠 vite.config.ts 的 `server.fs.allow`。
+  (内容不一致才写;用户已禁用则尊重;内置技能不可删/编辑),前端经
+  两个 vite 配置的 define 常量 `__GRF_AUTO_SKILL_MD__`(构建时读同一
+  文件)把全文注入操作员 system_prompt(创建自动化会话即自动加载)——
+  改指南只改这一份;core 不再跨树 ?raw 引 Go 源码。
 
 ## 运行时环境
 

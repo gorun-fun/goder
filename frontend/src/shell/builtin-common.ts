@@ -9,6 +9,9 @@ import '../panels/sessions/session-list';
 import '../panels/settings/settings-nav';
 import '../panels/settings/settings-page';
 import '../panels/inspector/browser';
+import '../panels/inspector/session-detail';
+import '../panels/console/console';
+import { builtinSettingsRender } from '../panels/settings/sections';
 import type { SettingsSection } from '../panels/settings/settings-nav';
 
 let registered = false;
@@ -56,8 +59,8 @@ export function registerBuiltinCommon(): void {
   });
 
   // ---------- 右栏 tab ----------
-  // (详情/事件台面板仍保留:嵌入库 entries/embed.ts 单独导出,三方可自行
-  // 经 registry.side.add 挂回右栏。)
+  // 浏览器为通用默认条目;详情/事件台同批注册(经右栏"+"菜单按需打开,
+  // 嵌入方可 hide 裁剪)。
   registry.side.add({
     id: 'browser',
     label: '浏览器',
@@ -65,15 +68,46 @@ export function registerBuiltinCommon(): void {
     width: 560,
     render: (ctx) => html`<grf-browser scope=${ctx.scope}></grf-browser>`,
   });
+  registry.side.add({
+    id: 'detail',
+    label: '详情',
+    icon: icon.info,
+    render: (ctx) => html`<grf-session-detail scope=${ctx.scope}></grf-session-detail>`,
+  });
+  registry.side.add({
+    id: 'console',
+    label: '事件台',
+    icon: icon.activity,
+    render: (ctx) => html`<grf-console scope=${ctx.scope}></grf-console>`,
+  });
 
   // ---------- 设置分区 ----------
-  // 内置分区:render 留空,由 settings-page 内部实现;三方经
-  // registry.settings.add 注入自定义分区(或同 id 覆写内置分区页面)、
-  // hide/show 裁剪,与导航/右栏/底栏同一套 API。
-  registry.settings.add({ id: 'appearance', label: '外观', icon: icon.palette, group: '基础设置', order: 10 });
-  registry.settings.add({ id: 'models', label: '模型', icon: icon.brain, group: '基础设置', order: 20 });
-  registry.settings.add({ id: 'harness', label: 'Harness', icon: icon.settings, group: '智能体', order: 30 });
-  registry.settings.add({ id: 'plugins', label: '插件', icon: icon.zap, group: '智能体', order: 40 });
-  registry.settings.add({ id: 'mcp', label: 'MCP', icon: icon.db, group: '智能体', order: 50 });
-  registry.settings.add({ id: 'skills', label: '技能', icon: icon.wrench, group: '智能体', order: 60 });
+  // 内置分区与三方同一条 render 通道:render 返回按 scope 池化的分区
+  // 组件元素(settings-page 的 HTMLElement 保活通道,跨分区切换不丢
+  // 内部状态)。三方经 registry.settings.add 注入自定义分区(或同 id
+  // 覆写内置分区页面)、hide/show 裁剪,与导航/右栏/底栏同一套 API。
+  registry.settings.add({
+    id: 'appearance', label: '外观', icon: icon.palette, group: '基础设置', order: 10,
+    render: builtinSettingsRender('grf-settings-appearance'),
+  });
+  registry.settings.add({
+    id: 'models', label: '模型', icon: icon.brain, group: '基础设置', order: 20, wide: true,
+    render: builtinSettingsRender('grf-settings-models'),
+  });
+  registry.settings.add({
+    id: 'harness', label: 'Harness', icon: icon.settings, group: '智能体', order: 30,
+    render: builtinSettingsRender('grf-settings-harness'),
+  });
+  registry.settings.add({
+    id: 'plugins', label: '插件', icon: icon.zap, group: '智能体', order: 40,
+    render: builtinSettingsRender('grf-settings-plugins'),
+  });
+  registry.settings.add({
+    id: 'mcp', label: 'MCP', icon: icon.db, group: '智能体', order: 50,
+    render: builtinSettingsRender('grf-settings-mcp'),
+  });
+  registry.settings.add({
+    id: 'skills', label: '技能', icon: icon.wrench, group: '智能体', order: 60,
+    render: builtinSettingsRender('grf-settings-skills'),
+  });
 }

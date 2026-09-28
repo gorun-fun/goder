@@ -74,7 +74,8 @@ func (s *Store) Load() (Config, error) {
 	return cfg, nil
 }
 
-// Save 落盘应用配置。
+// Save 落盘应用配置(原子写:tmp + rename,进程在写入中途被杀不致
+// 损坏既有配置)。
 func (s *Store) Save(cfg Config) error {
 	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 		return err
@@ -83,7 +84,21 @@ func (s *Store) Save(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.Dir, "config.json"), data, 0o600)
+	return atomicWrite(filepath.Join(s.Dir, "config.json"), data, 0o600)
+}
+
+// atomicWrite 同目录写临时文件后 rename 顶替(同分区保证原子性;
+// 失败时清理临时文件,目标文件保持旧内容)。
+func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 var scopeSan = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
@@ -97,10 +112,10 @@ func (s *Store) LoadIndex(scope string) (string, error) {
 	return string(data), err
 }
 
-// SaveIndex 写入某个 scope 的项目索引 JSON。
+// SaveIndex 写入某个 scope 的项目索引 JSON(原子写,同 Save)。
 func (s *Store) SaveIndex(scope string, indexJSON string) error {
 	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.Dir, "index-"+scopeSan.ReplaceAllString(scope, "_")+".json"), []byte(indexJSON), 0o600)
+	return atomicWrite(filepath.Join(s.Dir, "index-"+scopeSan.ReplaceAllString(scope, "_")+".json"), []byte(indexJSON), 0o600)
 }

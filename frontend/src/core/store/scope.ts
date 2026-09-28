@@ -1,8 +1,12 @@
 // scope.ts — 核心编排器:一个 scope 聚合连接配置、项目索引、会话运行态与
 // 事件日志;面板(会话列表/聊天/右栏/底栏)通过 scope 名共享同一份数据。
 // 嵌入态多个 scope 互不干扰,桌面态只用 "app"。
+// 嵌入方运行时策略(会话兜底配置/发送钩子/审批钩子)经 host-config.ts
+// 按 scope 注入;恢复策略(重试判定)经 retry-policy.ts 可注入;轻量持久化
+// 统一走 storage.ts 的可注入键值存储。
 import { GrfApiError, GrfClient } from '../api/client';
-import { friendlyError, isToolChoiceUnsupported } from '../../util/fmt';
+import { friendlyError } from '../../util/fmt';
+import { tFor } from '../i18n';
 import type {
   Conversation,
   GrfSessionConfig,
@@ -37,8 +41,30 @@ import { operatorSystemPrompt, runnerSystemPrompt, runnerMessage } from './autom
 import { goderSessionPrompt } from './session-prompt';
 import { desktopHomeDir, ensureHomeDir } from '../../host/bridge';
 import { Emitter } from './emitter';
+import {
+  defaultPromptDisabled,
+  getApprovalHook,
+  getSessionDefaults,
+  ungroupedAllowed,
+} from './host-config';
+import { createSendPipeline, errText, type SendPipeline } from './send-pipeline';
+export { errText } from './send-pipeline';
+import { keyValueStorage, kvGet, kvSet } from './storage';
 
 export const UNGROUPED = '__ungrouped';
+
+// 嵌入方配置入口重新导出(嵌入库 embed.ts 与既有调用方的稳定 import 路径)
+export {
+  setSessionDefaults,
+  setUngroupedSessions,
+  ungroupedAllowed,
+  setSendInterceptor,
+  getSendInterceptor,
+  setApprovalHook,
+  getApprovalHook,
+  setDisableDefaultPrompt,
+} from './host-config';
+export type { SendPayload, SendInterceptor, ApprovalRequest, ApprovalDecision, ApprovalHook } from './host-config';
 
 export interface ConsoleEntry {
   ts: number;
@@ -66,6 +92,12 @@ export interface ConnectionConfig {
    * 嵌入方经项目 defaults/grf:session 全权管理会话策略时置 false,
    * 防止使用者在 UI 上放宽宿主下发的策略。 */
   policySelector?: boolean;
+  /** 持久化连接副本时是否连带 token(默认 false:token 不落本地存储,
+   * 每次加载由宿主/网关重新下发 —— 网关模式令牌本就不进浏览器,直连
+   * 模式的长期令牌写 localStorage 有被同源脚本读取的风险)。桌面态由
+   * 桌面入口显式开启(令牌是本机 gh server 的短期本地令牌,风险可控,
+   * 且冷启动需要它直连)。旧数据里已存的 token 读取不受影响。 */
+  persistToken?: boolean;
 }
 
 export type ConnState = 'unknown' | 'checking' | 'ok' | 'error';
@@ -127,21 +159,39 @@ export class GrfScope extends Emitter {
   private pauseRepaired = new Set<string>();
 
   private authCfg?: AuthConfig;
+  /** 连接副本落盘是否连带 token(见 ConnectionConfig.persistToken)。 */
+  private persistToken = false;
+  /** 本 scope 的文案翻译函数(i18n;core 产生的用户可见文案过它)。 */
+  private t = tFor('default');
 
   constructor(name: string, cfg: ConnectionConfig) {
     super();
     this.name = name;
+    this.t = tFor(name);
     this.client = new GrfClient({ baseUrl: cfg.baseUrl, token: cfg.token });
     this.model = fullModelName(cfg.model);
+    this.persistToken = cfg.persistToken === true;
     // 思考强度无可继承记录/未选择时默认高(goder 约定,不依赖服务端默认)
     this.reasoningEffort = cfg.reasoningEffort ?? 'high';
     this.authCfg = cfg.auth;
     this.policySelector = cfg.policySelector !== false;
     this.draftPolicy = this.policySelector ? loadPolicyLocal(name) : undefined;
+    // 发送/恢复管线(三层重试 + 终态对账;依赖本 scope 的日志/翻译/
+    // 刷新与链尾采纳)
+    this.pipeline = createSendPipeline({
+      client: this.client,
+      log: (level, text) => this.log(level, text),
+      t: this.t,
+      onApplied: () => this.notify(),
+      adoptChainTail: (sid, respId) => this.adoptChainTail(sid, respId),
+    });
     // 桌面态的用户主目录:未选工作区时新会话 workspace 的默认值
     // (纯 web 态为空串,workspace 保持 undefined 走服务端默认)。
     void desktopHomeDir().then((h) => (this.homeDir = h));
   }
+
+  /** 发送/恢复管线(send-pipeline.ts;send/submitInputResult 经它出站)。 */
+  private pipeline: SendPipeline;
 
   /** 用户主目录(桌面态;未选工作区时新会话的默认 workspace)。 */
   private homeDir = '';
@@ -151,7 +201,7 @@ export class GrfScope extends Emitter {
     if (p !== 'write-workspace' && p !== 'off') return;
     this.draftPolicy = p;
     try {
-      localStorage.setItem(policyKey(this.name), p);
+      keyValueStorage().setItem(policyKey(this.name), p);
     } catch {
       /* 忽略 */
     }
@@ -164,7 +214,7 @@ export class GrfScope extends Emitter {
    * 不动连接状态。 */
   setModel(m: string): void {
     this.model = fullModelName(m);
-    saveConnLocal(this.name, {
+    saveConnLocal(this.name, this.persistToken, {
       baseUrl: this.client.config.baseUrl,
       token: this.client.config.token,
       ...(this.model ? { model: this.model } : {}),
@@ -178,7 +228,7 @@ export class GrfScope extends Emitter {
   reasoningEffort?: string;
   setReasoningEffort(e: string): void {
     this.reasoningEffort = e || undefined;
-    saveConnLocal(this.name, {
+    saveConnLocal(this.name, this.persistToken, {
       baseUrl: this.client.config.baseUrl,
       token: this.client.config.token,
       ...(this.model ? { model: this.model } : {}),
@@ -199,7 +249,7 @@ export class GrfScope extends Emitter {
       this.log('info', `访问策略已切换为 ${applied}(本会话生效)`);
       return true;
     } catch (err) {
-      this.log('warn', `策略变更失败:${errText(err)}`);
+      this.log('warn', `策略变更失败:${errText(err, this.t)}`);
       return false;
     }
   }
@@ -248,7 +298,7 @@ export class GrfScope extends Emitter {
           const since = Date.now() - (this.streamDoneAt.get(sid) ?? 0);
           if (!this.streamDoneAt.has(sid)) this.streamDoneAt.set(sid, Date.now());
           else if (since > 4000 && this.activeAborts.has(sid)) {
-            this.log('warn', '检测到事件流挂死,从服务器终态恢复');
+            this.log('warn', this.t('检测到事件流挂死,从服务器终态恢复'));
             this.watchdogHits.add(sid);
             this.activeAborts.get(sid)?.abort();
           }
@@ -301,6 +351,7 @@ export class GrfScope extends Emitter {
     this.client.setConfig({ baseUrl: cfg.baseUrl ?? this.client.config.baseUrl, token: cfg.token ?? this.client.config.token });
     if (cfg.model !== undefined) this.model = fullModelName(cfg.model);
     if (cfg.reasoningEffort !== undefined) this.reasoningEffort = cfg.reasoningEffort;
+    if (cfg.persistToken !== undefined) this.persistToken = cfg.persistToken === true;
     if (cfg.policySelector !== undefined) {
       this.policySelector = cfg.policySelector !== false;
       if (!this.policySelector) this.draftPolicy = undefined;
@@ -309,7 +360,7 @@ export class GrfScope extends Emitter {
       this.authCfg = cfg.auth;
       this.authPrompted = false; // 换了鉴权配置后重新允许触发
     }
-    saveConnLocal(this.name, {
+    saveConnLocal(this.name, this.persistToken, {
       baseUrl: this.client.config.baseUrl,
       token: this.client.config.token,
       ...(this.model ? { model: this.model } : {}),
@@ -545,12 +596,12 @@ export class GrfScope extends Emitter {
     try {
       const dir = await ensureHomeDir(trimmed);
       if (!dir) {
-        this.log('warn', '操作员仅桌面态支持(需要在主目录创建工作区)');
+        this.log('warn', this.t('操作员仅桌面态支持(需要在主目录创建工作区)'));
         return undefined;
       }
       path = dir;
     } catch (err) {
-      this.log('warn', `创建操作员目录失败:${errText(err)}`);
+      this.log('warn', `创建操作员目录失败:${errText(err, this.t)}`);
       return undefined;
     }
     const p: ProjectRecord = {
@@ -644,7 +695,7 @@ export class GrfScope extends Emitter {
       return;
     }
     if (!this.model && !this.activeRuntime?.model) {
-      this.log('warn', '尚未选择模型:请在输入框下方「模型」中选择后再执行任务');
+      this.log('warn', this.t('尚未选择模型:请在输入框下方「模型」中选择后再执行任务'));
       return;
     }
     const startedAt = new Date().toISOString();
@@ -760,7 +811,7 @@ export class GrfScope extends Emitter {
     if (latest.model !== undefined) this.model = fullModelName(latest.model);
     // effort 空串 = 旧版本记录未选(现恒有值),视同无可继承回落默认高
     this.reasoningEffort = latest.effort !== undefined ? latest.effort || 'high' : this.reasoningEffort ?? 'high';
-    saveConnLocal(this.name, {
+    saveConnLocal(this.name, this.persistToken, {
       baseUrl: this.client.config.baseUrl,
       token: this.client.config.token,
       ...(this.model ? { model: this.model } : {}),
@@ -784,7 +835,7 @@ export class GrfScope extends Emitter {
     if (rec?.model !== undefined) {
       this.model = fullModelName(rec.model);
       this.reasoningEffort = rec.effort !== undefined ? rec.effort || 'high' : this.reasoningEffort ?? 'high';
-      saveConnLocal(this.name, {
+      saveConnLocal(this.name, this.persistToken, {
         baseUrl: this.client.config.baseUrl,
         token: this.client.config.token,
         ...(this.model ? { model: this.model } : {}),
@@ -828,7 +879,7 @@ export class GrfScope extends Emitter {
       }
     } catch (err) {
       rt.loaded = false;
-      this.log('warn', `加载会话历史失败:${errText(err)}`);
+      this.log('warn', `加载会话历史失败:${errText(err, this.t)}`);
     }
     this.notify();
   }
@@ -908,6 +959,8 @@ export class GrfScope extends Emitter {
           );
           if (!exists) materializeRequest(rt, req);
         }
+        // 重开会话/多窗口恢复的审批同样过嵌入方钩子
+        this.maybeAutoApprove(rt, sid);
       }
     } catch {
       /* 探测失败忽略 */
@@ -918,7 +971,7 @@ export class GrfScope extends Emitter {
     try {
       await this.client.archiveConversation(sid);
     } catch (err) {
-      if (!opts?.silent) this.log('warn', `归档失败:${errText(err)}`);
+      if (!opts?.silent) this.log('warn', `归档失败:${errText(err, this.t)}`);
     }
     delete this.index.sessions[sid];
     this.runtimes.delete(sid);
@@ -976,96 +1029,9 @@ export class GrfScope extends Emitter {
     return rec.lastResponseId !== (rec.lastSeenResponseId ?? '');
   }
 
-  // requestWithRetry 针对"上游 vLLM 未开启工具调用"的瞬时 400 做有限重试:
-  // 上游网关按后端负载均衡,部分后端没带 --enable-auto-tool-choice,重发通常
-  // 会落到正常后端。该失败发生在生成之前(终态无输出),重发无副作用;重试
-  // 前清掉这次失败物化的错误条目。超过上限仍失败则原样返回,由调用方展示。
-  private async requestWithRetry(rt: SessionRuntime, sid: string, opts: SendOptions): Promise<ResponseResource> {    const max = 3;
-    for (let attempt = 0; ; attempt++) {
-      const final = await this.sendWithStreamRetry(rt, sid, opts);
-      const msg = final.error?.message ?? '';
-      if (
-        final.status !== 'failed' ||
-        (final.output?.length ?? 0) > 0 ||
-        attempt >= max ||
-        !isToolChoiceUnsupported(msg)
-      ) {
-        return final;
-      }
-      rt.items = rt.items.filter(
-        (i) => !(i.kind === 'error' && isToolChoiceUnsupported(i.text)),
-      );
-      this.log('warn', `模型服务瞬时不可用(后端未开启工具调用),自动重试 ${attempt + 1}/${max}`);
-      await new Promise((r) => setTimeout(r, 300));
-    }
-  }
-
-  // sendWithStreamRetry 连接层自愈,两类输入都覆盖:
-  //  1. 浏览器侧 fetch 抛错(事件流中断/静默断流/网络失败);
-  //  2. SSE 流正常结束但终态是 failed 且错误为连接类(如 gh 报
-  //     "llm: read stream: unexpected EOF" / "context deadline exceeded")。
-  // 先尝试从服务器终态对账(回合其实已完成或已暂停的情况直接拿快照),
-  // 否则退避后原样重发,最多 STREAM_RETRY_MAX 次;用户主动取消不重试。
-  // 重发可能造成模型重复生成,但比把会话卡死可取——服务端按会话串行,
-  // 幂等性由 lastResponseId 链保证。
-  private async sendWithStreamRetry(rt: SessionRuntime, sid: string, opts: SendOptions): Promise<ResponseResource> {
-    let sendOpts = opts;
-    for (let attempt = 0; ; attempt++) {
-      let final: ResponseResource | null = null;
-      try {
-        final = await this.client.send(sendOpts);
-      } catch (err) {
-        if (opts.signal?.aborted || attempt >= STREAM_RETRY_MAX || !isRetryableStreamError(err)) throw err;
-        this.log('warn', `连接中断(${errText(err)}),自动重试 ${attempt + 1}/${STREAM_RETRY_MAX}`);
-        // 服务器可能已受理并完成该回合:拿终态快照直接用,不盲目重发。
-        const snapped = await this.tryRecoverFinal(rt, sid);
-        if (snapped) {
-          this.log('info', '已从服务器终态恢复回合(连接中断重试期间)');
-          return snapped;
-        }
-        await new Promise((r) => setTimeout(r, Math.min(800 * (attempt + 1), 4000)));
-        continue;
-      }
-      // failed 终态且为连接类错误:清掉本次物化的错误条目,挂到失败
-      // response 之后重发一次(不挂链会分叉出新会话)。
-      const failMsg = final.error?.message ?? '';
-      if (
-        final.status === 'failed' &&
-        isRetryableStreamFailure(failMsg) &&
-        !opts.signal?.aborted &&
-        attempt < STREAM_RETRY_MAX
-      ) {
-        this.log('warn', `上游连接错误(${friendlyError(failMsg)}),自动重试 ${attempt + 1}/${STREAM_RETRY_MAX}`);
-        rt.items = rt.items.filter(
-          (i) => !(i.kind === 'error' && isRetryableStreamFailure(i.text.replace(/^(发送|应答)失败:/, ''))),
-        );
-        if (final.id) sendOpts = { ...sendOpts, previousResponseId: final.id };
-        await new Promise((r) => setTimeout(r, Math.min(800 * (attempt + 1), 4000)));
-        continue;
-      }
-      return final;
-    }
-  }
-
-  // tryRecoverFinal 查会话终态:服务器已推进到本地未见过的 response 且已到
-  // 终态,则对账并返回该快照(作为本轮 send 的结果);否则返回 null。
-  private async tryRecoverFinal(rt: SessionRuntime, sid: string): Promise<ResponseResource | null> {
-    try {
-      const detail = await this.client.getConversation(sid);
-      const last = detail.last_response_id;
-      if (!last || last === rt.lastResponseId) return null;
-      const snap = await this.client.retrieveResponse(last);
-      if (!snap) return null;
-      const status = snap.status;
-      if (status !== 'completed' && status !== 'failed' && status !== 'cancelled' && status !== 'incomplete') {
-        return null; // 仍在跑:对账无意义,等退避后重发
-      }
-      if (applyResponseSnapshot(rt, snap)) this.notify();
-      return snap;
-    } catch {
-      return null;
-    }
-  }
+  // requestWithRetry/sendWithStreamRetry/tryRecoverFinal/requestWithChainHeal
+  // —— 发送/恢复管线已抽到 send-pipeline.ts(createSendPipeline;构造器
+  // 装配为 this.pipeline),这里只留 scope 侧的链尾采纳(取消/同步路径共用)。
 
   /** 采纳服务器链尾为本地链尾(运行时 + 索引)。停止取消回合后链尾变成
    * 被取消回合的 id,不采纳的话重发会带着旧 previous_response_id 被
@@ -1077,32 +1043,6 @@ export class GrfScope extends Emitter {
     if (rec && rec.lastResponseId !== respId) {
       rec.lastResponseId = respId;
       this.persistIndex();
-    }
-  }
-
-  // requestWithChainHeal 链尾失配自愈:gh 严格要求 previous_response_id 为
-  // 会话链尾。本地链尾落后于服务器(典型:停止后立刻重发——被取消回合已成
-  // 链尾而 lastResponseId 还停在上一回合;或多窗口并发推进)时,首轮请求被
-  // 400 拒且报错会被 recoverAfterStreamBreak 吞成"已恢复",用户消息就无声
-  // 丢失。这里识别该错误,对账服务器链尾后原样重试一次;重试仍失败则把
-  // 真实错误抛给调用方展示。
-  private async requestWithChainHeal(
-    rt: SessionRuntime,
-    sid: string,
-    opts: SendOptions,
-  ): Promise<ResponseResource> {
-    try {
-      return await this.requestWithRetry(rt, sid, opts);
-    } catch (err) {
-      const mismatch =
-        err instanceof GrfApiError && /not the latest response|forking history/i.test(err.message);
-      if (!mismatch || opts.signal?.aborted) throw err;
-      const detail = await this.client.getConversation(sid).catch(() => null);
-      const tail = detail?.last_response_id;
-      if (!tail || tail === opts.previousResponseId) throw err;
-      this.log('warn', '会话链尾已前移(停止/多窗口并发),对账后自动重发');
-      this.adoptChainTail(sid, tail);
-      return await this.requestWithRetry(rt, sid, { ...opts, previousResponseId: tail });
     }
   }
 
@@ -1141,7 +1081,7 @@ export class GrfScope extends Emitter {
     // input_result(服务端会拒:回合已不在暂停态)。
     if (rt.pendingRequests.length > 0 && !resumeOnly) {
       for (const req of rt.pendingRequests) markRequestAnswered(rt, req.call_id, { dismiss: true });
-      this.log('info', '已放弃未应答的提问,按新输入继续');
+      this.log('info', this.t('已放弃未应答的提问,按新输入继续'));
     }
 
     // 编辑重发:本地视图截断到被编辑消息之前,并取服务端历史同位置
@@ -1172,7 +1112,7 @@ export class GrfScope extends Emitter {
           rt.items = rt.items.slice(0, idx);
         } catch {
           grfHistory = undefined;
-          this.log('warn', '读取会话历史失败,本次编辑重发退化为追加发送');
+          this.log('warn', this.t('读取会话历史失败,本次编辑重发退化为追加发送'));
         }
       }
     }
@@ -1221,7 +1161,7 @@ export class GrfScope extends Emitter {
     // 项目路径 > homeDir > sessionDefaults.workspace)。
     let grfSession: GrfSessionConfig | undefined;
     if (isDraft) {
-      const sd = sessionDefaultsMap.get(this.name);
+      const sd = getSessionDefaults(this.name);
       grfSession = {
         ...(sd ?? {}),
         workspace: draftProject?.path || this.homeDir || sd?.workspace,
@@ -1233,7 +1173,10 @@ export class GrfScope extends Emitter {
           draftInfo?.variant === 'run'
             ? runnerSystemPrompt()
             : operatorSystemPrompt(this.automationTasksOf(draftProject.id));
-      } else if (!grfSession.system_prompt?.trim()) {
+      } else if (!grfSession.system_prompt?.trim() && !defaultPromptDisabled(this.name)) {
+        // 嵌入方经 configure({ disableDefaultPrompt: true }) 可完全关闭
+        // goder 默认身份(项目 defaults 与 sessionDefaults 均未给
+        // system_prompt 时留空,由 gh 服务端默认接管)。
         grfSession.system_prompt = goderSessionPrompt();
       }
     }
@@ -1272,7 +1215,11 @@ export class GrfScope extends Emitter {
       const sidFromEvent = ev.response?.['grf:session_id'];
       if (sidFromEvent) migrate(sidFromEvent);
       const changed = applyEvent(rt, ev);
-      if (changed) this.notify();
+      // 会话定向通知:高频流式 delta 只唤醒关注本会话的面板(其余事件
+      // 已经 logEvent → log() 的全量通知覆盖,这里无需再全量广播)
+      if (changed) this.notifySession(sidFromEvent ?? realSid);
+      // 审批钩子:pending 的 tool_approval 物化后即咨询嵌入方
+      this.maybeAutoApprove(rt, sidFromEvent ?? realSid);
       // 截图类工具完成即回填图片:SSE 不带 base64,但工具结果已即时写入
       // 服务端内存历史(conversationItems 实时可读),不用等整回合结束。
       const toolName = ev.item?.name ?? ev.kind;
@@ -1295,7 +1242,7 @@ export class GrfScope extends Emitter {
       if (d?.last_response_id) previousFinal = d.last_response_id;
     }
 
-    const final = await this.requestWithChainHeal(rt, realSid, {
+    const final = await this.pipeline.requestWithChainHeal(rt, realSid, {
       model: this.model,
       reasoningEffort: this.reasoningEffort,
       // 恢复请求只含 function_call_output(暂停会话拒绝混入用户消息)。
@@ -1359,13 +1306,13 @@ export class GrfScope extends Emitter {
       if (ac.signal.aborted && !watchdog) {
         rt.items.push({ kind: 'status', id: genId('s'), text: '已请求中断…' });
       } else {
-        rt.error = errText(err);
+        rt.error = errText(err, this.t);
         this.maybeHandleUnauthorized(err);
-        this.log('error', `发送失败:${errText(err)}`);
+        this.log('error', `发送失败:${errText(err, this.t)}`);
         // 中途断流:请求可能已被服务端受理,按会话终态对账自愈,不盲报错。
         const recovered = await this.recoverAfterStreamBreak(realSid, rt);
         if (!recovered) {
-          rt.items.push({ kind: 'error', id: genId('e'), text: `发送失败:${friendlyError(errText(err))}` });
+          rt.items.push({ kind: 'error', id: genId('e'), text: `发送失败:${friendlyError(errText(err, this.t))}` });
         }
       }
       // 历史前缀被服务端拒绝(多窗口并发改写等):视图已本地截断,
@@ -1445,7 +1392,7 @@ export class GrfScope extends Emitter {
       const last = detail.last_response_id;
       if (last && last !== rt.lastResponseId) {
         await this.reconcileResponse(rt, last);
-        this.log('info', '已从服务器终态恢复回合(流中断)');
+        this.log('info', this.t('已从服务器终态恢复回合(流中断)'));
         return true;
       }
       if (last && last === rt.lastResponseId) {
@@ -1494,23 +1441,70 @@ export class GrfScope extends Emitter {
     }
   }
 
-  async answerAsk(callId: string, answers: Record<string, unknown>): Promise<void> {
-    await this.submitInputResult(callId, { answers });
+  async answerAsk(callId: string, answers: Record<string, unknown>, sid?: string): Promise<void> {
+    await this.submitInputResult(callId, { answers }, sid);
   }
 
-  async dismissAsk(callId: string): Promise<void> {
-    await this.submitInputResult(callId, { dismiss: true });
+  async dismissAsk(callId: string, sid?: string): Promise<void> {
+    await this.submitInputResult(callId, { dismiss: true }, sid);
   }
 
-  async answerApproval(callId: string, approved: boolean, feedback?: string): Promise<void> {
-    await this.submitInputResult(callId, { approved, feedback });
+  async answerApproval(callId: string, approved: boolean, feedback?: string, sid?: string): Promise<void> {
+    await this.submitInputResult(callId, { approved, feedback }, sid);
+  }
+
+  /** 嵌入方审批钩子(getApprovalHook)的自动决策:pending 的 tool_approval
+   *  物化后逐个咨询,返回决策即代用户应答,返回 null/undefined 落默认
+   *  审批卡。每个 callId 只咨询一次(autoApproved 防重);决策产生时回合
+   *  可能尚未收口(live 流还在跑),挂到 autoDecisions 由回合收口后的
+   *  flush 提交。多会话编排:后台会话的审批同样被接管。 */
+  private autoApproved = new Set<string>();
+  private autoDecisions = new Map<string, { sid: string; approved: boolean; feedback?: string }>();
+
+  maybeAutoApprove(rt: SessionRuntime, sid: string): void {
+    const hook = getApprovalHook(this.name);
+    if (!hook || sid.startsWith('draft:')) return;
+    for (const req of rt.pendingRequests) {
+      if (req.kind !== 'tool_approval' || this.autoApproved.has(req.call_id)) continue;
+      this.autoApproved.add(req.call_id);
+      let input: unknown = req.arguments;
+      try {
+        input = JSON.parse(req.arguments || '{}');
+      } catch {
+        /* 残缺参数原样给 */
+      }
+      void Promise.resolve(hook({ callId: req.call_id, sessionId: sid, toolName: req.name, input }))
+        .then((d) => {
+          if (!d) return; // 未决策:走默认审批卡
+          this.log(
+            'info',
+            this.t('审批已由嵌入方自动{r}:{tool}', { r: d.approved ? '通过' : '拒绝', tool: req.name }),
+          );
+          this.autoDecisions.set(req.call_id, { sid, approved: d.approved, feedback: d.feedback });
+          this.tryFlushAutoDecisions(sid);
+        })
+        .catch(() => {
+          /* 钩子异常:落默认审批卡 */
+        });
+    }
+  }
+
+  /** 提交已达的自动决策;回合仍在跑时留待收口后再试。 */
+  private tryFlushAutoDecisions(sid: string): void {
+    if (this.inflightSends.has(sid) || this.autoDecisions.size === 0) return;
+    for (const [callId, d] of [...this.autoDecisions]) {
+      if (d.sid !== sid) continue;
+      this.autoDecisions.delete(callId);
+      void this.submitInputResult(callId, { approved: d.approved, feedback: d.feedback }, sid);
+    }
   }
 
   private async submitInputResult(
     callId: string,
     payload: { answers?: Record<string, unknown>; approved?: boolean; feedback?: string; dismiss?: boolean },
+    sidOverride?: string,
   ): Promise<void> {
-    const sid = this.activeSessionId;
+    const sid = sidOverride ?? this.activeSessionId;
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
     if (this.inflightSends.has(sid) || rt.running) return;
@@ -1523,7 +1517,7 @@ export class GrfScope extends Emitter {
     this.streamDoneAt.delete(sid);
     const input: InputItem = { type: 'grf:input_result', call_id: callId, ...payload };
     try {
-      const final = await this.requestWithChainHeal(rt, sid, {
+      const final = await this.pipeline.requestWithChainHeal(rt, sid, {
         model: this.model,
         reasoningEffort: this.reasoningEffort,
         input: [input],
@@ -1531,7 +1525,8 @@ export class GrfScope extends Emitter {
         signal: ac.signal,
         onEvent: (ev) => {
           this.logEvent(ev);
-          if (applyEvent(rt, ev)) this.notify();
+          if (applyEvent(rt, ev)) this.notifySession(sid);
+          this.maybeAutoApprove(rt, sid);
         },
       });
       rt.lastResponseId = final.id;
@@ -1547,17 +1542,17 @@ export class GrfScope extends Emitter {
     } catch (err) {
       const watchdog = this.watchdogHits.has(sid);
       this.watchdogHits.delete(sid);
-      const msg = errText(err);
+      const msg = errText(err, this.t);
       if (/no paused tool calls/i.test(msg)) {
         // 回合已不在暂停态(被新输入顶掉/多窗口已应答):静默收尾,
         // 不再报错——卡片已标记为已应答。
         rt.pendingRequests = [];
-        this.log('warn', '提问已失效(回合不在暂停态),已忽略');
+        this.log('warn', this.t('提问已失效(回合不在暂停态),已忽略'));
       } else {
-        this.log('error', `应答失败:${msg}`);
+        this.log('error', this.t('应答失败:{msg}', { msg }));
         const recovered = watchdog ? await this.recoverAfterStreamBreak(sid, rt) : false;
         if (!recovered && !ac.signal.aborted) {
-          rt.items.push({ kind: 'error', id: genId('e'), text: `应答失败:${msg}` });
+          rt.items.push({ kind: 'error', id: genId('e'), text: this.t('应答失败:{msg}', { msg }) });
         }
       }
     } finally {
@@ -1569,6 +1564,7 @@ export class GrfScope extends Emitter {
         void this.syncRunningState(sid);
         this.flushSendQueue(sid);
         void this.attachScreenshotImages(rt, sid);
+        this.tryFlushAutoDecisions(sid);
       }, 300);
       this.notify();
     }
@@ -1592,7 +1588,7 @@ export class GrfScope extends Emitter {
       );
       return;
     }
-    if (n === 1) this.log('warn', '回合未能立即停止,正在重试…');
+    if (n === 1) this.log('warn', this.t('回合未能立即停止,正在重试…'));
     void this.client
       .cancelResponse(respId)
       .then((snap) => {
@@ -1604,8 +1600,9 @@ export class GrfScope extends Emitter {
       });
   }
 
-  async cancelActive(): Promise<void> {
-    const sid = this.activeSessionId;
+  /** 停止会话的当前回合(默认活动会话;多会话编排可显式指定 sid)。 */
+  async cancelActive(sidOverride?: string): Promise<void> {
+    const sid = sidOverride ?? this.activeSessionId;
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
     // 记录停止意图并清零重试计数(再次点击停止 = 重新开始有界重试)。
@@ -1617,7 +1614,7 @@ export class GrfScope extends Emitter {
       // 随到随记)。
       const respId = rt.curRespId ?? rt.lastResponseId;
       if (!respId) {
-        this.log('info', '回合尚未建立,已中断本地事件流');
+        this.log('info', this.t('回合尚未建立,已中断本地事件流'));
         this.activeAborts.get(sid)?.abort();
         return;
       }
@@ -1632,7 +1629,7 @@ export class GrfScope extends Emitter {
         this.sendQueues.delete(sid);
         this.log('info', `已停止本回合(丢弃 ${queued} 条排队消息)`);
       } else {
-        this.log('info', '已停止本回合');
+        this.log('info', this.t('已停止本回合'));
       }
       void this.client
         .cancelResponse(respId)
@@ -1644,7 +1641,7 @@ export class GrfScope extends Emitter {
         .catch((err: unknown) => {
           // 404 = 回合已结束;其余失败交由 syncRunningState 对账兜底。
           if (!(err instanceof GrfApiError && err.status === 404)) {
-            this.log('warn', `中断请求失败:${errText(err)}`);
+            this.log('warn', `中断请求失败:${errText(err, this.t)}`);
           }
         });
       this.activeAborts.get(sid)?.abort();
@@ -1670,23 +1667,24 @@ export class GrfScope extends Emitter {
       await this.client.cancelResponse(cur);
       this.adoptChainTail(sid, cur);
       rt.running = false;
-      this.log('info', '已停止本回合(远端运行中)');
+      this.log('info', this.t('已停止本回合(远端运行中)'));
       this.notify();
     } catch (err) {
       // 404 = 回合刚好结束。
       if (!(err instanceof GrfApiError && err.status === 404)) {
-        this.log('warn', `中断失败:${errText(err)}`);
+        this.log('warn', `中断失败:${errText(err, this.t)}`);
       }
     }
   }
 
-  async compactActive(): Promise<void> {
-    const sid = this.activeSessionId;
+  /** 压缩会话上下文(默认活动会话;多会话编排可显式指定 sid)。 */
+  async compactActive(sidOverride?: string): Promise<void> {
+    const sid = sidOverride ?? this.activeSessionId;
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
     const respId = rt.lastResponseId;
     if (!respId) {
-      this.log('warn', '会话尚无回合,无法压缩');
+      this.log('warn', this.t('会话尚无回合,无法压缩'));
       return;
     }
     // 压缩模型同样必须全名:rt.model 是服务端回报的裸名,直接下发会被 gh
@@ -1695,7 +1693,7 @@ export class GrfScope extends Emitter {
     // 行为不劣于旧版)。
     const model = this.model ?? fullModelName(rt.model ?? '');
     if (!model) {
-      this.log('warn', '压缩需要先选择模型(输入框下方「模型」)');
+      this.log('warn', this.t('压缩需要先选择模型(输入框下方「模型」)'));
       return;
     }
     try {
@@ -1704,7 +1702,7 @@ export class GrfScope extends Emitter {
       await this.loadHistoryFresh(sid);
       this.notify();
     } catch (err) {
-      this.log('error', `压缩失败:${errText(err)}`);
+      this.log('error', `压缩失败:${errText(err, this.t)}`);
     }
   }
 
@@ -1729,7 +1727,7 @@ export class GrfScope extends Emitter {
     if (ev.type === 'grf:notice') text = `notice:${ev.kind} ${ev.detail ?? ''}`;
     else if (ev.type.startsWith('grf:tool_call') && ev.item?.name) {
       text = `${ev.type} ${ev.item.name}(${(ev.item.call_id ?? '').slice(0, 10)})`;
-    } else if (ev.type === 'response.output_text.delta') return; // 高频噪声不入日志
+    } else if (ev.type.endsWith('.delta')) return; // 高频噪声不入日志(文本/思考增量)
     else if (ev.type === 'response.output_item.added' && ev.item) {
       text = `item+ ${ev.item.type}${ev.item.name ? ` ${ev.item.name}` : ''}`;
     }
@@ -1781,65 +1779,25 @@ function fullModelName(m: string | undefined): string | undefined {
   return resolveBareModel?.(m);
 }
 
-/** 流断连自动重试上限(事件流中断/静默超时/网络错误)。 */
-const STREAM_RETRY_MAX = 10;
-
-/** 可重试的连接类错误:事件流中断、流静默超时、网络层失败(fetch 抛 TypeError)。 */
-function isRetryableStreamError(err: unknown): boolean {
-  if (err instanceof GrfApiError) {
-    return err.code === 'stream_interrupted' || err.code === 'stream_idle_timeout' || err.status === 0;
-  }
-  return err instanceof TypeError; // fetch 网络失败(连接拒绝/断网/代理断)
-}
-
-/** 可重试的"上游连接类失败终态":gh/上游 llm 读取流断开的报错特征。
- * 只匹配连接类,业务错误(鉴权/参数/配额)不重试——重试也一样失败。 */
-function isRetryableStreamFailure(msg: string): boolean {
-  return /unexpected eof|context deadline exceeded|client\.timeout|read stream|connection reset|broken pipe|eof/i.test(
-    msg,
-  );
-}
-
-export function errText(err: unknown): string {
-  const raw =
-    err instanceof GrfApiError || err instanceof Error ? err.message : String(err);
-  return friendlyError(raw);
-}
+/** 流恢复策略见 retry-policy.ts(默认即历史内置行为,可注入覆写)。 */
 
 // ---------- scope 注册表 ----------
 
 const scopes = new Map<string, GrfScope>();
 export const scopeConfigs = new Map<string, ConnectionConfig>();
 
-// 嵌入方会话级兜底配置(configure 的 sessionDefaults 注入,不持久化——
-// 宿主每次加载自行下发):草稿落定时展开在项目 defaults 之前,项目
-// defaults 逐字段覆盖之;两者都缺 system_prompt 才回落 goder 默认提示词。
-// workspace 特殊:项目自身路径 > homeDir > sessionDefaults.workspace
-// (兜底顺序见 grfSession 组装处)。
-const sessionDefaultsMap = new Map<string, Partial<GrfSessionConfig>>();
-export function setSessionDefaults(
-  scope: string,
-  defaults: Partial<GrfSessionConfig> | undefined,
-): void {
-  if (defaults && Object.keys(defaults).length > 0) sessionDefaultsMap.set(scope, defaults);
-  else sessionDefaultsMap.delete(scope);
-}
-
-// 嵌入方禁止未分组会话(configure 的 ungroupedSessions:false 注入):
-// 无激活会话直接发送的兜底项目不再落 UNGROUPED,改绑最近使用的项目;
-// 左栏「未分组会话」分组不再渲染(索引里的伪项目保留,兼容既有逻辑)。
-const ungroupedDenied = new Set<string>();
-export function setUngroupedSessions(scope: string, allow: boolean): void {
-  if (allow) ungroupedDenied.delete(scope);
-  else ungroupedDenied.add(scope);
-}
-/** 未分组会话是否允许(嵌入形态默认允许;session-list 据此隐藏分组)。 */
-export function ungroupedAllowed(scope: string): boolean {
-  return !ungroupedDenied.has(scope);
-}
+// scope 引用计数:GrfPanel 挂载时经 getScope/configureScope acquire、
+// 断开时 releaseScope;归零后延迟回收(清 5s 轮询定时器、摘注册表),
+// 期间再 acquire 则取消回收 —— 覆盖嵌入方动态挂载/卸载面板与 tab 元素
+// 池 detach/reattach 的瞬时归零,防定时器与 scope 实例泄漏。桌面态由
+// 入口持有的面板常驻,不会归零。回收不保留运行态:运行中的流由旧实例
+// 自行跑完,重建后从服务器会话列表对齐。
+const scopeRefs = new Map<string, number>();
+const scopeGc = new Map<string, ReturnType<typeof setTimeout>>();
+const SCOPE_GC_DELAY = 30_000;
 
 // 连接配置持久化(纯 web 态;桌面态由 wails AppConfig 托管,但本地副本
-// 也能让 webview 冷启动更快连上)。
+// 也能让 webview 冷启动更快连上)。落点统一走可注入键值存储(storage.ts)。
 const connKey = (name: string) => `grf-ui:${name}:conn`;
 
 // 新会话策略偏好持久化(随 scope 隔离;仅接受预制两值)。
@@ -1847,30 +1805,24 @@ const policyKey = (name: string) => `grf-ui:${name}:policy`;
 
 function loadPolicyLocal(name: string): string | undefined {
   try {
-    const v = localStorage.getItem(policyKey(name));
+    const v = keyValueStorage().getItem(policyKey(name));
     return v === 'write-workspace' || v === 'off' ? v : undefined;
   } catch {
     return undefined;
   }
 }
 
-function saveConnLocal(name: string, cfg: ConnectionConfig): void {
-  try {
-    // policySelector 是宿主代码的配置项(非用户偏好),随每次 configure 给出,不持久化
-    const { policySelector: _host, ...rest } = cfg;
-    localStorage.setItem(connKey(name), JSON.stringify(rest));
-  } catch {
-    /* 忽略 */
-  }
+function saveConnLocal(name: string, persistToken: boolean, cfg: ConnectionConfig): void {
+  // policySelector/persistToken 是宿主代码的配置项(非用户偏好),随每次
+  // configure 给出,不持久化;token 默认不落本地存储(见
+  // ConnectionConfig.persistToken),桌面态显式开启。
+  const { policySelector: _host, persistToken: _pt, token, ...rest } = cfg;
+  if (token && persistToken) (rest as { token?: string }).token = token;
+  kvSet(connKey(name), rest);
 }
 
 function loadConnLocal(name: string): Partial<ConnectionConfig> | null {
-  try {
-    const raw = localStorage.getItem(connKey(name));
-    return raw ? (JSON.parse(raw) as Partial<ConnectionConfig>) : null;
-  } catch {
-    return null;
-  }
+  return kvGet<Partial<ConnectionConfig>>(connKey(name));
 }
 
 /** 读取某 scope 已持久化的连接(设置页 web 态初始化用;未配置返回 null)。 */
@@ -1882,19 +1834,50 @@ export function getScope(name = 'default'): GrfScope {
   let s = scopes.get(name);
   if (!s) {
     const saved = loadConnLocal(name);
-    const cfg = {
-      baseUrl: saved?.baseUrl ?? locationDefaultBase(),
-      token: saved?.token ?? '',
-      // localStorage 旧数据可能是裸名(下发会被 gh 忽略),恢复时归一
-      ...(saved?.model ? { model: fullModelName(saved.model) } : {}),
-      ...(saved?.reasoningEffort ? { reasoningEffort: saved.reasoningEffort } : {}),
-    };
+    // 宿主已 configure(内存态,token 可能未持久化)优先于本地副本,
+    // 保证 scope 回收后重建不丢宿主注入的连接配置。
+    const cfg =
+      scopeConfigs.get(name) ?? {
+        baseUrl: saved?.baseUrl ?? locationDefaultBase(),
+        token: saved?.token ?? '',
+        // localStorage 旧数据可能是裸名(下发会被 gh 忽略),恢复时归一
+        ...(saved?.model ? { model: fullModelName(saved.model) } : {}),
+        ...(saved?.reasoningEffort ? { reasoningEffort: saved.reasoningEffort } : {}),
+      };
     scopeConfigs.set(name, cfg);
     s = new GrfScope(name, cfg);
     scopes.set(name, s);
     void s.start();
   }
   return s;
+}
+
+/** 持有一次 scope 引用(GrfPanel 挂载时调用;内部确保 scope 存在)。 */
+export function acquireScope(name = 'default'): GrfScope {
+  const pendingGc = scopeGc.get(name);
+  if (pendingGc) {
+    clearTimeout(pendingGc);
+    scopeGc.delete(name);
+  }
+  scopeRefs.set(name, (scopeRefs.get(name) ?? 0) + 1);
+  return getScope(name);
+}
+
+/** 释放一次 scope 引用(GrfPanel 断开时调用);归零后延迟回收。 */
+export function releaseScope(name = 'default'): void {
+  const n = (scopeRefs.get(name) ?? 0) - 1;
+  scopeRefs.set(name, Math.max(0, n));
+  if (n > 0 || !scopes.has(name) || scopeGc.has(name)) return;
+  const t = setTimeout(() => {
+    scopeGc.delete(name);
+    if ((scopeRefs.get(name) ?? 0) > 0) return;
+    const s = scopes.get(name);
+    if (!s) return;
+    s.stop();
+    scopes.delete(name);
+    // scopeConfigs(宿主 configure 的落点)保留:重建时 getScope 优先取它
+  }, SCOPE_GC_DELAY);
+  scopeGc.set(name, t);
 }
 
 export function configureScope(name: string, cfg: Partial<ConnectionConfig>): GrfScope {
@@ -1912,7 +1895,7 @@ export function configureScope(name: string, cfg: Partial<ConnectionConfig>): Gr
   // configure 均可能给裸名;gh 的 trySwitchModel 忽略裸名)
   if (merged.model) merged.model = fullModelName(merged.model);
   scopeConfigs.set(name, merged);
-  saveConnLocal(name, merged);
+  saveConnLocal(name, merged.persistToken === true, merged);
   const existing = scopes.get(name);
   if (existing) {
     existing.setConnection(merged);

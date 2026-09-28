@@ -75,19 +75,19 @@ export class GrfClient {
   }
 
   async health(): Promise<void> {
-    const res = await fetch(this.url('/health'), { headers: this.headers(false) });
+    const res = await fetch(this.url('/health'), { headers: this.headers(false), ...RequestInitWithTimeout(HEALTH_TIMEOUT_MS) });
     if (!res.ok) throw await this.parseError(res);
   }
 
   async listConversations(): Promise<Conversation[]> {
-    const res = await fetch(this.url('/conversations'), { headers: this.headers(false) });
+    const res = await fetch(this.url('/conversations'), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
     if (!res.ok) throw await this.parseError(res);
     const body = (await res.json()) as { data: Conversation[] };
     return body.data ?? [];
   }
 
   async getConversation(id: string): Promise<ConversationDetail> {
-    const res = await fetch(this.url(`/conversations/${id}`), { headers: this.headers(false) });
+    const res = await fetch(this.url(`/conversations/${id}`), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
     if (!res.ok) throw await this.parseError(res);
     return (await res.json()) as ConversationDetail;
   }
@@ -105,7 +105,7 @@ export class GrfClient {
   }
 
   async conversationItems(id: string): Promise<HistMessage[]> {
-    const res = await fetch(this.url(`/conversations/${id}/items`), { headers: this.headers(false) });
+    const res = await fetch(this.url(`/conversations/${id}/items`), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
     if (!res.ok) throw await this.parseError(res);
     const body = (await res.json()) as { data: HistMessage[] };
     return body.data ?? [];
@@ -211,10 +211,12 @@ export class GrfClient {
         if (done) break;
         gotBytes = true;
         buf += decoder.decode(value, { stream: true });
+        // 分帧兼容 CRLF(某些代理会改写换行):归一 \r 后再按 \n\n 切
+        let probe: string;
         let idx: number;
-        while ((idx = buf.indexOf('\n\n')) >= 0) {
-          const chunk = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
+        while ((probe = buf.replace(/\r\n/g, '\n'), (idx = probe.indexOf('\n\n'))) >= 0) {
+          const chunk = probe.slice(0, idx);
+          buf = probe.slice(idx + 2);
           if (chunk.trim()) handleEvent(chunk);
         }
       }
@@ -237,12 +239,33 @@ export class GrfClient {
   }
 
   // retrieveResponse 按响应 id 查终态/进行中快照(断流自愈用)。
+  // 404 = 回合不存在,返回 null(调用方按「已消失」处理);其他错误
+  // (5xx/网络)原样上抛 —— 一律 null 会把网关故障吞成「下次再试」,
+  // 恢复链路拿不到可重试错误的判定输入。
   async retrieveResponse(id: string): Promise<ResponseResource | null> {
     const res = await fetch(this.url(`/responses/${encodeURIComponent(id)}`), {
       headers: this.headers(false),
+      ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (res.status === 404) return null;
+    if (!res.ok) throw await this.parseError(res);
     return (await res.json()) as ResponseResource;
+  }
+}
+
+/** 非流式端点超时:挂死的网关不再堆积悬挂 promise。 */
+const RESPONSE_TIMEOUT_MS = 30_000;
+const HEALTH_TIMEOUT_MS = 10_000;
+
+/** fetch 的超时参数(AbortSignal.timeout 不被旧 webview 支持时退回
+ *  AbortController + setTimeout)。 */
+function RequestInitWithTimeout(ms: number): { signal: AbortSignal } {
+  try {
+    return { signal: AbortSignal.timeout(ms) };
+  } catch {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), ms);
+    return { signal: ac.signal };
   }
 }
 

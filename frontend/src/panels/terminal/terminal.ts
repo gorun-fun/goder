@@ -2,7 +2,7 @@
 // 仅桌面形态使用(main.ts import 注册);嵌入产物不含本模块与 xterm 依赖,
 // 嵌入态经 panelRegistered('grf-terminal') 探测并隐藏入口。
 // PTY 会话随组件生命周期:挂载即启动、卸载即终止;cwd 变化时自动重启。
-import { unsafeCSS } from 'lit';
+import { unsafeCSS , type PropertyValues } from 'lit';
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Terminal } from '@xterm/xterm';
@@ -142,7 +142,7 @@ export class GrfTerminal extends GrfPanel {
     void this.boot();
   }
 
-  protected updated(props: Map<string, unknown>): void {
+  protected updated(props: PropertyValues<this>): void {
     super.updated(props);
     // cwd 变化(切换项目):重启终端
     if (props.has('cwd') && props.get('cwd') !== undefined) void this.boot();

@@ -6,7 +6,7 @@
 // 视觉:工作卡拉通到窗口顶部(无独立标题栏,标题栏角色由左栏顶行/工作卡
 // 头部承担);macOS 红绿灯悬浮其左。文件树(filesView)是会话导航的下钻
 // 子视图(非独立导航条目)。
-import { css, html, nothing } from 'lit';
+import { css, html, nothing, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, panelRegistered } from '../ui/panel';
@@ -20,6 +20,8 @@ import { initConsoleUi, reportConsoleUi, visibleTermIds } from './console-ui';
 import { settingsStore } from '../core/settings/settings-store';
 import '../panels/files/file-list';
 import '../panels/chat/chat-panel';
+import './side-dock';
+import './bottom-dock';
 
 /**
  * 装配哪些区域(legacy 兼容键;更细粒度的裁剪用 registry.hide/show):
@@ -192,6 +194,33 @@ export class GrfAppShell extends GrfPanel {
         min-width: 0;
         min-height: 0;
       }
+      /* 工作卡(黑色圆角卡片;原属 chat 面板,dock 剥离后上移壳层,
+       * 使「自定义中央内容 + 右栏/底栏」与聊天同享卡片视觉) */
+      .workcard {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        background: var(--grf-card);
+        border-radius: 12px 12px 0 0;
+        overflow: hidden;
+      }
+      .workcard .cols {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+      }
+      .workcard .col-main {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .workcard .col-main > * {
+        flex: 1;
+        min-height: 0;
+      }
       .hidden {
         display: none !important;
       }
@@ -241,6 +270,7 @@ export class GrfAppShell extends GrfPanel {
     super.connectedCallback();
     this.parseLayout();
     if (this.nav) this.activeNavId = this.nav;
+    else this.activeNavId = this.firstNavId();
     this.tdrag = makeTitleDrag('button, grf-update-chip');
     // registry 变更(三方增删条目)即时反映到装配
     this.regUnsub = registry.subscribe(() => this.requestUpdate());
@@ -484,22 +514,36 @@ export class GrfAppShell extends GrfPanel {
     }
   }
 
-  protected updated(props: Map<string, unknown>): void {
+  protected updated(props: PropertyValues<this>): void {
     super.updated(props);
     reportConsoleUi(this.consoleSnapshot());
   }
 
-  /** consoleOpenBrowser 智能体的 open_browser:开浏览器 tab 并导航
-   * (导航经 chat 面板既有的 grf-open-browser-url 事件,复用其元素查找)。 */
-  private consoleOpenBrowser(url: string): void {
+  protected willUpdate(_props: PropertyValues<this>): void {
+    // 激活导航不可见(初始默认值失效、被 hide/remove)时落到首个可见
+    // 条目 —— 渲染取 def 用 get 不校验隐藏,不收敛会让被裁剪的视图
+    // 残留在首屏(嵌入方 hide('sessions') 只留自家条目的场景)。
+    if (!registry.nav.visible(this.renderCtx()).some((d) => d.id === this.activeNavId)) {
+      const first = this.firstNavId();
+      if (first) this.activeNavId = first;
+    }
+  }
+
+  /** 打开右栏浏览器 tab 并导航(智能体 open_browser 与 file-view 的
+   * html「眼睛」共用;导航经 side-dock 的公开元素访问,不再跨 shadow
+   * 摸内部标签)。 */
+  private openBrowserTab(url: string): void {
     this.openSideTab({ defId: 'browser' });
     if (!url) return;
     void this.updateComplete.then(() => {
-      const chat = this.renderRoot.querySelector('grf-chat');
-      chat?.dispatchEvent(
-        new CustomEvent('grf-open-browser-url', { detail: { url }, bubbles: true, composed: true }),
-      );
+      const dock = this.renderRoot.querySelector('grf-side-dock');
+      const b = dock?.panelEl('browser') as { open?(u: string): void } | undefined;
+      b?.open?.(url);
     });
+  }
+
+  private consoleOpenBrowser(url: string): void {
+    this.openBrowserTab(url);
   }
 
   /** consoleSnapshot 界面状态快照(goder_ui_state 工具读;终端会话等
@@ -557,7 +601,8 @@ export class GrfAppShell extends GrfPanel {
   }
 
   render() {
-    const hasSessions = this.panelOn('sessions');    const hasChat = this.panelOn('chat');
+    const hasSessions = this.panelOn('sessions');
+    const hasChat = this.panelOn('chat');
     const hasSidebar = this.panelOn('sidebar');
     const hasConsole = this.panelOn('console');
     const ctx = this.renderCtx();
@@ -595,29 +640,49 @@ export class GrfAppShell extends GrfPanel {
             `
           : nothing}
         <div class="center">
-          ${navDef?.center
-            ? (navDef.center(ctx, navState) as ReturnType<typeof html>)
-            : hasChat
-              ? html`<grf-chat
-                  scope=${this.scope}
-                  .bottomToggle=${hasConsole}
-                  .sidebarToggle=${hasSidebar}
-                  .bottomOn=${this.showBottom}
-                  .sidebarOn=${this.showSidebar}
-                  .sideTabs=${this.sideTabs}
-                  .activeSideTab=${this.activeSideTab}
-                  .leftToggle=${hasSessions}
-                  .leftOn=${this.showSessions}
-                  .leftLights=${this.nativeLights}
-                  .winControls=${this.nativeWinControls}
-                  @grf-toggle-bottom=${() => this.setBottom(!this.showBottom)}
-                  @grf-toggle-sidebar=${() => this.setSidebar(!this.showSidebar)}
-                  @grf-toggle-sessions=${() => this.setSessions(!this.showSessions)}
-                  @grf-side-tab-open=${(e: Event) => this.openSideTab((e as CustomEvent<SideTabInstance>).detail)}
-                  @grf-side-tab-close=${(e: Event) => this.closeSideTab((e as CustomEvent<string>).detail)}
-                  @grf-side-tab-activate=${(e: Event) => this.activateSideTab((e as CustomEvent<string>).detail)}
-                ></grf-chat>`
-              : nothing}
+          <div
+            class="workcard"
+            @grf-toggle-bottom=${() => this.setBottom(!this.showBottom)}
+            @grf-toggle-sidebar=${() => this.setSidebar(!this.showSidebar)}
+            @grf-toggle-sessions=${() => this.setSessions(!this.showSessions)}
+            @grf-side-tab-open=${(e: Event) => this.openSideTab((e as CustomEvent<SideTabInstance>).detail)}
+            @grf-side-tab-close=${(e: Event) => this.closeSideTab((e as CustomEvent<string>).detail)}
+            @grf-side-tab-activate=${(e: Event) => this.activateSideTab((e as CustomEvent<string>).detail)}
+            @grf-open-browser-url=${(e: Event) => this.openBrowserTab((e as CustomEvent<{ url: string }>).detail.url)}
+          >
+            <div class="cols">
+              <div class="col-main">
+                ${navDef?.center
+                  ? (navDef.center(ctx, navState) as ReturnType<typeof html>)
+                  : hasChat
+                    ? html`<grf-chat
+                        scope=${this.scope}
+                        flat
+                        .bottomToggle=${hasConsole}
+                        .sidebarToggle=${hasSidebar}
+                        .bottomOn=${this.showBottom}
+                        .sidebarOn=${this.showSidebar}
+                        .sideTabs=${this.sideTabs}
+                        .leftToggle=${hasSessions}
+                        .leftOn=${this.showSessions}
+                        .leftLights=${this.nativeLights}
+                        .winControls=${this.nativeWinControls}
+                      ></grf-chat>`
+                    : nothing}
+                ${hasConsole
+                  ? html`<grf-bottom-dock scope=${this.scope} .on=${this.showBottom}></grf-bottom-dock>`
+                  : nothing}
+              </div>
+              ${hasSidebar
+                ? html`<grf-side-dock
+                    scope=${this.scope}
+                    .on=${this.showSidebar}
+                    .tabs=${this.sideTabs}
+                    .activeTab=${this.activeSideTab}
+                  ></grf-side-dock>`
+                : nothing}
+            </div>
+          </div>
         </div>
       </div>
       ${this.nativeWinControls

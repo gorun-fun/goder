@@ -30,6 +30,23 @@ type ManagerConfig struct {
 	// SettingsSeed PerUserHome 时的播种来源(宿主 settings.json 绝对路径;
 	// 用户文件不存在则复制一份作初始配置,之后完全独立)。空 = 不播种。
 	SettingsSeed string
+	// RestartCooldown 崩溃重启的冷却窗口:进程退出后窗口内的 Get 请求
+	// 不再触发 Start(返回 ErrStartCooling),防止坏二进制 + 大流量下
+	// 的反复 spawn 风暴;0 = 默认 10s。
+	RestartCooldown time.Duration
+	// Hooks 进程生命周期回调(网关的 webhook 转发、运维日志等挂这里;
+	// 回调在独立 goroutine 执行,勿阻塞)。
+	Hooks ManagerHooks
+}
+
+// ManagerHooks 进程生命周期回调。
+type ManagerHooks struct {
+	// OnStart 进程启动成功(收养成功也计)。
+	OnStart func(uid, addr string)
+	// OnStop 进程停止(主动回收/空闲回收/退出)。
+	OnStop func(uid, reason string)
+	// OnCrash 进程异常退出后启动失败(重启被冷却抑制)。
+	OnCrash func(uid string)
 }
 
 // Manager 多用户 gh server 进程注册表。
@@ -39,6 +56,8 @@ type Manager struct {
 	procs  map[string]*Proc
 	ports  map[int]string // 端口 → uid
 	nextPt int
+	// lastFailAt uid → 最近一次启动失败时刻(冷却窗口判定)。
+	lastFailAt map[string]time.Time
 }
 
 // NewManager 创建注册表(不启动任何进程)。
@@ -55,11 +74,15 @@ func NewManager(cfg ManagerConfig) *Manager {
 	if cfg.PortMax < cfg.PortMin {
 		cfg.PortMin, cfg.PortMax = cfg.PortMax, cfg.PortMin
 	}
+	if cfg.RestartCooldown <= 0 {
+		cfg.RestartCooldown = 10 * time.Second
+	}
 	return &Manager{
-		cfg:    cfg,
-		procs:  map[string]*Proc{},
-		ports:  map[int]string{},
-		nextPt: cfg.PortMin,
+		cfg:        cfg,
+		procs:      map[string]*Proc{},
+		ports:      map[int]string{},
+		lastFailAt: map[string]time.Time{},
+		nextPt:     cfg.PortMin,
 	}
 }
 
@@ -109,26 +132,42 @@ func (m *Manager) UserAddr(uid string) string {
 	return ""
 }
 
-// Get 取(必要时懒启动)某用户的进程。ErrTooManyUsers 触发方提示扩容。
+// Get 取(必要时懒启动)某用户的进程。错误类型化:ErrTooManyUsers(429,
+// 触发方提示扩容)/ ErrStartCooling(503,崩溃重启冷却中)/ *StartError
+// (503,启动失败明细)/ ErrPortExhausted(503)。
 func (m *Manager) Get(uid string) (*Proc, error) {
 	m.mu.Lock()
 	p := m.procs[uid]
+	cooling := false
 	if p != nil {
-		m.mu.Unlock()
+		cooling = m.coolingLocked(uid)
+	}
+	m.mu.Unlock()
+	if p != nil {
 		p.Touch()
 		if p.Status().Running {
 			return p, nil
 		}
-		// 崩溃/被杀:原地重启(复用已分配端口与目录)。
+		// 崩溃/被杀:原地重启(复用已分配端口与目录)。冷却窗口内不再
+		// 触发 Start —— 坏二进制 + 大流量会反复 spawn 打满 CPU;窗口
+		// 过后自动恢复尝试。
+		if cooling {
+			return p, ErrStartCooling
+		}
 		st := p.Start()
 		if st.Running {
+			m.clearFail(uid)
+			m.hookStart(uid, st.Addr)
 			return p, nil
 		}
-		return p, fmt.Errorf("gh server 启动失败: %s", st.LastError)
+		m.markFail(uid)
+		m.hookCrash(uid)
+		return p, &StartError{LastError: st.LastError}
 	}
+	m.mu.Lock()
 	if m.cfg.MaxUsers > 0 && len(m.procs) >= m.cfg.MaxUsers {
 		m.mu.Unlock()
-		return nil, fmt.Errorf("托管用户进程已达上限(%d)", m.cfg.MaxUsers)
+		return nil, &tooManyUsersError{max: m.cfg.MaxUsers}
 	}
 	port, err := m.allocPort()
 	if err != nil {
@@ -150,15 +189,55 @@ func (m *Manager) Get(uid string) (*Proc, error) {
 	})
 	m.procs[uid] = p
 	m.ports[port] = uid
+	delete(m.lastFailAt, uid)
 	m.mu.Unlock()
 
 	if err := os.MkdirAll(p.Config().DataDir, 0o755); err != nil {
 		return p, err
 	}
 	if st := p.Start(); !st.Running {
-		return p, fmt.Errorf("gh server 启动失败: %s", st.LastError)
+		m.markFail(uid)
+		m.hookCrash(uid)
+		return p, &StartError{LastError: st.LastError}
 	}
+	m.hookStart(uid, addr)
 	return p, nil
+}
+
+// coolingLocked 冷却窗口判定(需持 mu)。
+func (m *Manager) coolingLocked(uid string) bool {
+	t, ok := m.lastFailAt[uid]
+	return ok && time.Since(t) < m.cfg.RestartCooldown
+}
+
+func (m *Manager) markFail(uid string) {
+	m.mu.Lock()
+	m.lastFailAt[uid] = time.Now()
+	m.mu.Unlock()
+}
+
+func (m *Manager) clearFail(uid string) {
+	m.mu.Lock()
+	delete(m.lastFailAt, uid)
+	m.mu.Unlock()
+}
+
+func (m *Manager) hookStart(uid, addr string) {
+	if m.cfg.Hooks.OnStart != nil {
+		go m.cfg.Hooks.OnStart(uid, addr)
+	}
+}
+
+func (m *Manager) hookCrash(uid string) {
+	if m.cfg.Hooks.OnCrash != nil {
+		go m.cfg.Hooks.OnCrash(uid)
+	}
+}
+
+func (m *Manager) hookStop(uid, reason string) {
+	if m.cfg.Hooks.OnStop != nil {
+		go m.cfg.Hooks.OnStop(uid, reason)
+	}
 }
 
 // Stop 停止并移除某用户的进程。
@@ -174,21 +253,23 @@ func (m *Manager) Stop(uid string) {
 	m.mu.Unlock()
 	if p != nil {
 		p.Stop()
+		m.hookStop(uid, "stop")
 	}
 }
 
 // StopAll 停止全部用户进程(服务退出时调用)。
 func (m *Manager) StopAll() {
 	m.mu.Lock()
-	procs := make([]*Proc, 0, len(m.procs))
-	for _, p := range m.procs {
-		procs = append(procs, p)
+	procsByUID := make(map[string]*Proc, len(m.procs))
+	for uid, p := range m.procs {
+		procsByUID[uid] = p
 	}
 	m.procs = map[string]*Proc{}
 	m.ports = map[int]string{}
 	m.mu.Unlock()
-	for _, p := range procs {
+	for uid, p := range procsByUID {
 		p.Stop()
+		m.hookStop(uid, "shutdown")
 	}
 }
 
@@ -204,6 +285,7 @@ func (m *Manager) ReapIdle() []string {
 		if p.IdleFor() > m.cfg.IdleTTL && !p.Status().Running {
 			// 已死进程直接摘除
 			delete(m.procs, uid)
+			delete(m.lastFailAt, uid)
 			for port, u := range m.ports {
 				if u == uid {
 					delete(m.ports, port)
@@ -251,7 +333,7 @@ func (m *Manager) allocPort() (int, error) {
 		_ = ln.Close()
 		return port, nil
 	}
-	return 0, fmt.Errorf("端口池耗尽(%d-%d)", m.cfg.PortMin, m.cfg.PortMax)
+	return 0, &portExhaustedError{min: m.cfg.PortMin, max: m.cfg.PortMax}
 }
 
 // SortedUIDs Statuses 的辅助:uid 排序列表。
@@ -266,3 +348,22 @@ func SortedUIDs(sts map[string]Status) []string {
 
 // IdleTTL 空闲回收阈值(0 = 不回收)。
 func (m *Manager) IdleTTL() time.Duration { return m.cfg.IdleTTL }
+
+// GhBin 配置的 gh 可执行文件(就绪探针用)。
+func (m *Manager) GhBin() string { return m.cfg.GhBin }
+
+// SetHooks 运行期挂接/替换生命周期回调(网关创建后配置 webhook 时用;
+// nil 字段保留既有值)。
+func (m *Manager) SetHooks(h ManagerHooks) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h.OnStart != nil {
+		m.cfg.Hooks.OnStart = h.OnStart
+	}
+	if h.OnStop != nil {
+		m.cfg.Hooks.OnStop = h.OnStop
+	}
+	if h.OnCrash != nil {
+		m.cfg.Hooks.OnCrash = h.OnCrash
+	}
+}

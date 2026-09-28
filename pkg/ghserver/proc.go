@@ -139,7 +139,7 @@ func (p *Proc) Start() Status {
 
 // startWatchdog 给 gh 挂父进程退出看门狗:宿主进程退出(正常退出/崩溃/
 // 被强杀)时按 pid/进程组回收 gh,保证不留孤儿。平台实现见
-// proc_unix.go(sh 管道 EOF)与 proc_windows.go(暂缺,依赖收养兜底)。
+// proc_unix.go(sh 管道 EOF)与 proc_windows.go(Job 对象 KILL_ON_JOB_CLOSE)。
 // 优雅 Stop 时由 cleanupLocked 主动关闭管道并清掉看门狗。
 
 // Stop 终止托管实例(收养实例仅清理本地状态)。

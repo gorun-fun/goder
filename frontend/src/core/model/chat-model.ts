@@ -12,6 +12,7 @@ import type {
   Usage,
 } from '../api/types';
 import { friendlyError } from '../../util/fmt';
+import { kvGet, kvSet } from '../store/storage';
 
 export type ToolStatus = 'running' | 'done' | 'error' | 'denied';
 
@@ -151,24 +152,15 @@ export interface LocalUsage {
 }
 
 function readUsageMap(): Record<string, LocalUsage> {
-  try {
-    const raw = localStorage.getItem(USAGE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, LocalUsage>) : {};
-  } catch {
-    return {};
-  }
+  return kvGet<Record<string, LocalUsage>>(USAGE_KEY) ?? {};
 }
 
 function writeUsageMap(map: Record<string, LocalUsage>): void {
-  try {
-    const keys = Object.keys(map);
-    if (keys.length > USAGE_MAX) {
-      for (const k of keys.slice(0, keys.length - USAGE_MAX)) delete map[k];
-    }
-    localStorage.setItem(USAGE_KEY, JSON.stringify(map));
-  } catch {
-    /* 隐私模式等写入失败时静默,当次会话内仍生效 */
+  const keys = Object.keys(map);
+  if (keys.length > USAGE_MAX) {
+    for (const k of keys.slice(0, keys.length - USAGE_MAX)) delete map[k];
   }
+  kvSet(USAGE_KEY, map);
 }
 
 /** 历史恢复时回填该会话的前端 usage 累计(scope.ensureRuntime 调用)。 */
@@ -219,27 +211,18 @@ const TOOL_DUR_KEY = 'grf-ui:tool-durs';
 const TOOL_DUR_MAX = 4000;
 
 function readToolDurs(): Record<string, [number, number]> {
-  try {
-    const raw = localStorage.getItem(TOOL_DUR_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, [number, number]>) : {};
-  } catch {
-    return {};
-  }
+  return kvGet<Record<string, [number, number]>>(TOOL_DUR_KEY) ?? {};
 }
 
 export function saveToolDur(sid: string | undefined, callId: string, startedAt: number, endedAt: number): void {
   if (!sid || !callId || !startedAt || !endedAt) return;
-  try {
-    const all = readToolDurs();
-    all[`${sid}\u0000${callId}`] = [startedAt, endedAt];
-    const keys = Object.keys(all);
-    if (keys.length > TOOL_DUR_MAX) {
-      for (const k of keys.slice(0, keys.length - TOOL_DUR_MAX)) delete all[k];
-    }
-    localStorage.setItem(TOOL_DUR_KEY, JSON.stringify(all));
-  } catch {
-    /* localStorage 不可用(隐私模式等):放弃持久化,仅当次有效 */
+  const all = readToolDurs();
+  all[`${sid}\u0000${callId}`] = [startedAt, endedAt];
+  const keys = Object.keys(all);
+  if (keys.length > TOOL_DUR_MAX) {
+    for (const k of keys.slice(0, keys.length - TOOL_DUR_MAX)) delete all[k];
   }
+  kvSet(TOOL_DUR_KEY, all);
 }
 
 // applySavedDurs 历史恢复后回填本地记录的工具耗时(不可变替换,触发渲染)。

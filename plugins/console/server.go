@@ -72,11 +72,15 @@ func (s *Server) Handler() http.Handler {
 }
 
 // serveEvalReport Windows 求值回报:body 首行调用 id,其余为信封 JSON。
-// 仅 loopback + token 与 /mcp 同源保护,这里再校验一次 Referer 不必要
-// (id 不可猜,应答按 id 定向)。
+// loopback + Bearer token 双重校验(与 /mcp 同一令牌;回环内任意进程
+// 不可伪造应答回报)。
 func (s *Server) serveEvalReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.checkAuth(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))

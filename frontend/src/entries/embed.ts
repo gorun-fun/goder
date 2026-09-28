@@ -7,8 +7,11 @@
 //   configure('myscope', { baseUrl: '/grf-api' });          // 网关模式无需 token
 //   registry.side.hide('console');                          // 裁剪右栏条目
 //   registry.nav.add({ id: 'help', label: '帮助', view: (ctx) => … }); // 自定义导航
+//   registry.chat.addRenderer({ id: 'mytool', toolName: 'mcp__mine__q', render: … }); // 定制消息
 // 同一 scope 的面板共享数据;不同 scope 互不干扰。
+// 版本:GRF_UI_VERSION 常量(与构建产物同源),升级前可做特性协商。
 export { GrfAppShell } from '../shell/app-shell';
+export type { PanelName } from '../shell/app-shell';
 export { GrfChat } from '../panels/chat/chat-panel';
 export { GrfSessionList } from '../panels/sessions/session-list';
 export { GrfSessionDetail } from '../panels/inspector/session-detail';
@@ -22,16 +25,49 @@ export { GrfToolCard } from '../panels/chat/tool-card';
 export { GrfAskForm } from '../panels/chat/ask-form';
 export { GrfApprovalCard } from '../panels/chat/approval-card';
 
-export { configureScope, getScope, UNGROUPED, setSessionDefaults, setUngroupedSessions } from '../core/store/scope';
+export { configureScope, getScope, acquireScope, releaseScope, UNGROUPED, savedConn, setSessionDefaults, setUngroupedSessions, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt, setModelNameResolver } from '../core/store/scope';
 export type { GrfScope, ConnectionConfig, AuthConfig } from '../core/store/scope';
+export type { SendPayload, SendInterceptor, ApprovalRequest, ApprovalDecision, ApprovalHook } from '../core/store/host-config';
 import type { AuthConfig } from '../core/store/scope';
 import type { GrfSessionConfig } from '../core/api/types';
+import type { SendInterceptor, ApprovalHook } from '../core/store/host-config';
 export { settingsStore, ACCENTS } from '../core/settings/settings-store';
 export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settings-store';
 export { GrfClient, GrfApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
-export { registry, sideTabId, setUser, getUser, setSideTop, getSideTop, setSettingsConfig, getSettingsConfig, setModelGuard, getModelGuard, setFileOpen, getFileOpen, setUiEventHandler, getUiEventHandler, setNewProject, getNewProject } from '../registry/registry';
+// 键值存储注入(嵌入方整体替换 core 的本地持久化落点)
+export { setKeyValueStorage, keyValueStorage, MemoryStorage } from '../core/store/storage';
+export type { KeyValueStorage } from '../core/store/storage';
+// 恢复策略注入(流断重试判定/上限/退避)
+export { setRetryPolicy, resetRetryPolicy, getRetryPolicy, defaultRetryPolicy } from '../core/store/retry-policy';
+export type { RetryPolicy } from '../core/store/retry-policy';
+// i18n(文案定制:key 即中文默认文案)
+export { setI18n, getI18n, translate, tFor } from '../core/i18n';
+export type { I18nConfig, I18nMessages } from '../core/i18n';
+
+export {
+  registry,
+  sideTabId,
+  setUser,
+  getUser,
+  setSideTop,
+  getSideTop,
+  setSettingsConfig,
+  getSettingsConfig,
+  setModelGuard,
+  getModelGuard,
+  setFileOpen,
+  getFileOpen,
+  setUiEventHandler,
+  getUiEventHandler,
+  setNewProject,
+  getNewProject,
+  setMarkdownRenderer,
+  getMarkdownRenderer,
+  setStatusPop,
+  getStatusPop,
+} from '../registry/registry';
 export type {
   PanelContext,
   ShellState,
@@ -43,17 +79,28 @@ export type {
   UserConfig,
   SideTopConfig,
   SettingsConfig,
+  FileOpenHook,
+  UiEvent,
+  UiEventHandler,
+  NewProjectHook,
+  MarkdownRenderer,
+  ItemViewActions,
+  ItemRenderContext,
+  ItemRendererDef,
+  ToolMetaDef,
 } from '../registry/registry';
 import { setUser } from '../registry/registry';
 import { setSideTop } from '../registry/registry';
 import { setSettingsConfig } from '../registry/registry';
 import { setModelGuard } from '../registry/registry';
-import { setFileOpen, type FileOpenHook, type UiEventHandler, setUiEventHandler, setNewProject, type NewProjectHook } from '../registry/registry';
+import { setFileOpen, setUiEventHandler, setNewProject, setMarkdownRenderer, setStatusPop, type FileOpenHook, type UiEventHandler, type NewProjectHook } from '../registry/registry';
 import type { UserConfig } from '../registry/registry';
 import type { SideTopConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
+import type { MarkdownRenderer } from '../registry/registry';
 
-import { configureScope, setSessionDefaults, setUngroupedSessions } from '../core/store/scope';
+import { configureScope, setSessionDefaults, setUngroupedSessions, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt } from '../core/store/scope';
+import { setI18n } from '../core/i18n';
 import { registerBuiltinCommon } from '../shell/builtin-common';
 import '../shell/app-shell';
 import '../panels/chat/chat-panel';
@@ -62,6 +109,10 @@ import '../panels/inspector/session-detail';
 import '../panels/console/console';
 import '../panels/settings/settings-nav';
 import '../panels/settings/settings-page';
+
+/** 嵌入库版本(vite define 注入,源 package.json;未注入时 'dev')。 */
+declare const __GRF_UI_VERSION__: string | undefined;
+export const GRF_UI_VERSION: string = typeof __GRF_UI_VERSION__ === 'string' ? __GRF_UI_VERSION__ : 'dev';
 
 // 嵌入库默认装配通用内置条目(桌面专属条目不进嵌入产物)
 registerBuiltinCommon();
@@ -82,7 +133,9 @@ registerBuiltinCommon();
  * (下发过 model 的 scope 不适用)。sessionDefaults 供嵌入方给「项目
  * 无 defaults/未分组」的会话兜底 grf:session 配置(system_prompt/
  * default_skill/policy 等;草稿落定时展开在项目 defaults 之前,逐字段
- * 被其覆盖——有 defaults 的项目不受影响)。ungroupedSessions: false
+ * 被其覆盖——有 defaults 的项目不受影响)。disableDefaultPrompt: true
+ * 完全关闭 goder 默认身份提示词(sessionDefaults 与项目 defaults 均未给
+ * system_prompt 时留空,不再兜底注入)。ungroupedSessions: false
  * 禁止未分组会话:无激活会话直接发送时兜底改绑最近使用的项目,左栏
  * 「未分组会话」分组不再渲染。fileOpen 供嵌入方接管「点文件 → 右栏」
  * 的统一路由(工具卡文件名/文件树/console open_file):钩子返回 true
@@ -90,7 +143,17 @@ registerBuiltinCommon();
  * 再打开内置「文件」tab;返回 false/未配置走内置行为。uiEvents 供集成方
  * 消费壳层页面变化事件总线:导航/右栏 tab 开·关·激活/三栏显隐/设置
  * 分区/文件打开/文件下钻,在 goder 执行变更**之前**回调(返回 true =
- * 已接管自定义行为,false = 放行走原生)——一个钩子同时覆盖观测与拦截。 */
+ * 已接管自定义行为,false = 放行走原生)——一个钩子同时覆盖观测与拦截。
+ * newProject 供嵌入方接管左栏「新建项目」:由嵌入方创建自己的项目实体
+ * 并返回根目录绝对路径。onBeforeSend 为发送钩子(用户消息离开输入框
+ * 前回调:改写载荷继续发送,返回 null 取消且输入保留)——出站审计/
+ * 前置 RAG/敏感词过滤。onApproval 为审批钩子(工具审批出现时回调:
+ * 返回决策即自动应答,返回 null 落默认审批卡)——接自家权限中心或
+ * 策略化自动审批。markdown 覆写消息流的 markdown 渲染器(换 marked
+ * 等富引擎;覆写方负责输出 HTML 的转义与安全)。locale/messages 为
+ * i18n 文案定制(key 即中文默认文案,支持 {x} 插值)。persistToken:
+ * true 才把连接 token 持久化到本地存储(默认不落盘,每次由宿主下发;
+ * 桌面形态自身开启)。 */
 export function configure(
   scope: string,
   cfg: {
@@ -104,10 +167,20 @@ export function configure(
     settings?: SettingsConfig;
     modelGuard?: boolean;
     sessionDefaults?: Partial<GrfSessionConfig>;
+    disableDefaultPrompt?: boolean;
     ungroupedSessions?: boolean;
     fileOpen?: FileOpenHook;
     uiEvents?: UiEventHandler;
     newProject?: NewProjectHook;
+    onBeforeSend?: SendInterceptor;
+    onApproval?: ApprovalHook;
+    markdown?: MarkdownRenderer;
+    locale?: string;
+    messages?: Record<string, string>;
+    persistToken?: boolean;
+    /** false = 隐藏聊天列右上的状态浮窗(goder 特有的自动化任务/git/
+     * goal 卡;不用自动化能力的嵌入方裁掉,聊天区完全干净)。 */
+    statusPop?: boolean;
   },
 ): void {
   if (cfg.user !== undefined) setUser(scope, cfg.user);
@@ -115,10 +188,18 @@ export function configure(
   if (cfg.settings !== undefined) setSettingsConfig(scope, cfg.settings);
   if (cfg.modelGuard !== undefined) setModelGuard(scope, cfg.modelGuard);
   if (cfg.sessionDefaults !== undefined) setSessionDefaults(scope, cfg.sessionDefaults);
+  if (cfg.disableDefaultPrompt !== undefined) setDisableDefaultPrompt(scope, cfg.disableDefaultPrompt);
   if (cfg.ungroupedSessions !== undefined) setUngroupedSessions(scope, cfg.ungroupedSessions);
   if (cfg.fileOpen !== undefined) setFileOpen(scope, cfg.fileOpen);
   if (cfg.uiEvents !== undefined) setUiEventHandler(scope, cfg.uiEvents);
   if (cfg.newProject !== undefined) setNewProject(scope, cfg.newProject);
+  if (cfg.onBeforeSend !== undefined) setSendInterceptor(scope, cfg.onBeforeSend);
+  if (cfg.onApproval !== undefined) setApprovalHook(scope, cfg.onApproval);
+  if (cfg.markdown !== undefined) setMarkdownRenderer(scope, cfg.markdown);
+  if (cfg.statusPop !== undefined) setStatusPop(scope, cfg.statusPop);
+  if (cfg.locale !== undefined || cfg.messages !== undefined) {
+    setI18n(scope, { locale: cfg.locale, messages: cfg.messages });
+  }
   configureScope(scope, cfg);
 }
 

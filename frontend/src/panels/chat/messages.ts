@@ -1,6 +1,10 @@
 // messages.ts — 聊天消息流的渲染函数(从 chat-panel 拆出的纯模板逻辑)。
 // 消息条目(用户/助手/思考/工具/通知/ask/审批/错误/状态)、左侧消息导航
 // 波浪条;样式随 chat-panel 的 static styles 提供。
+// 渲染管线三层:① registry.chat 的自定义渲染器(工具名/kind 接管,三方
+// 定制消息内容的入口) → ② 内置 kind switch → ③ 未知 kind 通用通知卡
+// (不再静默丢弃,新版服务端条目至少可见)。markdown 走 per-scope 覆写
+// (registry.setMarkdownRenderer),未覆写用内置 renderMarkdown。
 import { html, nothing } from 'lit';
 import type { TemplateResult } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
@@ -8,6 +12,8 @@ import { renderMarkdown } from '../../util/markdown';
 import { truncate, fmtDuration } from '../../util/fmt';
 import { icon } from '../../util/icons';
 import type { ChatItem } from '../../core/model/chat-model';
+import type { GrfScope } from '../../core/store/scope';
+import { registry, getMarkdownRenderer, type ItemViewActions } from '../../registry/registry';
 import { hasSkillBlock, hasTaskBlock, parseGrfSkillBlocks, parseGrfTaskBlocks, type TaskSegment } from '../../core/store/automation';
 import './tool-card';
 import './ask-form';
@@ -16,7 +22,13 @@ import './task-card';
 import './skill-card';
 
 /** 消息渲染依赖的宿主状态与回调(由 chat-panel 实现)。 */
-export interface MessageViewProps {
+export interface MessageViewProps extends ItemViewActions {
+  /** 数据域名(自定义渲染器与 markdown 覆写按 scope 生效) */
+  scope: string;
+  store: GrfScope;
+  sessionId?: string;
+  /** 文案翻译(i18n;chat-panel 实现时绑定面板 scope) */
+  t(key: string): string;
   /** 编辑中的用户消息 id 与草稿 */
   editingId?: string;
   editDraft: string;
@@ -27,25 +39,23 @@ export interface MessageViewProps {
   onEditDraft(v: string): void;
   onCommitEdit(): void;
   onCancelEdit(): void;
-  onStartEdit(it: { kind: 'user'; id: string; text: string }): void;
-  onCopy(id: string, text: string): void;
-  onToggleReasoning(id: string): void;
-  onAskAnswer(e: Event): void;
-  onAskDismiss(e: Event): void;
-  onApprove(e: Event): void;
-  /** 任务卡保存(操作员输出的 <grf-task> 块 → 自动化任务库) */
-  onSaveTask(name: string, instructions: string): void;
-  /** 任务是否已保存(当前会话所属操作员名下同名同指令) */
-  isTaskSaved(name: string, instructions: string): boolean;
-  /** 技能卡保存(执行会话输出的 <grf-skill> 块 → 桌面 bridge 落盘技能) */
-  onSaveSkill(name: string, content: string): void;
-  /** 技能是否已保存(本会话内已点过保存的技能名) */
-  isSkillSaved(name: string): boolean;
+}
+
+/** 消息流内的 markdown 渲染:per-scope 覆写优先,未覆写走内置。 */
+export function chatMarkdown(scope: string, text: string): string {
+  return getMarkdownRenderer(scope)?.(text) ?? renderMarkdown(text);
 }
 
 /** 渲染单条消息(ask 待答态返回 nothing:交互控件在底部输入框内)。
- * items 为整条消息列表:点击类工具要向前找最近的截图,供「查看」定位圈点。 */
-export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]): TemplateResult | typeof nothing {
+ * items 为整条消息列表:点击类工具要向前找最近的截图,供「查看」定位圈点。
+ * 返回 HTMLElement 为自定义渲染器接管(内置渲染只产出模板)。 */
+export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]): TemplateResult | HTMLElement | typeof nothing {
+  // ① 自定义渲染器(registry.chat):工具名/kind 接管,返回 undefined 走内置
+  const custom = registry.chat.rendererFor(it);
+  if (custom) {
+    const out = custom.render(it, { scope: p.scope, store: p.store, sessionId: p.sessionId, items: items ?? [], view: p });
+    if (out !== undefined) return out;
+  }
   switch (it.kind) {
     case 'user': {
       // 编辑态:气泡原位变输入框,改完作为新消息重新发送
@@ -62,9 +72,9 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
                 }}
               ></textarea>
               <div class="edit-ops">
-                <span class="hint">⌘/Ctrl+Enter 重新发送 · Esc 取消</span>
-                <button class="primary" @click=${p.onCommitEdit}>重新发送</button>
-                <button @click=${p.onCancelEdit}>取消</button>
+                <span class="hint">${p.t('⌘/Ctrl+Enter 重新发送 · Esc 取消')}</span>
+                <button class="primary" @click=${p.onCommitEdit}>${p.t('重新发送')}</button>
+                <button @click=${p.onCancelEdit}>${p.t('取消')}</button>
               </div>
             </div>
           </div>
@@ -74,15 +84,15 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
         <div class="msg-user" data-mid=${it.id}>
           <div class="body">${it.text}</div>
           <div class="bops">
-            <button class="bop" title="复制" @click=${() => p.onCopy(it.id, it.text)}>
+            <button class="bop" title=${p.t('复制')} @click=${() => p.onCopy(it.id, it.text)}>
               ${unsafeHTML(p.copiedId === it.id ? icon.check : icon.copy)}
             </button>
-            <button class="bop" title="编辑后重新发送" @click=${() => p.onStartEdit(it)}>
+            <button class="bop" title=${p.t('编辑后重新发送')} @click=${() => p.onStartEdit(it)}>
               ${unsafeHTML(icon.edit)}
             </button>
           </div>
           ${it.images?.length
-            ? html`<div class="imgs">${it.images.map((u) => html`<img src=${u} alt="图片" />`)}</div>`
+            ? html`<div class="imgs">${it.images.map((u) => html`<img src=${u} alt=${p.t('图片')} />`)}</div>`
             : nothing}
         </div>
       `;
@@ -134,8 +144,17 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
       return html`<div class="err">${it.text}</div>`;
     case 'status':
       return html`<div class="status">— ${it.text} —</div>`;
-    default:
-      return nothing;
+    default: {
+      // ③ 未知 kind(新版服务端新增条目等):渲染为通用通知卡,不再静默
+      // 丢弃 —— 条目至少可见,升级 gh 后前端未跟随时可发现
+      const rec = it as { kind?: string; text?: string };
+      const body = rec.text !== undefined ? String(rec.text) : JSON.stringify(it).slice(0, 300);
+      return html`
+        <div class="notice">
+          <span class="k">${String(rec.kind ?? 'item')}</span><span>${truncate(body, 300)}</span>
+        </div>
+      `;
+    }
   }
 }
 
@@ -173,7 +192,7 @@ function renderAssistantBody(it: { text: string }, p: MessageViewProps): (Templa
               p.onSaveSkill(e.detail.name, e.detail.content)}
           ></grf-skill-card>`
         : part.type === 'text'
-          ? html`${unsafeHTML(renderMarkdown(part.text))}`
+          ? html`${unsafeHTML(chatMarkdown(p.scope, part.text))}`
           : nothing,
     );
   });
@@ -188,9 +207,9 @@ function renderAssistantBody(it: { text: string }, p: MessageViewProps): (Templa
   // 超出后跟随模型输出滚动(chat-panel updated 里推到末尾)
   if (it.streaming && !open) {
     return html`
-      <div class="reasoning live" @click=${() => p.onToggleReasoning(it.id)} title="点击展开思考全文">
+      <div class="reasoning live" @click=${() => p.onToggleReasoning(it.id)} title=${p.t('点击展开思考全文')}>
         ${unsafeHTML(icon.brain)}
-        <span class="rlabel">正在思考:</span>
+        <span class="rlabel">${p.t('正在思考:')}</span>
         <span class="rscroll"><span class="rtext">${it.text.trim() || '…'}</span></span>
       </div>
     `;
@@ -201,7 +220,7 @@ function renderAssistantBody(it: { text: string }, p: MessageViewProps): (Templa
     <div class="reasoning">
       <div class="rhead" @click=${() => p.onToggleReasoning(it.id)}>
         ${unsafeHTML(icon.brain)}
-        <span>思考${dur}</span>
+        <span>${p.t('思考')}${dur}</span>
         <svg
           class="chev ${open ? 'open' : ''}"
           viewBox="0 0 16 16"

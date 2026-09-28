@@ -65,6 +65,32 @@ configure('myscope', {
   ungroupedSessions: false, // 可选:false 禁止未分组会话——无激活会话直接
                          // 发送时兜底改绑最近使用的项目,左栏「未分组
                          // 会话」分组不再渲染
+  disableDefaultPrompt: true, // 可选:完全关闭 goder 默认身份提示词
+                         // (sessionDefaults 与项目 defaults 均未给
+                         // system_prompt 时留空,由 gh 服务端默认接管——
+                         // 嵌入方完全自管身份时用)
+  onBeforeSend: (p) => {  // 可选:发送钩子——用户消息离开输入框之前回调。
+    if (banned(p.text)) return null; // 返回 null 取消发送(输入保留在框内)
+    return { ...p, text: p.text + RAG }; // 返回改写载荷继续发送
+  },                      // 出站审计/前置 RAG 注入/敏感词过滤/路由改写
+  onApproval: (req) => {  // 可选:审批钩子——工具审批卡出现时回调。
+    if (req.toolName === 'bash' && trusted(req.input)) {
+      return { approved: true }; // 返回决策即自动应答(后台会话同样接管)
+    }
+    return null;          // 返回 null 落默认审批卡,由用户手动处置
+  },
+  markdown: (text) => renderRich(text), // 可选:覆写消息流的 markdown
+                         // 渲染器(换 marked 等富引擎;输出 HTML 字符串,
+                         // 覆写方自行负责转义与安全)
+  locale: 'en',          // 可选:i18n 目标语言(标记性)
+  messages: {            // 可选:文案覆盖(key 即中文默认文案,支持 {x} 插值)
+    '新会话': 'New chat',
+    '连接中断({err}),自动重试 {a}/{m}': 'reconnecting ({err}) {a}/{m}',
+  },
+  statusPop: false,      // 可选:false 隐藏聊天列右上的状态浮窗(goder
+                         // 特有的自动化任务/git/goal 卡)
+  persistToken: true,    // 可选:true 才把连接 token 持久化到本地存储
+                         // (默认不落盘,每次由宿主下发——见鉴权模型)
 });
 ```
 
@@ -93,6 +119,18 @@ configure('myscope', {
 | `<grf-app-shell>` | 上述整套布局(左导航 + 黑色圆角工作卡,可折叠/拖拽分区) | `panels="sessions,chat,sidebar,console"` `layout="sidebar=false"` `nav="sessions"` |
 
 所有面板公有属性:`scope`(数据域,默认 `default`)、`server`、`token`。
+右栏/底栏 dock 为独立元素(`<grf-side-dock>`/`<grf-bottom-dock>`,由
+`<grf-app-shell>` 装配;宿主自组布局时也可单独使用):`panels` 不含
+`chat` 时右栏/底栏照常可用(「主区不是对话、侧栏有工具面板」的形态)。
+
+```js
+import { GRF_UI_VERSION } from '/path/to/grf-ui.js';
+GRF_UI_VERSION; // '0.1.0' —— 产物同源版本常量,升级前可做特性协商
+```
+
+`dist-embed/types/` 下有完整 TypeScript 类型产物(`grf-ui.js` +
+`entries/embed.d.ts` 等依赖闭包),TS 项目按相对路径引用即可获得全部
+`configure` 选项与钩子签名。
 
 ## 4. registry:界面定制(核心扩展点)
 
@@ -193,6 +231,47 @@ registry.settings.add({
 `grf-nav-state`(detail = `{ nav?, state }`)向 shell 上抛状态(内置设置
 分区即此机制)。
 
+### 条目的 scope 归属(scopes 字段)
+
+注册表是全局单例;同页多个 scope 实例默认共享条目。条目可声明
+`scopes: ['app']` 限定只在这些 scope 下可见(与 `visible(ctx)` 守卫
+正交),实现「同页两个嵌入实例各装配各的面板集合」:
+
+```js
+registry.side.add({ id: 'game', label: '游戏', icon: svg, scopes: ['play'], render: … });
+```
+
+### 聊天内容定制(registry.chat)
+
+消息层的渲染扩展(壳层四区解决「放哪、放什么」,这里解决「消息本身
+长什么样」):
+
+```js
+import { registry, html } from '/path/to/grf-ui.js';
+
+// ① 自家工具的专属卡片:按工具名(字符串或正则)接管 tool 条目渲染
+registry.chat.addRenderer({
+  id: 'mine',
+  toolName: /^mcp__mine__/,
+  render: (it, ctx) => {
+    if (it.kind !== 'tool') return undefined; // 条件接管:undefined 走内置
+    const el = document.createElement('div');
+    el.textContent = '我的工具卡片:' + it.name;
+    return el; // 返回 HTMLElement/lit 模板;nothing/空模板 = 不渲染
+  },
+});
+
+// ② 工具展示知识:名字 → 中文标签 + 主参数/明细提取(工具卡与消息流共用)
+registry.chat.addToolMeta({ name: 'mcp__mine__query', label: '知识检索' });
+
+// ③ 未知 kind 兜底:内置已改为渲染通用通知卡(不再静默丢弃),
+//    渲染器按 kind 接管可完全自定义
+registry.chat.removeRenderer('mine'); // 同 id 覆写/移除
+```
+
+markdown 渲染器覆写走 `configure({ markdown })`(per-scope);内置
+`renderMarkdown` 同时仍作为独立导出供宿主复用。
+
 ### 注册表生效范围
 
 registry 是全局单例:同页所有 scope 实例共享条目定义;数据按 scope 隔离。
@@ -276,7 +355,27 @@ GRF_IDENTITY=header GRF_UID_HEADER=X-GRF-UID ADDR=127.0.0.1:7702 \
 ```
 
 自检端点:`GET /grf-api/whoami` 返回当前解析到的用户与后端进程地址;
-`GET /grf-api/healthz` 网关探活。
+`GET /grf-api/healthz` 网关探活;`GET /grf-api/healthz/ready` 就绪探针
+(gh 二进制可解析;进程按用户懒启动)。
+
+**运维面(可选,`GRF_ADMIN_TOKEN` 开启)**:`GET /grf-api/admin/statuses`
+返回全部用户进程状态(headless 监控/三方后端的编程入口);
+`POST /grf-api/admin/start?uid=<用户>` 幂等拉起该用户的进程(已在跑则
+原样返回;崩溃冷却中返回 503);`POST /grf-api/admin/stop?uid=<用户>`
+回收指定用户的进程;`POST /grf-api/admin/restart?uid=<用户>` 停止后
+拉起(配置变更/进程僵死时用;会换端口,数据目录不变)。鉴权:
+`Authorization: Bearer <GRF_ADMIN_TOKEN>`。
+
+**webhook(可选,`GRF_WEBHOOK_URL` 开启)**:用户进程生命周期事件
+(`proc.started`/`proc.stopped`/`proc.crashed`)POST 回调给三方后端
+(body 携带 `type/uid/addr?/reason?/ts`;投递尽力而为)。会话完成等
+应用级事件仍走浏览器 SSE 消费。
+
+**其他网关环境变量**:`GRF_CORS_ORIGINS`(逗号分隔 Origin 白名单,
+精确放行 + 允许凭据,优先于 `GRF_CORS` 的通配模式)、`GRF_ACCESS_LOG=1`
+(结构化请求日志)、`GRF_SESSIONS_FILE`(sso 会话文件持久化,重启免
+重登)、`GRF_WEBHOOK_URL`、`GRF_ADMIN_TOKEN`。网关错误已类型化:容量
+类(用户上限/端口耗尽)429,进程未就绪/启动失败/冷却 503,其余 502。
 
 **安全约束**:header 模式信任请求头,必须保证网关端口只接受来自你后端的
 流量(内网/localhost/防火墙),不可直接暴露公网。
@@ -318,6 +417,14 @@ auth: { loginUrl: '/grf-api/auth/login' } })`。
 <grf-session-list scope="ops"></grf-session-list>
 <grf-chat scope="ops"></grf-chat>
 ```
+
+scope 的生命周期由面板自动管理:面板挂载时持引用,全部面板断开后
+延迟 30s 回收(清轮询定时器、释放实例;期间再挂载则取消回收)。
+动态创建/销毁大量 scope 实例的宿主也可手动持引用防回收:
+`acquireScope(name)` / `releaseScope(name)`(与面板的自动计数叠加)。
+回收不保留运行态:运行中的回合由旧实例跑完,重建后从服务器会话
+列表重新对齐;宿主经 `configure` 注入的连接配置(含未持久化的
+token)在重建时保留,不受影响。
 
 ## 7. 事件(宿主监听)
 

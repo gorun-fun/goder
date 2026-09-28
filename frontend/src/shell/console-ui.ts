@@ -3,8 +3,43 @@
 // 这里映射为 app-shell 的既有 API;界面状态由快照函数按需生成、节流
 // 上报(reportConsoleUi → ConsoleMCP.ReportUIState,goder_ui_state 工具读)。
 // 桌面专属能力:纯 web/嵌入态下订阅为 no-op、上报自动跳过。
+// 本模块同时注册 goder-console 全部工具的展示名(registry.chat 工具
+// 元数据)—— 工具定义在 Go 侧 plugins/console/tools.go,展示知识与
+// 前端接线同源维护;双形态都注册(消息历史里的工具卡要有中文名)。
 import { inWails, consoleUiListen, consoleUiReport } from '../host/bridge';
-import type { SideTabInstance } from '../registry/registry';
+import { registry, type SideTabInstance } from '../registry/registry';
+
+// goder-console 工具展示名(与 plugins/console/tools.go 的工具面同步)。
+const GODER_TOOL_LABELS: Record<string, string> = {
+  goder_browser_navigate: '面板浏览器·打开网页',
+  goder_browser_back: '面板浏览器·后退',
+  goder_browser_forward: '面板浏览器·前进',
+  goder_browser_reload: '面板浏览器·刷新',
+  goder_browser_state: '面板浏览器·状态',
+  goder_browser_snapshot: '面板浏览器·页面快照',
+  goder_browser_click: '面板浏览器·点击',
+  goder_browser_type: '面板浏览器·输入',
+  goder_browser_press_key: '面板浏览器·按键',
+  goder_browser_hover: '面板浏览器·悬停',
+  goder_browser_select_option: '面板浏览器·选择选项',
+  goder_browser_scroll: '面板浏览器·滚动',
+  goder_browser_evaluate: '面板浏览器·执行脚本',
+  goder_browser_get_text: '面板浏览器·获取文本',
+  goder_browser_screenshot: '面板浏览器·截图',
+  goder_browser_console: '面板浏览器·控制台日志',
+  goder_browser_network: '面板浏览器·网络请求',
+  goder_browser_wait_for: '面板浏览器·等待',
+  goder_terminal_list: '面板终端·列表',
+  goder_terminal_new: '面板终端·新建',
+  goder_terminal_send: '面板终端·输入',
+  goder_terminal_read: '面板终端·读取',
+  goder_terminal_kill: '面板终端·关闭',
+  goder_ui_state: '界面·状态',
+  goder_ui_do: '界面·操作',
+};
+for (const [name, label] of Object.entries(GODER_TOOL_LABELS)) {
+  registry.chat.addToolMeta({ name, label });
+}
 
 /** app-shell 暴露给智能体的界面操作面(与用户手动操作同一入口)。 */
 export interface ConsoleUiActions {

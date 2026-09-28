@@ -26,22 +26,27 @@
 //	GRF_UPSTREAM(仅 single)  GRF_UID_HEADER(X-GRF-UID)  GRF_NAME_HEADER(X-GRF-Name)
 //	GRF_USER_HOME(1)  GRF_SETTINGS_SEED(空/1/绝对路径)
 //	SSO_ENDPOINT / SSO_CLIENT_ID / SSO_CLIENT_SECRET / SSO_REDIRECT_URL /
-//	SSO_ORGANIZATION / AUTH_DEV_EMAIL / COOKIE_SECURE(仅 sso)
+//	SSO_ORGANIZATION / AUTH_DEV_EMAIL / COOKIE_SECURE / GRF_SESSIONS_FILE(仅 sso)
+//	GRF_CORS_ORIGINS(逗号分隔白名单,给出时精确放行+允许凭据,优先于 GRF_CORS)
+//	GRF_ADMIN_TOKEN(/admin/* 管理 API 令牌;空 = 关闭)  GRF_WEBHOOK_URL(进程
+//	生命周期事件回调;空 = 关闭)  GRF_ACCESS_LOG(1 = 请求日志)
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
-	"git.gorun.fun/share/goder/internal/gateway"
-	"git.gorun.fun/share/goder/internal/ghserver"
-	"git.gorun.fun/share/goder/internal/identity"
+	"git.gorun.fun/share/goder/pkg/gateway"
+	"git.gorun.fun/share/goder/pkg/ghserver"
+	"git.gorun.fun/share/goder/pkg/identity"
 )
 
 func main() {
@@ -54,6 +59,16 @@ func main() {
 		APIPrefix: "/grf-api",
 		StaticDir: staticDir,
 		CORS:      envBool("GRF_CORS", true),
+		AdminToken: env("GRF_ADMIN_TOKEN", ""),
+		WebhookURL: env("GRF_WEBHOOK_URL", ""),
+		AccessLog:  envBool("GRF_ACCESS_LOG", false),
+	}
+	if v := os.Getenv("GRF_CORS_ORIGINS"); v != "" {
+		for _, o := range strings.Split(v, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				opts.CORSOrigins = append(opts.CORSOrigins, o)
+			}
+		}
 	}
 
 	switch env("GRF_IDENTITY", "single") {
@@ -95,6 +110,10 @@ func main() {
 		if cfg.DevEmail == "" && (cfg.Endpoint == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURL == "") {
 			log.Fatalf("sso 模式需要 SSO_ENDPOINT/SSO_CLIENT_ID/SSO_CLIENT_SECRET/SSO_REDIRECT_URL(或 AUTH_DEV_EMAIL 开发后门)")
 		}
+		if f := env("GRF_SESSIONS_FILE", ""); f != "" {
+			cfg.Sessions = identity.NewFileSessions(f)
+			log.Printf("会话持久化: %s(重启免重登)", f)
+		}
 		opts.Resolver = identity.NewSSO(cfg)
 		opts.Manager = managerFromEnv(ghBin, dataDir)
 		log.Printf("身份模式: sso(Casdoor %s;登录入口 /grf-api/auth/login)", cfg.Endpoint)
@@ -103,7 +122,16 @@ func main() {
 	}
 
 	gw := gateway.New(opts)
-	server := &http.Server{Addr: addr, Handler: gw.Handler()}
+	server := &http.Server{
+		Addr: addr,
+		Handler: gw.Handler(),
+		// 慢连接防护:头/体读取设限,空闲连接回收;WriteTimeout 不设
+		// —— SSE 长响应会被它掐断(流式聊天的主链路)。
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 
 	go func() {
 		sig := make(chan os.Signal, 1)
@@ -111,7 +139,10 @@ func main() {
 		<-sig
 		log.Printf("收到退出信号,回收用户进程…")
 		gw.Shutdown()
-		_ = server.Close()
+		// 优雅退出:给在途请求(含 SSE)5s 收尾,超时强关。
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
 	}()
 
 	log.Printf("grf-web-serve: http://%s  (API /grf-api,静态 %s)", addr, staticDir)

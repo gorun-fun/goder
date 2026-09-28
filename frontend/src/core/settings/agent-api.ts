@@ -4,7 +4,7 @@
 //
 // 密钥安全往返(掩码语义):GET 只回空 apiKey/token + hasKey/hasToken;
 // PUT 空值 = 保留现值(改名经 keepKeyFrom 指回旧条目),非空 = 更换。
-import type { DetectedModelDTO, ModelConfigDTO, PluginsDTO, ProviderDTO, SkillsDTO } from '../../host/bridge';
+import type { DetectedModelDTO, ModelConfigDTO, PluginsDTO, ProviderDTO, SkillsDTO } from '../api/agent-dto';
 
 /** agent API 不可用(404 = gh server 过旧/未启用)时抛出,调用方回落引导文案 */
 export class AgentApiUnsupportedError extends Error {

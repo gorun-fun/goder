@@ -1,0 +1,559 @@
+// side-dock.ts — <grf-side-dock>:右栏 dock(tab 行 + 内容元素池)。
+// 从 chat-panel 剥离的通用容器:dock 属于壳层布局、与聊天内容无关,
+// 剥离后「无聊天但保留右栏」的装配(panels="sessions,sidebar")成立。
+// 池化语义与剥离前一致:render 返回 HTMLElement 的条目按 (tab id, 会话)
+// 池化保活(跨 tab 开关与会话切换不销毁,如终端 PTY),shared 条目为
+// scope 级单例(切会话不动,如嵌入方的项目级面板);条目被 hide 后其
+// tab 不再渲染。tab 状态(tabs/active/on)由 app-shell 受控下发,变更经
+// grf-side-tab-open/close/activate 冒泡上抛(UI 事件总线在壳层闸门)。
+import { css, html, nothing } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import type { PropertyValues } from 'lit';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
+import { GrfPanel, theme } from '../ui/panel';
+import { icon } from '../util/icons';
+import { inWails } from '../host/bridge';
+import { registry, sideTabId, type PanelContext, type SideTabDef, type SideTabInstance } from '../registry/registry';
+
+@customElement('grf-side-dock')
+export class GrfSideDock extends GrfPanel {
+  /** 展开态(收起时隐藏,内部 tab 会话保活) */
+  @property({ type: Boolean }) on = false;
+  /** 已打开的 tab 实例(有序;受控,由 app-shell 维护) */
+  @property({ type: Array }) tabs: SideTabInstance[] = [];
+  /** 当前激活的 tab id */
+  @property({ type: String }) activeTab = '';
+
+  /** 用户拖拽后的宽度(null = 按 tab 默认宽) */
+  @state() private width: number | null = null;
+  /** "+" 类型菜单展开态与定位 */
+  @state() private menuOpen = false;
+  @state() private menuLeft = 0;
+  private dragging = false;
+
+  /** 返回 HTMLElement 的右栏条目(终端等有状态内容)按 (tab id, 会话)
+   * 池化保活:跨 tab 开关与会话切换不销毁元素 */
+  private elPool = new Map<string, Map<string, HTMLElement>>();
+  /** shared 条目(SideTabDef.shared)的 scope 级单例池:按 tab id 一份,
+   * 切会话不动元素(防 DOM 移动致 iframe 重载等副作用) */
+  private sharedEls = new Map<string, HTMLElement>();
+  /** 池内容当前归属的会话('' = 尚未绑定) */
+  private poolSid = '';
+
+  static styles = [
+    theme,
+    css`
+      :host {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        flex: 0 1 auto;
+        max-width: 65%;
+        background: transparent;
+        font-family: var(--grf-font);
+        font-size: var(--grf-font-size);
+        color: var(--grf-text);
+      }
+      .gutter-side.off,
+      aside.side.off {
+        display: none;
+      }
+      /* 右栏拖拽条:常显一条灰线作为与聊天区的分界,悬停提亮一档 */
+      .gutter-side {
+        flex: none;
+        width: 4px;
+        cursor: col-resize;
+        position: relative;
+      }
+      /* 命中区左右各扩 5px:4px 线太细,浏览器 iframe 贴线时几乎点不中 */
+      .gutter-side::before {
+        content: '';
+        position: absolute;
+        inset: 0 -5px;
+      }
+      .gutter-side::after {
+        content: '';
+        position: absolute;
+        inset: 0 1.5px;
+        background: var(--grf-border-soft);
+      }
+      .gutter-side:hover::after {
+        background: var(--grf-border-hover);
+      }
+      /* 拖拽中:禁用右栏内嵌元素的指针事件(尤其浏览器 iframe) */
+      :host(.dragging) {
+        cursor: col-resize;
+      }
+      :host(.dragging) .side-body {
+        pointer-events: none;
+      }
+      /* tab 行外包一层定位容器:下拉菜单不能放在 .side-tabs 内 ——
+       * 该行横向滚动会把 absolute 子元素裁掉 */
+      .tabs-head {
+        flex: none;
+        position: relative;
+      }
+      .side-tabs {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 5px 6px 0;
+        border-bottom: 1px solid var(--grf-border);
+        user-select: none;
+        min-height: 32px;
+        /* 文件 tab(相对路径标题)可能很多/很长:tab 行横向滚动 */
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .stab .stab-t {
+        max-width: 170px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .stab {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 8px;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-dim);
+        border-bottom: 2px solid transparent;
+        cursor: pointer;
+        border-radius: 4px 4px 0 0;
+      }
+      .stab:hover {
+        color: var(--grf-text);
+        background: var(--grf-bg-hover);
+      }
+      /* 激活 tab:白字白下划线,不用强调色 */
+      .stab.on {
+        color: var(--grf-text);
+        border-bottom-color: var(--grf-text);
+      }
+      .stab svg {
+        width: 12px;
+        height: 12px;
+        flex: none;
+      }
+      .stab .x {
+        display: none;
+        border: none;
+        background: transparent;
+        padding: 0 0 0 2px;
+        color: var(--grf-text-faint);
+        cursor: pointer;
+      }
+      .stab .x svg {
+        width: 10px;
+        height: 10px;
+      }
+      .stab:hover .x {
+        display: inline-flex;
+      }
+      .stab .x:hover {
+        color: var(--grf-error);
+      }
+      .stab.add {
+        color: var(--grf-text-faint);
+        border-bottom-color: transparent;
+      }
+      .side-menu {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        z-index: 30;
+        background: var(--grf-bg-raise);
+        border: 1px solid var(--grf-border);
+        border-radius: var(--grf-radius);
+        box-shadow: var(--grf-shadow);
+        padding: 4px;
+        min-width: 160px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .side-menu .mi {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-dim);
+        border-radius: var(--grf-radius-sm);
+        cursor: pointer;
+        user-select: none;
+      }
+      .side-menu .mi:hover {
+        background: var(--grf-bg-hover);
+        color: var(--grf-text);
+      }
+      .side-menu .mi svg {
+        width: 12px;
+        height: 12px;
+        flex: none;
+      }
+      .side-menu .mitag {
+        margin-left: auto;
+        color: var(--grf-text-faint);
+        font-size: 10px;
+      }
+      /* 右栏空态:居中类型入口 */
+      .side-empty {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: 12px;
+        padding: 20px;
+      }
+      .side-empty .hint {
+        font-size: var(--grf-font-size-xs);
+        color: var(--grf-text-faint);
+      }
+      .side-empty .entries {
+        display: grid;
+        gap: 8px;
+      }
+      .side-empty .entry {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 8px 14px;
+        background: var(--grf-bg-raise);
+        border: 1px solid var(--grf-border);
+        border-radius: var(--grf-radius);
+        color: var(--grf-text-dim);
+        font-size: var(--grf-font-size-sm);
+        cursor: pointer;
+        min-width: 176px;
+        justify-content: flex-start;
+      }
+      .side-empty .entry:hover {
+        background: var(--grf-bg-hover);
+        color: var(--grf-text);
+        border-color: var(--grf-border-hover);
+      }
+      .side-empty .entry svg {
+        width: 14px;
+        height: 14px;
+        flex: none;
+      }
+      .side-body {
+        flex: 1;
+        min-height: 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .pane {
+        display: none;
+      }
+      .pane.on {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        min-width: 0;
+      }
+      .pane > * {
+        flex: 1;
+        min-height: 0;
+        min-width: 0;
+      }
+      /* 内嵌面板融入底色 */
+      .pane > grf-session-detail,
+      .pane > grf-review,
+      .pane > grf-browser,
+      .pane > grf-console {
+        background: transparent;
+        border-left: none;
+      }
+    `,
+  ];
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    window.addEventListener('pointermove', this.onDrag);
+    window.addEventListener('pointerup', this.stopDrag);
+    window.addEventListener('pointerdown', this.onWinPointerDown);
+  }
+
+  disconnectedCallback(): void {
+    window.removeEventListener('pointermove', this.onDrag);
+    window.removeEventListener('pointerup', this.stopDrag);
+    window.removeEventListener('pointerdown', this.onWinPointerDown);
+    this.elPool.clear();
+    this.sharedEls.clear();
+    this.poolSid = '';
+    super.disconnectedCallback();
+  }
+
+  private onDrag = (e: PointerEvent): void => {
+    if (!this.dragging) return;
+    const rect = this.getBoundingClientRect();
+    // 右栏拖宽:下限 260(右栏自身可用),上限保留聊天列最小宽度 300
+    // (dock 左缘到视口左端的空间减去聊天列保底)
+    this.width = Math.min(Math.max(rect.right - e.clientX, 260), Math.max(rect.left - 300, 260));
+  };
+
+  private stopDrag = (): void => {
+    this.dragging = false;
+    this.classList.remove('dragging');
+  };
+
+  // "+" 菜单:点击菜单外任意处关闭
+  private onWinPointerDown = (e: PointerEvent): void => {
+    if (!this.menuOpen) return;
+    const path = e.composedPath();
+    const inMenu = [...this.renderRoot.querySelectorAll('.side-menu')].some((m) => path.includes(m));
+    const inAdd = [...this.renderRoot.querySelectorAll('.stab.add')].some((m) => path.includes(m));
+    if (!inMenu && !inAdd) this.menuOpen = false;
+  };
+
+  /** 面板渲染上下文(registry 条目渲染用)。 */
+  private _ctx?: PanelContext;
+
+  private refreshCtx(): PanelContext {
+    this._ctx = {
+      scope: this.scope,
+      store: this.store,
+      sessionId: this.store?.activeSessionId,
+      desktop: inWails(),
+    };
+    return this._ctx;
+  }
+
+  protected willUpdate(props: PropertyValues<this>): void {
+    super.willUpdate(props);
+    this.syncPools();
+  }
+
+  // prunePools 清理已不存在的会话(归档/服务器删除/草稿废弃)的池化内容:
+  // 从 map 移除后元素不再渲染,断开即销毁(如 PTY)。
+  private prunePools(): void {
+    const s = this.store;
+    if (!s) return;
+    const alive = (sid: string) =>
+      sid.startsWith('draft:') ? s.drafts.has(sid) : !!s.index.sessions[sid];
+    // 注意结构差异:elPool 外层键是 tab id('terminal'/'file:<路径>'…),
+    // 会话 id 在内层 map —— 判活必须遍历内层,否则会把 tab id 当会话 id
+    // 误判为已死,每次渲染清空侧栏元素池(终端 PTY 随之被杀重启)。
+    for (const [tabId, bySid] of this.elPool) {
+      for (const sid of bySid.keys()) {
+        if (alive(sid) || sid === this.poolSid) continue;
+        bySid.delete(sid);
+      }
+      if (bySid.size === 0) this.elPool.delete(tabId);
+    }
+  }
+
+  // syncPools 会话切换收敛 + 内容工作目录跟随当前会话的项目(其他会话
+  // 的 tab 保持各自目录,不因切换会话被重启)。
+  private syncPools(): void {
+    this.prunePools();
+    const sid = this.store?.activeSessionId ?? '';
+    if (sid !== this.poolSid) this.poolSid = sid;
+    const cwd = this.store?.activeProjectPath() ?? '';
+    const targets: HTMLElement[] = [];
+    for (const bySid of this.elPool.values()) targets.push(...bySid.values());
+    for (const el of targets) {
+      if (el && 'cwd' in el) (el as unknown as { cwd: string }).cwd = cwd;
+    }
+  }
+
+  /** 当前环境可用的右栏条目。 */
+  private sideDefs(): SideTabDef[] {
+    return registry.side.visible(this.refreshCtx());
+  }
+
+  /** 取(懒建)某会话、某 tab 的保活元素;仅 render 返回 HTMLElement 的
+   * 条目走池化,模板条目返回 null。shared 条目走 scope 级单例池。 */
+  private pooledEl(def: SideTabDef, key: string | undefined, sid: string): HTMLElement | null {
+    const tabId = key !== undefined ? `${def.id}:${key}` : def.id;
+    if (def.shared) {
+      let el = this.sharedEls.get(tabId);
+      if (!el) {
+        const out = def.render(this.refreshCtx(), key);
+        if (!(out instanceof HTMLElement)) return null; // 模板条目不走池化
+        el = out;
+        this.sharedEls.set(tabId, el);
+      }
+      return el;
+    }
+    let bySid = this.elPool.get(tabId);
+    if (!bySid) {
+      bySid = new Map();
+      this.elPool.set(tabId, bySid);
+    }
+    let el = bySid.get(sid);
+    if (!el) {
+      const out = def.render(this.refreshCtx(), key);
+      if (!(out instanceof HTMLElement)) return null; // 模板条目不走池化
+      el = out;
+      bySid.set(sid, el);
+    }
+    return el;
+  }
+
+  /** 某条目当前(会话维度的)池化元素(公开:壳层/宿主对池内元素做编程
+   * 操作的通道,如浏览器 tab 导航);模板条目或条目不存在返回 undefined。
+   * 单例条目取池化实例,多实例条目取当前会话的实例。 */
+  panelEl(defId: string, key?: string): HTMLElement | undefined {
+    const def = registry.side.get(defId);
+    if (!def) return undefined;
+    return this.pooledEl(def, key, this.poolSid || this.store?.activeSessionId || '') ?? undefined;
+  }
+
+  // tabLabel 实例标题:显式 title > 条目 titleFor > 条目 label。
+  private tabLabel(t: SideTabInstance, defs: SideTabDef[]): string {
+    const def = defs.find((d) => d.id === t.defId);
+    if (!def) return t.defId;
+    return t.title ?? def.titleFor?.(t.key) ?? def.label;
+  }
+
+  // toggleMenu 开"+"菜单:打开时实测加号位置,菜单左上角对齐加号左缘
+  // (tab 行可横向滚动,加号位置不固定)。右侧空间不足时向左收。
+  private toggleMenu(): void {
+    if (this.menuOpen) {
+      this.menuOpen = false;
+      return;
+    }
+    const add = this.renderRoot.querySelector('.stab.add') as HTMLElement | null;
+    if (add) {
+      const head = this.renderRoot.querySelector('.tabs-head') as HTMLElement | null;
+      const max = head ? head.clientWidth - 170 : add.offsetLeft;
+      this.menuLeft = Math.max(0, Math.min(add.offsetLeft, max));
+    }
+    this.menuOpen = true;
+  }
+
+  render() {
+    const ctx = this.refreshCtx();
+    const defs = this.sideDefs();
+    // 打开的 tab 过滤到仍可用的条目(条目被 hide 后其 tab 不再渲染)
+    const tabs = this.tabs.filter((t) => defs.some((d) => d.id === t.defId));
+    const activeInst = tabs.find((t) => sideTabId(t) === this.activeTab);
+    const activeDef = activeInst ? defs.find((d) => d.id === activeInst.defId) : undefined;
+    const width = this.width ?? activeDef?.width ?? 300;
+    const on = this.activeTab;
+    const sid = this.poolSid || this.store?.activeSessionId || '';
+    if (!this.on && tabs.length === 0 && defs.length === 0) return nothing;
+
+    return html`
+      <div class="gutter-side ${this.on ? '' : 'off'}" @pointerdown=${() => this.startDrag()}></div>
+      <aside class="side ${this.on ? '' : 'off'}" style="width:${width}px">
+        ${this.renderTabBar(tabs, defs)}
+        <div class="side-body">
+          ${tabs.map((t) => {
+            const def = defs.find((d) => d.id === t.defId)!;
+            const active = on === sideTabId(t);
+            // 池化条目:所有会话的元素常驻 DOM(隐藏保活,切会话不销毁,
+            // PTY/滚动位置都在),仅「当前会话 + 激活 tab」可见;模板条目
+            // 轻量,按激活 tab 现渲染。
+            const el = this.pooledEl(def, t.key, sid);
+            if (el) {
+              if (def.shared) {
+                // shared 条目:scope 级单例,激活即见,不随会话切换换元素
+                return html`<div class="pane ${active ? 'on' : ''}">${el}</div>`;
+              }
+              const tabId = t.key !== undefined ? `${def.id}:${t.key}` : def.id;
+              const bySid = this.elPool.get(tabId) ?? new Map();
+              return [...bySid.entries()].map(
+                ([ownerSid, pel]) => html`<div class="pane ${active && ownerSid === sid ? 'on' : ''}">${pel}</div>`,
+              );
+            }
+            return html`<div class="pane ${active ? 'on' : ''}">${def.render(ctx, t.key)}</div>`;
+          })}
+        </div>
+      </aside>
+    `;
+  }
+
+  private startDrag(): void {
+    this.dragging = true;
+    this.classList.add('dragging');
+  }
+
+  // renderTabBar 右栏顶部 tab 栏;无已开 tab 时显示居中类型入口。
+  // passive 条目(如文件)只由外部带 key 打开,不进两个手动打开入口;
+  // 已开的 passive tab 照常显示在 tab 行、可激活可关闭。
+  private renderTabBar(tabs: SideTabInstance[], defs: SideTabDef[]) {
+    const openable = defs.filter((d) => !d.passive);
+    if (tabs.length === 0) {
+      return html`
+        <div class="side-empty">
+          <div class="hint">${this.t('选择要打开的面板')}</div>
+          <div class="entries">
+            ${openable.map(
+              (d) => html`
+                <button class="entry" title=${this.t('打开{label}', { label: d.label })} @click=${() => this.fire('grf-side-tab-open', { defId: d.id } satisfies SideTabInstance)}>
+                  ${unsafeHTML(d.icon)}
+                  <span>${d.label}</span>
+                </button>
+              `,
+            )}
+          </div>
+        </div>
+      `;
+    }
+    return html`
+      <div class="tabs-head">
+        <div class="side-tabs">
+          ${tabs.map((t) => {
+            const def = defs.find((d) => d.id === t.defId)!;
+            const tid = sideTabId(t);
+            const label = this.tabLabel(t, defs);
+            return html`
+              <span class="stab ${this.activeTab === tid ? 'on' : ''}" title=${label} @click=${() => this.fire('grf-side-tab-activate', tid)}>
+                ${unsafeHTML(def.icon)}
+                <span class="stab-t">${label}</span>
+                <button
+                  class="x"
+                  title=${this.t('关闭{label}', { label })}
+                  @click=${(e: Event) => {
+                    e.stopPropagation();
+                    this.fire('grf-side-tab-close', tid);
+                  }}
+                >
+                  ${unsafeHTML(icon.close)}
+                </button>
+              </span>
+            `;
+          })}
+          <span class="stab add" title=${this.t('打开其他面板')} @click=${() => this.toggleMenu()}>${unsafeHTML(icon.plus)}</span>
+        </div>
+        ${this.menuOpen
+          ? html`
+              <div class="side-menu" style=${`left:${this.menuLeft}px`}>
+                ${openable.map(
+                  (d) => html`
+                    <div
+                      class="mi"
+                      @click=${() => {
+                        this.menuOpen = false;
+                        this.fire('grf-side-tab-open', { defId: d.id } satisfies SideTabInstance);
+                      }}
+                    >
+                      ${unsafeHTML(d.icon)}
+                      <span>${d.label}</span>
+                      ${tabs.some((t) => t.defId === d.id && !d.multi) ? html`<span class="mitag">${this.t('已打开')}</span>` : nothing}
+                    </div>
+                  `,
+                )}
+              </div>
+            `
+          : nothing}
+      </div>
+    `;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'grf-side-dock': GrfSideDock;
+  }
+}

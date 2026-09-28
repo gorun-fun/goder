@@ -1,7 +1,7 @@
 // review.ts — <grf-review>:git 审查面板(右栏 tab 之一)。
 // 读取当前项目目录的 git 状态(分支/领先落后/文件分组),点文件行内展开
 // diff;经 Desktop 服务执行 git,仅桌面态可用。打开期间 10s 轮询刷新。
-import { css, html, nothing } from 'lit';
+import { css, html, nothing , type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GrfPanel, theme, controls } from '../../ui/panel';
@@ -218,7 +218,7 @@ export class GrfReview extends GrfPanel {
     super.disconnectedCallback();
   }
 
-  protected updated(props: Map<string, unknown>): void {
+  protected updated(props: PropertyValues<this>): void {
     super.updated(props);
     if (props.has('cwd') && props.get('cwd') !== undefined) {
       this.diffs.clear();

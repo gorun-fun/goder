@@ -53,7 +53,7 @@ export class GrfDesktop extends LitElement {
     }
     // 桌面:先把连接无阻塞切到同源代理(wails 调用通道加载初期可能挂起,
     // 不能把连接设置挡在任何 wails 调用后面);token 等桥就绪后异步补上。
-    configureScope('app', { baseUrl: `${location.origin}/grf-api`, token: '' });
+    configureScope('app', { baseUrl: `${location.origin}/grf-api`, token: '', persistToken: true });
     this.initStage = 'proxy';
     void this.bootstrapDesktop();
   }

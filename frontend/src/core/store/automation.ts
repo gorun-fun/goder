@@ -5,12 +5,17 @@
 // 前端解析渲染保存卡,入库后出现在状态浮窗,点击即新建执行会话。
 //
 // 内置技能 grf-auto(自动化任务创作指南)的正文单一源文件在
-// internal/desktop/agentskills/grf-auto.md:这里以 vite ?raw 引同一份
-// 注入操作员 system prompt(创建自动化会话即全文生效),Go 侧
-// go:embed 启动烙写 ~/.grf/skills 供设置页展示与非操作员会话 skill
-// 工具加载 —— 改指南只改那一份。
-import grfAutoSkillMD from '../../../../internal/desktop/agentskills/grf-auto.md?raw';
+// internal/desktop/agentskills/grf-auto.md:经两个 vite 配置的 define
+// (__GRF_AUTO_SKILL_MD__,构建时读该文件注入)进操作员 system prompt
+// (创建自动化会话即全文生效),Go 侧 go:embed 启动烙写 ~/.grf/skills
+// 供设置页展示与非操作员会话 skill 工具加载 —— 改指南只改那一份。
+// core 由此不再跨树引 Go 源码,可整体拷出独立成包。
 import type { AutomationTask } from './persistence';
+
+/** 构建期注入的 grf-auto 技能全文(vite define;两个配置同源注入)。 */
+declare const __GRF_AUTO_SKILL_MD__: string | undefined;
+const grfAutoSkillMD: string =
+  typeof __GRF_AUTO_SKILL_MD__ === 'string' ? __GRF_AUTO_SKILL_MD__ : '';
 
 /** 任务块标签(markdown 代码栏之外的裸标签,assistant 文本里出现即解析) */
 const TASK_OPEN = /<grf-task(?:\s+name="([^"]*)")?\s*>/;

@@ -41,6 +41,7 @@ import {
   type ServerStatusDTO,
 } from '../../host/bridge';
 import { getScope, configureScope, savedConn, locationDefaultBase, setModelNameResolver } from '../store/scope';
+import { kvGet, kvSet } from '../store/storage';
 import {
   fetchModelCfg,
   putModelCfg,
@@ -155,31 +156,22 @@ interface ProviderCtx {
 }
 
 function loadCtxLensLocal(): Record<string, ProviderCtx> {
-  try {
-    const raw = localStorage.getItem(CTX_LS_KEY);
-    if (!raw) return {};
-    const p = JSON.parse(raw) as Record<string, { url?: unknown; lens?: unknown }>;
-    const out: Record<string, ProviderCtx> = {};
-    for (const [name, v] of Object.entries(p)) {
-      if (typeof v?.url !== 'string' || typeof v?.lens !== 'object' || v.lens === null) continue;
-      const lens: Record<string, number> = {};
-      for (const [m, n] of Object.entries(v.lens as Record<string, unknown>)) {
-        if (typeof n === 'number' && n > 0) lens[m] = n;
-      }
-      out[name] = { url: v.url, lens };
+  const p = kvGet<Record<string, { url?: unknown; lens?: unknown }>>(CTX_LS_KEY);
+  if (!p) return {};
+  const out: Record<string, ProviderCtx> = {};
+  for (const [name, v] of Object.entries(p)) {
+    if (typeof v?.url !== 'string' || typeof v?.lens !== 'object' || v.lens === null) continue;
+    const lens: Record<string, number> = {};
+    for (const [m, n] of Object.entries(v.lens as Record<string, unknown>)) {
+      if (typeof n === 'number' && n > 0) lens[m] = n;
     }
-    return out;
-  } catch {
-    return {};
+    out[name] = { url: v.url, lens };
   }
+  return out;
 }
 
 function saveCtxLensLocal(data: Record<string, ProviderCtx>): void {
-  try {
-    localStorage.setItem(CTX_LS_KEY, JSON.stringify(data));
-  } catch {
-    /* 隐私模式等写入失败时静默,当次会话内仍生效 */
-  }
+  kvSet(CTX_LS_KEY, data);
 }
 
 /** 模型名去 provider 前缀取裸名(与 util/modelctx 的匹配规则一致) */
@@ -190,25 +182,20 @@ function bareModelName(model: string): string {
 type Listener = () => void;
 
 function loadAppearanceLocal(): Appearance {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return { ...DEFAULT_APPEARANCE };
-    const p = JSON.parse(raw) as Partial<Appearance> & { fontSize?: number | string };
-    // 旧档位名(compact/standard/relaxed)迁移为基准像素
-    const fontSize =
-      typeof p.fontSize === 'number'
-        ? p.fontSize
-        : typeof p.fontSize === 'string' && p.fontSize in FONT_MODE_PX
-          ? FONT_MODE_PX[p.fontSize]
-          : DEFAULT_APPEARANCE.fontSize;
-    return {
-      theme: p.theme === 'light' ? 'light' : 'dark',
-      accent: typeof p.accent === 'string' && p.accent ? p.accent : 'blue',
-      fontSize: Math.max(FONT_MIN, Math.min(FONT_MAX, fontSize)),
-    };
-  } catch {
-    return { ...DEFAULT_APPEARANCE };
-  }
+  const p = kvGet<Partial<Appearance> & { fontSize?: number | string }>(LS_KEY);
+  if (!p) return { ...DEFAULT_APPEARANCE };
+  // 旧档位名(compact/standard/relaxed)迁移为基准像素
+  const fontSize =
+    typeof p.fontSize === 'number'
+      ? p.fontSize
+      : typeof p.fontSize === 'string' && p.fontSize in FONT_MODE_PX
+        ? FONT_MODE_PX[p.fontSize]
+        : DEFAULT_APPEARANCE.fontSize;
+  return {
+    theme: p.theme === 'light' ? 'light' : 'dark',
+    accent: typeof p.accent === 'string' && p.accent ? p.accent : 'blue',
+    fontSize: Math.max(FONT_MIN, Math.min(FONT_MAX, fontSize)),
+  };
 }
 
 class SettingsStore {
@@ -277,11 +264,7 @@ class SettingsStore {
 
   setAppearance(patch: Partial<Appearance>): void {
     this.appearance = { ...this.appearance, ...patch };
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(this.appearance));
-    } catch {
-      /* 隐私模式等写入失败时静默,当次会话内仍生效 */
-    }
+    kvSet(LS_KEY, this.appearance);
     this.applyAppearanceVars();
     this.bump();
   }
@@ -332,6 +315,8 @@ class SettingsStore {
     configureScope(scope, {
       baseUrl: `${location.origin}/grf-api`,
       token: this.cfg.serverMode === 'managed' ? (this.srv?.token ?? '') : this.cfg.remoteToken,
+      // 桌面态连接副本连带 token 落本地存储(本机 gh 短期令牌,冷启动直连用)
+      persistToken: true,
     });
   }
 
@@ -795,7 +780,7 @@ class SettingsStore {
     if (this.srv?.running) this.srv = await serverStop();
     this.srv = await serverStart();
     if (this.srv?.running) {
-      configureScope(scope, { baseUrl: `${location.origin}/grf-api`, token: this.srv.token });
+      configureScope(scope, { baseUrl: `${location.origin}/grf-api`, token: this.srv.token, persistToken: true });
     }
     this.bump();
   }

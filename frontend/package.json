@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:embed": "vite build --config vite.embed.config.ts"
+    "build:embed": "vite build --config vite.embed.config.ts && tsc -p tsconfig.embed.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@wailsio/runtime": "3.0.0-beta.19",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "typescript": "^5.9.2",
-    "vite": "^7.1.5"
+    "vite": "^7.1.5",
+    "vitest": "^5.0.2"
   }
 }

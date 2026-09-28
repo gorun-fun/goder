@@ -1,4 +1,7 @@
-// fmt.ts — 展示格式化辅助。
+// fmt.ts — 展示格式化辅助。工具展示名/明细/主文本会先查三方注册的
+// 工具元数据(registry.chat.addToolMeta),未注册走内置词典。
+import { registry } from '../registry/registry';
+
 export function fmtTime(iso: string | number | undefined): string {
   if (!iso) return '';
   const d = typeof iso === 'number' ? new Date(iso) : new Date(iso);
@@ -129,6 +132,8 @@ const TOOL_LABELS: Record<string, string> = {
   job_list: '列出作业',
   job_output: '查看作业输出',
   job_kill: '结束作业',
+  // goder-console(goder_* 系)的展示名不在这里:与前端接线同源注册在
+  // shell/console-ui.ts(registry.chat 工具元数据,双形态生效)。
   // 浏览器插件(grf-browser)
   browser_click: '浏览器·点击',
   browser_double_click: '浏览器·双击',
@@ -152,32 +157,6 @@ const TOOL_LABELS: Record<string, string> = {
   browser_console_messages: '浏览器·控制台日志',
   browser_network_requests: '浏览器·网络请求',
   browser_cookies: '浏览器·Cookies',
-  // goder-console(智能体驱动 goder 界面面板:浏览器/终端/界面)
-  goder_browser_navigate: '面板浏览器·打开网页',
-  goder_browser_back: '面板浏览器·后退',
-  goder_browser_forward: '面板浏览器·前进',
-  goder_browser_reload: '面板浏览器·刷新',
-  goder_browser_state: '面板浏览器·状态',
-  goder_browser_snapshot: '面板浏览器·页面快照',
-  goder_browser_click: '面板浏览器·点击',
-  goder_browser_type: '面板浏览器·输入',
-  goder_browser_press_key: '面板浏览器·按键',
-  goder_browser_hover: '面板浏览器·悬停',
-  goder_browser_select_option: '面板浏览器·选择选项',
-  goder_browser_scroll: '面板浏览器·滚动',
-  goder_browser_evaluate: '面板浏览器·执行脚本',
-  goder_browser_get_text: '面板浏览器·获取文本',
-  goder_browser_screenshot: '面板浏览器·截图',
-  goder_browser_console: '面板浏览器·控制台日志',
-  goder_browser_network: '面板浏览器·网络请求',
-  goder_browser_wait_for: '面板浏览器·等待',
-  goder_terminal_list: '面板终端·列表',
-  goder_terminal_new: '面板终端·新建',
-  goder_terminal_send: '面板终端·输入',
-  goder_terminal_read: '面板终端·读取',
-  goder_terminal_kill: '面板终端·关闭',
-  goder_ui_state: '界面·状态',
-  goder_ui_do: '界面·操作',
   // 桌面控制插件(grf-computer)
   computer_click: '电脑·点击',
   computer_type: '电脑·输入',
@@ -243,6 +222,10 @@ const TOOL_WORDS: Record<string, string> = {
 };
 
 export function toolLabel(name: string): string {
+  // 三方注册的工具元数据优先(registry.chat.addToolMeta):自定义 MCP
+  // 工具可给出展示名,也可覆写内置条目
+  const meta = registry.chat.toolMetaFor(name);
+  if (meta) return meta.label;
   const known = TOOL_LABELS[name];
   if (known) return known;
   // 插件工具兜底:按前缀 + 动词词典拼出中文名,避免直接展示 browser_xxx
@@ -296,8 +279,10 @@ function valText(v: unknown): string {
 
 // toolDetail 工具调用的可读明细:优先取该工具的关键参数(如 bash 的命令、
 // 文件工具的路径),没有固定主参数时按 "key: value" 逐行展示,避免出现
-// 带花括号引号的原始 JSON。
+// 带花括号引号的原始 JSON。三方注册的 detail 提取器优先(registry.chat)。
 export function toolDetail(name: string, args: string): string {
+  const meta = registry.chat.toolMetaFor(name);
+  if (meta?.detail) return meta.detail(args);
   let obj: Record<string, unknown>;
   try {
     const parsed = JSON.parse(args || '{}') as unknown;
@@ -435,8 +420,10 @@ export function toolFilePath(name: string, args: string): string | undefined {
 
 // toolPrimaryText 工具标签行的主参数文本:参数可能仍在流式生成(残缺
 // JSON),容错提取——文件名在参数刚流出时就上屏,不再只剩"运行中"转圈。
-// 取不到返回 undefined。
+// 取不到返回 undefined。三方注册的 primary 提取器优先(registry.chat)。
 export function toolPrimaryText(name: string, args: string): string | undefined {
+  const meta = registry.chat.toolMetaFor(name);
+  if (meta?.primary) return meta.primary(args);
   const keys = TOOL_LINE_SUBJECT[name];
   if (!keys) return undefined;
   for (const k of keys) {
@@ -455,20 +442,18 @@ export function isToolChoiceUnsupported(msg: string): boolean {
 
 // friendlyError 把已知的后端错误翻成可操作的提示(其余原样返回)。
 // 典型:模型侧 vLLM 未开启原生工具调用,整个回合都会 400。
-export function friendlyError(msg: string): string {
+// t 为 i18n 翻译函数(可选;key 即中文默认文案,支持 {x} 插值)。
+export type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+export function friendlyError(msg: string, t: Translate = (k) => k): string {
   if (isToolChoiceUnsupported(msg)) {
-    return (
-      '当前模型服务未开启工具调用,本回合无法执行。\n' +
-      'vLLM 需以 --enable-auto-tool-choice 与 --tool-call-parser <解析器> 启动;' +
-      '若无法改动服务,请在「设置 → 模型设置」改用支持工具调用的模型。\n' +
-      `服务返回:${msg}`
-    );
+    return t('当前模型服务未开启工具调用,本回合无法执行。\nvLLM 需以 --enable-auto-tool-choice 与 --tool-call-parser <解析器> 启动;若无法改动服务,请在「设置 → 模型设置」改用支持工具调用的模型。\n服务返回:{msg}', { msg });
   }
   if (/paused awaiting interaction/i.test(msg)) {
-    return '会话正在等待上一次的提问/审批应答,请先完成输入框中的交互再发新消息。';
+    return t('会话正在等待上一次的提问/审批应答,请先完成输入框中的交互再发新消息。');
   }
   if (/a turn is already running/i.test(msg)) {
-    return '本会话仍有一个回合在服务端运行(可能未能停止)。请再点一次「停止」,或稍候片刻重试。';
+    return t('本会话仍有一个回合在服务端运行(可能未能停止)。请再点一次「停止」,或稍候片刻重试。');
   }
   return msg;
 }

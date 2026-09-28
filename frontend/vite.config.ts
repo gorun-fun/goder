@@ -1,8 +1,17 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+
+// grf-auto 技能正文构建期注入(单一源文件在 Go 侧目录,与 go:embed
+// 同一份;core 不再跨树 ?raw 引用,见 core/store/automation.ts)。
+const grfAutoSkill = readFileSync(resolve(__dirname, '../internal/desktop/agentskills/grf-auto.md'), 'utf8');
 
 // 桌面 app 构建(也用于浏览器直开调试):入口 main.ts + embed-demo。
 export default defineConfig({
+  define: {
+    __GRF_AUTO_SKILL_MD__: JSON.stringify(grfAutoSkill),
+    __GRF_UI_VERSION__: JSON.stringify("0.1.0"),
+  },
   base: './',
   build: {
     outDir: 'dist',
@@ -17,9 +26,8 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: false,
-    // core/store/automation.ts 以 ?raw 引 internal/desktop/agentskills/
-    // 下的技能源文件(与 Go go:embed 同一份),dev server 需放行
-    // frontend 之外的仓库路径。
+    // embed-demo 等页面可能引用仓库内资源,dev server 放行 frontend
+    // 之外的仓库路径(core 的跨树 ?raw 已改为 define 注入,与此无关)。
     fs: { allow: [resolve(__dirname, '..')] },
   },
 });

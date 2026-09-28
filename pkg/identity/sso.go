@@ -1,7 +1,8 @@
 // sso.go — 内置 Casdoor OAuth2 授权码登录(独立部署方案)。流程参考
 // game-web:登录跳 Casdoor,回调换 access_token 取用户信息,本地签发
 // 不透明随机会话令牌经 HttpOnly cookie 传递。无数据库依赖:默认内存
-// 会话表(重启需重登),SessionStore 接口预留给持久化实现。
+// 会话表,持久化实现见 file_sessions.go(GRF_SESSIONS_FILE 接线;单实例
+// 定位,分布式需自换 SessionStore)。
 package identity
 
 import (

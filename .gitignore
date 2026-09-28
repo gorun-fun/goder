@@ -7,6 +7,7 @@ build/bin/
 *.dmg
 .DS_Store
 /goder
+/grf-web-serve
 /package-lock.json
 .gui-test-screenshots.tmp/
 .run/

@@ -1,15 +1,18 @@
-// registry.ts — UI 注册表:整个界面的四个可装配区域。
+// registry.ts — UI 注册表:整个界面的可装配区域。
 //   nav      左栏导航视图(默认:会话列表 / 设置)
 //   side     右栏 tab(默认:详情 / 审查 / 终端 / 浏览器 / 文件 / 事件台)
 //   bottom   底栏 tab(默认:终端)
 //   settings 设置分区(默认:外观/模型/Harness/插件/MCP/技能)
+//   chat     聊天内容层渲染扩展(消息渲染器 / 工具元数据;见 ChatRegistry)
 //
 // 内置面板与三方自定义条目走同一条注册路径 —— 三方可以 hide/show 增删
 // 任意条目,或注册带自定义渲染的新条目(开放性的核心扩展点)。
 // 注册表是全局单例:同页多 scope 实例共享条目定义,渲染时按 scope 区分
-// 数据域(见 PanelContext)。
+// 数据域(见 PanelContext);条目可用 scopes 字段限定只对哪些 scope 可见,
+// 让同页多个嵌入实例各装配各的面板集合。
 import type { TemplateResult } from 'lit';
 import type { GrfScope } from '../core/store/scope';
+import type { ChatItem } from '../core/model/chat-model';
 
 /** 宿主壳(shell)下发给条目渲染的布局状态(仅 app-shell 内装配时存在;
  * 独立嵌入的面板拿不到,自定义条目需判空使用)。 */
@@ -57,6 +60,9 @@ export interface NavViewDef {
   visible?: (ctx: PanelContext) => boolean;
   /** 从该视图返回时回到哪个导航(grf-nav-back 事件的落点);缺省 = 首个可见条目 */
   exitTo?: string;
+  /** 只在这些 scope 名下可见(缺省 = 所有 scope);同页多嵌入实例各装配
+   * 各的面板集合时用,与 visible(ctx) 守卫正交 */
+  scopes?: string[];
 }
 
 /** 右栏 tab 类型定义。 */
@@ -86,6 +92,8 @@ export interface SideTabDef {
   shared?: boolean;
   /** 是否可用(内置条目用它做形态降级,如终端仅桌面) */
   visible?: (ctx: PanelContext) => boolean;
+  /** 只在这些 scope 名下可见(缺省 = 所有 scope) */
+  scopes?: string[];
 }
 
 /** 一个已打开的右栏 tab 实例(多实例 tab 带 key,如 file:<绝对路径>)。 */
@@ -114,12 +122,14 @@ export interface BottomTabDef {
   titleFor?: (index: number) => string;
   /** 是否可用(内置条目用它做形态降级) */
   visible?: (ctx: PanelContext) => boolean;
+  /** 只在这些 scope 名下可见(缺省 = 所有 scope) */
+  scopes?: string[];
 }
 
 /** 设置分区定义:设置左栏导航的一级条目 + 设置页中央的一个分区页面。
- * 内置分区(外观/模型/Harness/插件/MCP/技能)在 builtin-common 注册且
- * render 留空(由 settings-page 内部实现);三方条目给出 render 即自绘
- * 分区页面,同 id 重复 add 可整体覆写内置分区(含页面)。 */
+ * 内置分区(外观/模型/Harness/插件/MCP/技能)在 builtin-common 注册,
+ * render 返回 sections/ 分区组件(按 scope 池化);三方条目给出 render
+ * 即自绘分区页面,同 id 重复 add 可整体覆写内置分区(含页面)。 */
 export interface SettingsSectionDef {
   id: string;
   /** 展示名(左栏条目与设置页标题) */
@@ -143,21 +153,24 @@ export interface SettingsSectionDef {
 
 type Listener = () => void;
 
-/** Zone:一个区域内的条目定义集合 + 显隐覆写(带变更通知)。 */
-class Zone<T extends { id: string; order?: number; visible?: (ctx: PanelContext) => boolean }> {
+/** Zone:一个区域内的条目定义集合 + 显隐覆写(带变更通知)。
+ *  条目的 scopes 字段限定只对哪些 scope 可见(缺省 = 所有 scope)。 */
+class Zone<T extends { id: string; order?: number; visible?: (ctx: PanelContext) => boolean; scopes?: string[] }> {
   private defs: T[] = [];
   private hidden = new Set<string>();
   private seq = 0;
   private listeners = new Set<Listener>();
 
-  /** 注册条目;同 id 覆盖。无 order 的条目按注册顺序排在有 order 的之后。 */
+  /** 注册条目;同 id 覆盖。无 order 的条目按注册顺序排在有 order 的之后。
+   *  不改写入参对象(缺省 order 存在包装里),同一份 def 可安全注册到
+   *  多个 zone / 复用。 */
   add(def: T): void {
-    const existing = this.defs.findIndex((d) => d.id === def.id);
+    const d = def.order === undefined ? ({ ...def, order: 1000 + this.seq++ } as T) : def;
+    const existing = this.defs.findIndex((x) => x.id === d.id);
     if (existing >= 0) {
-      this.defs[existing] = def;
+      this.defs[existing] = d;
     } else {
-      if (def.order === undefined) (def as { order?: number }).order = 1000 + this.seq++;
-      this.defs.push(def);
+      this.defs.push(d);
       this.defs.sort((a, b) => (a.order ?? 1000) - (b.order ?? 1000));
     }
     this.notify();
@@ -191,9 +204,12 @@ class Zone<T extends { id: string; order?: number; visible?: (ctx: PanelContext)
     return this.defs;
   }
 
-  /** 当前上下文可见的定义(未隐藏且 visible() 通过),按 order 排序。 */
+  /** 当前上下文可见的定义(未隐藏、scopes 含该 scope 且 visible() 通过),
+   *  按 order 排序。 */
   visible(ctx: PanelContext): T[] {
-    return this.defs.filter((d) => !this.hidden.has(d.id) && (d.visible?.(ctx) ?? true));
+    return this.defs.filter(
+      (d) => !this.hidden.has(d.id) && (d.scopes === undefined || d.scopes.includes(ctx.scope)) && (d.visible?.(ctx) ?? true),
+    );
   }
 
   subscribe(fn: Listener): () => void {
@@ -206,6 +222,70 @@ class Zone<T extends { id: string; order?: number; visible?: (ctx: PanelContext)
   }
 }
 
+/** ChatRegistry:消息渲染器 + 工具元数据(全局注册,变更即通知)。 */
+class ChatRegistry {
+  private renderers: ItemRendererDef[] = [];
+  private toolMeta: ToolMetaDef[] = [];
+  private listeners = new Set<Listener>();
+
+  /** 注册渲染器(同 id 覆盖)。 */
+  addRenderer(def: ItemRendererDef): void {
+    const i = this.renderers.findIndex((r) => r.id === def.id);
+    if (i >= 0) this.renderers[i] = def;
+    else this.renderers.unshift(def); // 后注册者优先(倒序匹配)
+    this.notify();
+  }
+
+  /** 移除渲染器。 */
+  removeRenderer(id: string): void {
+    this.renderers = this.renderers.filter((r) => r.id !== id);
+    this.notify();
+  }
+
+  /** 匹配一条消息的自定义渲染器(工具名优先于 kind;无匹配返回 undefined)。 */
+  rendererFor(it: ChatItem): ItemRendererDef | undefined {
+    return this.renderers.find((r) => {
+      if (r.toolName !== undefined) return it.kind === 'tool' && matchTool(r.toolName, it.name);
+      if (r.kind !== undefined) return it.kind === r.kind;
+      return true;
+    });
+  }
+
+  /** 注册工具元数据(同 name 覆写)。 */
+  addToolMeta(def: ToolMetaDef): void {
+    const same = (a: string | RegExp, b: string | RegExp) => String(a) === String(b);
+    const i = this.toolMeta.findIndex((m) => same(m.name, def.name));
+    if (i >= 0) this.toolMeta[i] = def;
+    else this.toolMeta.unshift(def);
+    this.notify();
+  }
+
+  /** 移除工具元数据。 */
+  removeToolMeta(name: string | RegExp): void {
+    const key = String(name);
+    this.toolMeta = this.toolMeta.filter((m) => String(m.name) !== key);
+    this.notify();
+  }
+
+  /** 查工具元数据(自定义优先于内置)。 */
+  toolMetaFor(name: string): ToolMetaDef | undefined {
+    return this.toolMeta.find((m) => matchTool(m.name, name));
+  }
+
+  subscribe(fn: Listener): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private notify(): void {
+    for (const fn of this.listeners) fn();
+  }
+}
+
+function matchTool(pattern: string | RegExp, name: string): boolean {
+  return typeof pattern === 'string' ? pattern === name : pattern.test(name);
+}
+
 /** UI 注册表(全局单例)。 */
 class GrfRegistry {
   /** 左栏导航视图 */
@@ -216,14 +296,132 @@ class GrfRegistry {
   readonly bottom = new Zone<BottomTabDef>();
   /** 设置分区(设置左栏条目 + 设置页分区) */
   readonly settings = new Zone<SettingsSectionDef>();
+  /** 聊天内容层渲染扩展(消息渲染器 / 工具元数据) */
+  readonly chat = new ChatRegistry();
 
   subscribe(fn: Listener): () => void {
-    const offs = [this.nav.subscribe(fn), this.side.subscribe(fn), this.bottom.subscribe(fn), this.settings.subscribe(fn)];
+    const offs = [this.nav.subscribe(fn), this.side.subscribe(fn), this.bottom.subscribe(fn), this.settings.subscribe(fn), this.chat.subscribe(fn)];
     return () => offs.forEach((off) => off());
   }
 }
 
 export const registry = new GrfRegistry();
+
+// ---------- 聊天内容层渲染扩展(消息流定制的入口) ----------
+// 壳层装配(四区 Zone)解决「放哪、放什么面板」;这里解决「消息本身长
+// 什么样」:渲染器按 kind/工具名接管单条消息,工具元数据补展示知识,
+// markdown 渲染器可按 scope 覆写。三方接入自家 MCP 工具的专属卡片、
+// 换富 markdown 引擎、定制气泡结构都走这里。
+
+/** markdown 渲染器覆写:输入原始 markdown 文本,输出 HTML 字符串 ——
+ *  与内置 renderMarkdown 同契约(调用方以 unsafeHTML 注入,覆写方自行
+ *  负责转义与安全,不得引入未消毒的用户内容)。 */
+export type MarkdownRenderer = (text: string) => string;
+
+/** 内置消息渲染暴露给自定义渲染器的操作集(与 messages.ts 的
+ *  MessageViewProps 的相应成员结构兼容):复制/编辑/ask 应答/审批/
+ *  任务与技能卡保存。自定义渲染器可选择使用,也可完全自绘。 */
+export interface ItemViewActions {
+  onCopy(id: string, text: string): void;
+  onStartEdit(it: { kind: 'user'; id: string; text: string }): void;
+  onToggleReasoning(id: string): void;
+  onAskAnswer(e: Event): void;
+  onAskDismiss(e: Event): void;
+  onApprove(e: Event): void;
+  onSaveTask(name: string, instructions: string): void;
+  isTaskSaved(name: string, instructions: string): boolean;
+  onSaveSkill(name: string, content: string): void;
+  isSkillSaved(name: string): boolean;
+}
+
+/** 自定义渲染器的上下文。 */
+export interface ItemRenderContext {
+  scope: string;
+  store: GrfScope;
+  sessionId?: string;
+  /** 整个会话的消息表(向前找截图等上下文用) */
+  items: ChatItem[];
+  /** 内置渲染的操作回调集(见 ItemViewActions) */
+  view: ItemViewActions;
+}
+
+/** 消息条目自定义渲染器:按 kind 或工具名接管一条消息的渲染。
+ *  返回 undefined 走内置渲染(可条件接管);返回 lit 的 nothing/空模板
+ *  则该条目不渲染。匹配优先级:工具名 > kind,同优先级后注册者优先。 */
+export interface ItemRendererDef {
+  /** 渲染器 id(remove 用) */
+  id: string;
+  /** 匹配消息 kind('user'/'assistant'/'tool'/…);缺省 = 任意 kind */
+  kind?: ChatItem['kind'];
+  /** 仅匹配该工具名的 tool 条目(优先于 kind),如 'mcp__mine__query' */
+  toolName?: string | RegExp;
+  /** 渲染;返回 undefined 走内置渲染 */
+  render: (it: ChatItem, ctx: ItemRenderContext) => TemplateResult | HTMLElement | undefined;
+}
+
+/** 工具元数据:工具卡的展示名与摘要提取。内置知识在 util/fmt.ts
+ *  (TOOL_LABELS / TOOL_PRIMARY);三方经 registry.chat.addToolMeta 注册
+ *  自家工具的展示名(或覆写内置条目),让自定义 MCP 工具不再只能显示
+ *  原始工具名。 */
+export interface ToolMetaDef {
+  /** 工具名(完整匹配) */
+  name: string | RegExp;
+  /** 展示名 */
+  label: string;
+  /** 主参数文本提取(参数 JSON 字符串 → 标签行主文本);缺省用内置行为 */
+  primary?: (args: string) => string | undefined;
+  /** 明细提取(参数 JSON 字符串 → 展开的可读明细);缺省用内置行为 */
+  detail?: (args: string) => string;
+}
+
+// ---------- 宿主状态浮窗裁剪(embed.configure 的 statusPop 落点) ----------
+
+/** 状态浮窗(聊天列右上的自动化任务/git 概览/goal 卡)是 goder 特有的
+ * 业务面板;不打算用自动化能力的嵌入方可整体隐藏,聊天区完全干净。 */
+const statusPopOff = new Set<string>();
+const statusPopListeners = new Set<Listener>();
+
+/** 开/关某 scope 的状态浮窗(默认开;false = 不渲染)。 */
+export function setStatusPop(scope: string, on: boolean): void {
+  if (on) statusPopOff.delete(scope);
+  else statusPopOff.add(scope);
+  for (const l of statusPopListeners) l();
+}
+
+/** 某 scope 的状态浮窗是否展示。 */
+export function getStatusPop(scope: string): boolean {
+  return !statusPopOff.has(scope);
+}
+
+/** 订阅状态浮窗配置变更。 */
+export function onStatusPopChange(fn: Listener): () => void {
+  statusPopListeners.add(fn);
+  return () => statusPopListeners.delete(fn);
+}
+
+// ---------- 宿主 markdown 渲染覆写(embed.configure 的 markdown 落点) ----------
+
+const markdownOverlays = new Map<string, MarkdownRenderer>();
+const markdownListeners = new Set<Listener>();
+
+/** 覆写某 scope 的 markdown 渲染器(undefined = 清除,恢复内置)。
+ *  只影响消息流内的渲染;宿主自用 renderMarkdown 不受影响。 */
+export function setMarkdownRenderer(scope: string, fn: MarkdownRenderer | undefined): void {
+  if (fn) markdownOverlays.set(scope, fn);
+  else markdownOverlays.delete(scope);
+  for (const l of markdownListeners) l();
+}
+
+/** 读取某 scope 的 markdown 渲染覆写。 */
+export function getMarkdownRenderer(scope: string): MarkdownRenderer | undefined {
+  return markdownOverlays.get(scope);
+}
+
+/** 订阅 markdown 覆写变更(消息流等消费方刷新用)。 */
+export function onMarkdownRendererChange(fn: Listener): () => void {
+  markdownListeners.add(fn);
+  return () => markdownListeners.delete(fn);
+}
 
 // ---------- 宿主身份注入(embed.configure 的 user 落点) ----------
 

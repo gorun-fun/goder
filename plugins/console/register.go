@@ -108,7 +108,8 @@ func writeWrapper(exe, pluginsDir, endpoint, token string) error {
 	if raw, err := os.ReadFile(path); err == nil && string(raw) == content {
 		return nil // 内容一致,免写
 	}
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+	// 0700:wrapper 内嵌 MCP 端点令牌,多用户机器上不给其他本地用户读权限
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
 		return fmt.Errorf("写入插件 wrapper: %w", err)
 	}
 	return nil

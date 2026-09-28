@@ -13,6 +13,8 @@ import { icon } from '../../util/icons';
 import { fmtTokens } from '../../util/fmt';
 import type { AskItem } from '../../core/model/chat-model';
 import type { LLMStats, Usage } from '../../core/api/types';
+import { getSendInterceptor } from '../../core/store/host-config';
+import { translate } from '../../core/i18n';
 import './ask-form';
 
 /** 新会话访问策略(与 gh 预制策略选项一一对应) */
@@ -73,6 +75,8 @@ const EFFORT_OPTIONS: { value: string; label: string }[] = [
 
 @customElement('grf-composer')
 export class GrfComposer extends LitElement {
+  /** 数据域名(发送钩子等嵌入方策略按 scope 生效;宿主/chat-panel 下发) */
+  @property({ type: String }) scope = 'default';
   /** 运行中(切换为停止) */
   @property({ type: Boolean }) running = false;
   /** 有暂停待应答时不允许普通发送 */
@@ -81,7 +85,11 @@ export class GrfComposer extends LitElement {
   @property({ type: Array }) asks: AskItem[] = [];
   /** 排队待发消息(回合运行中发送的,显示在输入框上方,可删除) */
   @property({ type: Array }) queue: { text: string; images?: string[] }[] = [];
-  @property({ type: String }) placeholder = '发送消息…(/ 指令,Enter 发送,Shift+Enter 换行)';
+  @property({ type: String }) placeholder = '';
+  /** 未显式给 placeholder 时的默认文案(i18n 可覆盖)。 */
+  private get placeholderText(): string {
+    return this.placeholder || translate(this.scope, '发送消息…(/ 指令,Enter 发送,Shift+Enter 换行)');
+  }
   /** 新会话访问策略:write-workspace(工作区访问)| off(完全访问) */
   @property({ type: String }) policy: DraftPolicy = 'off';
   /** 策略可即时生效(已有会话;false = 草稿,随首条消息生效) */
@@ -601,7 +609,7 @@ export class GrfComposer extends LitElement {
                 : nothing}
               <textarea
                 .value=${this.text}
-                placeholder=${this.inputRequired ? '等待应答上方问题…' : this.placeholder}
+                placeholder=${this.inputRequired ? translate(this.scope, '等待应答上方问题…') : this.placeholderText}
                 rows="1"
                 spellcheck="false"
                 @input=${this.onInput}
@@ -609,13 +617,16 @@ export class GrfComposer extends LitElement {
                 @paste=${this.onPaste}
               ></textarea>
               ${this.slashOpen ? this.renderSlashPop() : nothing}
-              <div class="bar">
-                <button class="ghost attach" title="添加附件(图片)" ?disabled=${this.running} @click=${this.pickImage}>
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M8 3v10M3 8h10" stroke-linecap="round" />
-                  </svg>
-                </button>
-                <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple @change=${this.onFile} />
+                <div class="bar">
+                  <button class="ghost attach" title="添加附件(图片)" ?disabled=${this.running} @click=${this.pickImage}>
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M8 3v10M3 8h10" stroke-linecap="round" />
+                    </svg>
+                  </button>
+                  {/* 仅图片:ORS 线格式 ContentPart 只有 input_text/input_image
+                      (与 gh server dto.go 对齐),任意文件无协议通道 —— 双形态
+                      评估结论:不做非图片附件,文本内容让用户自行粘贴。 */}
+                  <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple @change=${this.onFile} />
                 ${this.policySelector
                   ? html`<button
                       class="bar-btn policy-ctl ${this.policyPos ? 'open' : ''}"
@@ -1080,7 +1091,28 @@ export class GrfComposer extends LitElement {
     // 运行中不再拦截:消息进 scope 发送队列,当前回合结束后自动发出。
     if (this.inputRequired) return;
     if (!this.text.trim() && !this.images.length) return;
-    this.fire('send', { text: this.text, images: this.images });
+    // 嵌入方发送钩子(configure 的 onBeforeSend):dispatch 前消费 ——
+    // 返回 null 取消发送且输入保留在框内;返回改写载荷按改写值发出。
+    // 异步钩子等结果再 dispatch(期间输入不清空)。
+    const hook = getSendInterceptor(this.scope);
+    if (hook) {
+      void Promise.resolve(hook({ text: this.text, images: this.images })).then((r) => {
+        if (!r) return;
+        if (!r.text.trim() && !r.images?.length) return;
+        this.dispatchSend(r.text, r.images ?? []);
+      });
+      return;
+    }
+    this.dispatchSend(this.text, this.images);
+  }
+
+  /** 派发 send 事件并清空输入。事件可取消:宿主(事件监听)调
+   *  preventDefault 时输入保留在框内,由拦截方决定后续。 */
+  private dispatchSend(text: string, images: string[]): void {
+    const ok = this.dispatchEvent(
+      new CustomEvent('send', { detail: { text, images }, bubbles: true, composed: true, cancelable: true }),
+    );
+    if (!ok) return;
     this.clearInput();
     this.images = [];
   }

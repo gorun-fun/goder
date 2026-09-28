@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 )
 
 var localServer *http.Server
@@ -21,7 +22,14 @@ func serveLocal(hostname string, port int, h http.Handler) string {
 		return ""
 	}
 	p := ln.Addr().(*net.TCPAddr).Port
-	localServer = &http.Server{Handler: h}
+	localServer = &http.Server{
+		Handler: h,
+		// 慢连接防护(回环本地服务);WriteTimeout 不设 —— SSE 长响应
+		// 与 test-serve 事件流会被它掐断。
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	go func() { _ = localServer.Serve(ln) }()
 	return fmt.Sprintf("http://%s:%d/", hostname, p)
 }

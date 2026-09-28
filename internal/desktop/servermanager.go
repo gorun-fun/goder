@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"git.gorun.fun/share/goder/internal/appcfg"
-	"git.gorun.fun/share/goder/internal/ghserver"
+	"git.gorun.fun/share/goder/pkg/ghserver"
 )
 
 // ServerManager wails 服务(全局单例)。
