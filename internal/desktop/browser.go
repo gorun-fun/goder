@@ -1,5 +1,5 @@
 // browser.go — BrowserManager 服务:内嵌浏览器面板的原生 webview 薄壳。
-// 前端 grf-browser 面板经 desktop.BrowserManager.* 导航并上报面板 rect;
+// 前端 goder-browser 面板经 desktop.BrowserManager.* 导航并上报面板 rect;
 // 实际生命周期/布局逻辑在 internal/browser.Manager(app 退出时销毁)。
 package desktop
 

@@ -2,16 +2,16 @@
 
 Goder:grf-harness(gh)的 ZCode 风格图形界面。一个 Lit 前端,多种形态:
 wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面的 web components
-库(`frontend/dist-embed/grf-ui.js`,ESM、零外部依赖、shadow DOM 自隔离),
-以及多用户 web 网关(`cmd/grf-web-serve`:一个登录用户一个独立 gh server 进程)。
+库(`frontend/dist-embed/goder.js`,ESM、零外部依赖、shadow DOM 自隔离),
+以及多用户 web 网关(`cmd/goder-web-serve`:一个登录用户一个独立 gh server 进程)。
 
 ## 常用命令
 
 - `./build.sh` — 前端 + 桌面二进制 `./goder`
 - `./build.sh app` — 组装 macOS `dist/goder.app`(adhoc 签名)
-- `./build.sh embed` — 仅构建嵌入库 `frontend/dist-embed/grf-ui.js`
-- `./build.sh web` — 纯 web 形态(grf-web-serve 网关:静态 + `/grf-api`,
-  http://127.0.0.1:7700;身份模式与多用户参数见 cmd/grf-web-serve 头注释)
+- `./build.sh embed` — 仅构建嵌入库 `frontend/dist-embed/goder.js`
+- `./build.sh web` — 纯 web 形态(goder-web-serve 网关:静态 + `/goder-api`,
+  http://127.0.0.1:7700;身份模式与多用户参数见 cmd/goder-web-serve 头注释)
 - `./run.sh start|stop|restart` — 桌面 App 生命周期(后台运行,PID/日志在 `.run/`)
 - `./goder test-serve [--port 7460]` — 无头测试形态:同一份二进制不建窗口,
   经本地 HTTP 服务器(令牌门槛)把完整桌面 UI 暴露给浏览器,wails 服务
@@ -23,7 +23,7 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
 - 类型检查:`cd frontend && npx tsc --noEmit`;Go:`go build ./... && go vet ./...`
 - 单元测试:`cd frontend && npm test`(vitest,按模块拆分在 frontend/tests/:
   registry/markdown/chat-model 归约器/automation 协议块/i18n/storage/
-  retry-policy/发送管线/工具词典/scope 生命周期);
+  retry-policy/发送管线/工具词典/scope 生命周期/scripted-api 测试装具);
   `go test ./...`(pkg 基座面:ghserver 进程管理与反代、identity、
   gateway;internal/desktop 含 gh 下载与 bridge FQN 对齐守护)
 - (自动化测试以 test-serve + 浏览器驱动为主,指导见 `docs/testing.md`;
@@ -64,9 +64,9 @@ pkg/                     Go 公开层(三方 Go module 可 import 的基座面;
   identity/              用户身份解析 Resolver:single(单用户)/ header
                          (信任上级网关用户头,被集成推荐)/ sso(Casdoor
                          OAuth2 + 本地会话 cookie;SessionStore 可注入,
-                         file_sessions.go 提供 GRF_SESSIONS_FILE 文件
+                         file_sessions.go 提供 GODER_SESSIONS_FILE 文件
                          持久化,单实例定位,分布式需自换实现)
-  gateway/               多用户 web 网关:静态托管 + /grf-api 按用户路由
+  gateway/               多用户 web 网关:静态托管 + /goder-api 按用户路由
                          (身份 → 懒拉起用户进程 → 注入令牌转发)+ auth
                          端点挂载 + CORS(通配/白名单)+ /healthz/ready +
                          /admin/* 管理 API(statuses/start/stop/restart,
@@ -76,13 +76,13 @@ internal/                Go 桌面专属层
   desktop/               桌面 wails 服务薄壳(AppConfig/ServerManager/
                          ModelConfig/AgentConfig/Desktop/TerminalManager/
                          BrowserManager/ConsoleMCP/Updater + rootHandler
-                         /grf-api 反代与 /grf-api/token 冷启动端点;引用
+                         /goder-api 反代与 /goder-api/token 冷启动端点;引用
                          internal/appcfg、pkg/ghserver)
   browser/               右栏内嵌浏览器面板的原生 webview(macOS 自建
                          WKWebView 子视图/Windows WebView2 重父级子窗),
                          含 Eval/截图与 console/网络捕获钩子(eval.go:
                          macOS 原生 callAsyncJavaScript 回调,Windows
-                         void ExecJS + fetch 回报 /grf-eval-report)
+                         void ExecJS + fetch 回报 /goder-eval-report)
 plugins/console/         goder-console:智能体驱动界面面板的 MCP 服务(仅绑
                          127.0.0.1,loopback 7450 偏好端口 + 随机令牌;设置页
                          展示名「界面控制」)。工具面 goder_browser_*(右栏
@@ -97,11 +97,14 @@ plugins/console/         goder-console:智能体驱动界面面板的 MCP 服务
                          plugins 键时 upsert 命令项,不破坏自动发现语义)
 main.go                  wails v3 桌面入口(仅装配:服务注册、窗口、embed 资源;
                          开头分派 `goder console-shim` 子命令)
-cmd/grf-web-serve/       多用户网关 CLI(GRF_IDENTITY=single|header|sso;
-                         运维 env:GRF_ADMIN_TOKEN/GRF_WEBHOOK_URL/
-                         GRF_CORS_ORIGINS/GRF_ACCESS_LOG/GRF_SESSIONS_FILE)
+cmd/goder-web-serve/       多用户网关 CLI(GODER_IDENTITY=single|header|sso;
+                         运维 env:GODER_ADMIN_TOKEN/GODER_WEBHOOK_URL/
+                         GODER_CORS_ORIGINS/GODER_ACCESS_LOG/GODER_SESSIONS_FILE)
 frontend/src/
   core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗+非流式超时;
+           fetch.ts 传输层注入 + scripted-api.ts 可编程假后端——接入方
+           AI 自动化测试的数据面,经 setApiFetch 装载,指导见
+           docs/integration-testing.md、示例页 frontend/test-harness.html;
            agent-dto 为 gh 智能体配置 DTO,桌面桥与网页 agent-api 共用)/
            model(会话运行时模型)/ store(emitter 响应式基座——subscribe
            全量 + subscribeSession 会话定向,流式 delta 只唤醒关注该会话
@@ -113,7 +116,7 @@ frontend/src/
            替换)、retry-policy(流恢复策略,可注入)、host-config(嵌入方
            按 scope 注入的运行时策略:sessionDefaults/ungroupedSessions/
            disableDefaultPrompt/onBeforeSend 发送钩子/onApproval 审批钩子)、
-           automation 操作员 system_prompt 与 <grf-task> 任务块解析、
+           automation 操作员 system_prompt 与 <goder-task> 任务块解析、
            session-prompt 普通会话默认 custom 提示词——gh 系统提示词为
            「custom 段 + inner prompt(内置工具说明,按可用工具恒定拼装)」
            叠加结构,草稿落定时项目 defaults 与操作员提示词均未带
@@ -121,7 +124,7 @@ frontend/src/
            defaults 另可带 default_skill 指定默认技能全文注入,经
            grf:session 透传、同为嵌入方开放通道)/ settings(设置状态)/
            i18n.ts(gettext 风格文案通道:key 即中文默认文案,嵌入方经
-           configure({locale,messages}) 覆盖;GrfPanel.t() 与 core 文案
+           configure({locale,messages}) 覆盖;GoderPanel.t() 与 core 文案
            均过它,收口持续推进)
   registry/ UI 注册表:nav(左栏导航)/ side(右栏 tab)/ bottom(底栏
            tab)/ settings(设置分区,内置六分区为 panels/settings/
@@ -146,28 +149,28 @@ frontend/src/
            side-dock.ts(右栏 dock:tab 行+元素池,panelEl 公开取池内元素)/
            bottom-dock.ts(底栏 dock:按会话分组 tab 组)+ builtin-common /
            builtin-desktop(内置条目注册:模块加载即注册,幂等)
-  ui/      GrfPanel 基类(panel.ts——scope 订阅+会话定向订阅+fire+t()
-           i18n 帮助方法,同时转出 theme)+ theme.ts(--grf-* 令牌)
+  ui/      GoderPanel 基类(panel.ts——scope 订阅+会话定向订阅+fire+t()
+           i18n 帮助方法,同时转出 theme)+ theme.ts(--goder-* 令牌)
   host/    wails 宿主桥(纯 web 态 no-op 回退)
   entries/ desktop.ts(桌面入口,注册桌面条目)/ embed.ts(嵌入库入口:
-           全部钩子类型导出 + GRF_UI_VERSION 版本常量;构建产出
-           dist-embed/grf-ui.js + types/ 的 .d.ts)
+           全部钩子类型导出 + GODER_UI_VERSION 版本常量;构建产出
+           dist-embed/goder.js + types/ 的 .d.ts)
 ```
 
 依赖方向:panels/shell → registry/core;core 不依赖 UI;桌面专属能力只经
-`host/bridge.ts` 进出。Go 侧桌面壳(internal/desktop)与网关(cmd/grf-web-serve)
+`host/bridge.ts` 进出。Go 侧桌面壳(internal/desktop)与网关(cmd/goder-web-serve)
 只做参数装配,进程/反代/身份逻辑一律在 pkg。
 
 ## 硬性约束(改代码前必读)
 
 - **双形态不变量**:同一份前端代码同时跑在 wails 桌面、三方嵌入页与
-  grf-web-serve 静态页。`@wailsio/runtime` 只能动态 import(嵌入产物不含它,
+  goder-web-serve 静态页。`@wailsio/runtime` 只能动态 import(嵌入产物不含它,
   `vite.embed.config.ts` 已 external);一切 wails 调用收敛在
   `frontend/src/host/bridge.ts`,纯 web 态必须 no-op 回退。
 - 桌面态检测用 `inWails()`(协议/hostname + 真实调用探针),不能只看
   `window._wails`(浏览器懒加载 runtime 后也会置位)。
 - **新增功能必须先做网页形态评估**:同一份代码跑双形态,新功能默认
-  桌面/网页都要可用;实现前先评估网页形态(嵌入库 / grf-web-serve)
+  桌面/网页都要可用;实现前先评估网页形态(嵌入库 / goder-web-serve)
   是否有等价通道——密钥、文件系统等桌面专属资源,网页形态往往可经
   gh server `/v1/agent/*` 服务端代理承载。**确有等价通道的必须实现
   网页路径,不得用 `inWails()` 一刀切关闭**;只有确认网页端确实无
@@ -184,7 +187,7 @@ frontend/src/
   只做壳层装配与保活,不硬编码分区清单。桌面专属模块
   (terminal/review/file-view)只能被
   entries/desktop.ts 或 builtin-desktop 引用,嵌入产物不得包含。
-- 嵌入库保持零外部依赖、shadow DOM 样式自隔离;换肤只经 `--grf-*` CSS 变量。
+- 嵌入库保持零外部依赖、shadow DOM 样式自隔离;换肤只经 `--goder-*` CSS 变量。
 - **dock 不变量**:右栏/底栏 dock(`shell/side-dock.ts`、`bottom-dock.ts`)
   是壳层通用布局容器,由 app-shell 的 workcard 结构装配;chat-panel 不再
   渲染任何 dock —— 新的面板内容一律经 registry.side/bottom 注册,不许往
@@ -202,11 +205,11 @@ frontend/src/
   kvDel 容错帮助函数;连接副本默认不落 token(`persistToken: true`
   显式开启,桌面入口已开)。嵌入方运行时策略(发送/审批钩子等)一律经
   `core/store/host-config.ts` 按 scope 注入;流恢复参数经 retry-policy.ts。
-  automation 的 grf-auto 技能正文经 vite define(`__GRF_AUTO_SKILL_MD__`,
-  两个 vite 配置同源读 internal/desktop/agentskills/grf-auto.md)注入,
+  automation 的 goder-auto 技能正文经 vite define(`__GODER_AUTO_SKILL_MD__`,
+  两个 vite 配置同源读 internal/desktop/agentskills/goder-auto.md)注入,
   core 不跨树 ?raw 引 Go 源码 —— core 目录保持可整体拷出独立成包。
-- gh server 无 CORS 头:浏览器端一律走同源 `/grf-api`(桌面反代或网关),
-  不要直连;web 形态默认 baseUrl 为同源 `/grf-api`(scope.ts 的
+- gh server 无 CORS 头:浏览器端一律走同源 `/goder-api`(桌面反代或网关),
+  不要直连;web 形态默认 baseUrl 为同源 `/goder-api`(scope.ts 的
   locationDefaultBase)。
 - **多用户网关令牌边界**:用户级 gh 令牌由网关/桌面代理注入,不下发浏览器;
   api client 的 Authorization 仅在配置了 token 时携带。
@@ -237,25 +240,25 @@ frontend/src/
   先红;AppConfig/ServerManager 是薄壳,逻辑改动应落在
   internal/appcfg、pkg/ghserver。
 - 前端 web 默认 baseUrl、桌面 bootstrap 顺序(先同源代理再补 token)与
-  `/grf-api/token` 端点是冷启动链路的一部分,改动需回归桌面+web 两形态。
+  `/goder-api/token` 端点是冷启动链路的一部分,改动需回归桌面+web 两形态。
 - **自动化操作员不变量**:操作员 = ProjectsIndex 里 `kind:'operator'` 的
   项目(桌面态经 `Desktop.EnsureHomeDir` 在 `~/<名>` 建工作区目录,
   「自动化」左栏类别仅桌面态显示);其会话首条消息由 scope 注入
   `core/store/automation.ts` 的 system_prompt(记忆用 gh 内置 memory
   工具,project 级落工作区 `.grf/memory.json`),任务沉淀协议
-  `<grf-task>` 块同样在 automation.ts 解析、由 chat 任务卡保存进
+  `<goder-task>` 块同样在 automation.ts 解析、由 chat 任务卡保存进
   `index.automation`(migrateIndex 必须保留该字段,漏拷 web 态重载即
   清空);执行入口在 status-pop,点击即在该操作员下新建 run 变体会话。
   执行会话(run 变体)成功跑通后按 runnerSystemPrompt 的指引输出
-  `<grf-skill>` 块沉淀技能(automation.ts 解析、chat/skill-card.ts 渲染
+  `<goder-skill>` 块沉淀技能(automation.ts 解析、chat/skill-card.ts 渲染
   保存卡),保存走 host/bridge 的 saveSkill 落盘 `~/.grf/skills/<名>/
   SKILL.md`,仅桌面态可写、web 态卡片禁用保存。
-  内置技能 grf-auto(自动化任务创作指南,指导用户完成操作并沉淀为
+  内置技能 goder-auto(自动化任务创作指南,指导用户完成操作并沉淀为
   可点击执行的指令)的正文单一源文件在
-  `internal/desktop/agentskills/grf-auto.md`:Go 侧 go:embed 由
-  AgentConfig.ServiceStartup 幂等烙写 `~/.grf/skills/grf-auto`
+  `internal/desktop/agentskills/goder-auto.md`:Go 侧 go:embed 由
+  AgentConfig.ServiceStartup 幂等烙写 `~/.grf/skills/goder-auto`
   (内容不一致才写;用户已禁用则尊重;内置技能不可删/编辑),前端经
-  两个 vite 配置的 define 常量 `__GRF_AUTO_SKILL_MD__`(构建时读同一
+  两个 vite 配置的 define 常量 `__GODER_AUTO_SKILL_MD__`(构建时读同一
   文件)把全文注入操作员 system_prompt(创建自动化会话即自动加载)——
   改指南只改这一份;core 不再跨树 ?raw 引 Go 源码。
 
@@ -265,7 +268,7 @@ frontend/src/
   `gh server -addr 127.0.0.1:7400 -data ~/Library/Application Support/goder/server-data`
 - 桌面配置与项目索引存 `~/Library/Application Support/goder/`
   (`index-<scope>.json`);纯 web 态项目索引存 localStorage;网关多用户
-  数据在 `GRF_DATA/users/<uid>/server-data`(端口池默认 17400-18400)
+  数据在 `GODER_DATA/users/<uid>/server-data`(端口池默认 17400-18400)
 - goder-console MCP 仅绑 127.0.0.1(偏好端口 7450,被占随机回退并
   回写 appcfg 目录 console-mcp.json;随机令牌同存,跨启动稳定)
 - 模型配置沿用 `~/.grf/settings.json`(GRF_HOME 可重定位)

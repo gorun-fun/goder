@@ -47,7 +47,7 @@ const goderDlBase = "https://download.gorun.fun/goder"
 const ghTagsAPI = "https://git.gorun.fun/api/v4/projects/21/repository/tags/"
 
 // updateEvent 更新进度事件名(前端 host/bridge.ts onUpdateProgress 订阅)。
-const updateEvent = "grf:update-progress"
+const updateEvent = "goder:update-progress"
 
 // notesClient 更新说明探测用 HTTP 客户端(尽力而为,超时收紧)。
 var notesClient = &http.Client{Timeout: 6 * time.Second}
@@ -152,7 +152,7 @@ func (u *Updater) Status() UpdateInfoDTO {
 }
 
 // Apply 应用更新(which = "goder" | "gh"):异步执行(下载耗时数分钟,
-// 不能占住调用通道),进度经 grf:update-progress 事件下发;返回只表示
+// 不能占住调用通道),进度经 goder:update-progress 事件下发;返回只表示
 // "已开始",失败同样走事件的 error 阶段。
 func (u *Updater) Apply(which string) error {
 	if which != "goder" && which != "gh" {

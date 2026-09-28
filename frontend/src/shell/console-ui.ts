@@ -1,5 +1,5 @@
 // console-ui.ts — goder-console 智能体的前端接线(shell 装配期调用)。
-// Go 侧经 wails 事件 'grf:console-ui' 下发界面操作(goder_ui_do 工具),
+// Go 侧经 wails 事件 'goder:console-ui' 下发界面操作(goder_ui_do 工具),
 // 这里映射为 app-shell 的既有 API;界面状态由快照函数按需生成、节流
 // 上报(reportConsoleUi → ConsoleMCP.ReportUIState,goder_ui_state 工具读)。
 // 桌面专属能力:纯 web/嵌入态下订阅为 no-op、上报自动跳过。

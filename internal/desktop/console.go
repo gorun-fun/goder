@@ -67,7 +67,7 @@ func (c *ConsoleMCP) ServiceStartup(ctx context.Context, options application.Ser
 		Browser:  bm,
 		Terminal: termAdapter{GetTerminalManager()},
 		EmitUI: func(action string, params map[string]any) {
-			application.Get().Event.Emit("grf:console-ui", map[string]any{"action": action, "params": params})
+			application.Get().Event.Emit("goder:console-ui", map[string]any{"action": action, "params": params})
 		},
 		Version: appVersion,
 	}, listenCfg.Token)

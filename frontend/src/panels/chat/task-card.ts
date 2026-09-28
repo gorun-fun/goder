@@ -1,4 +1,4 @@
-// task-card.ts — <grf-task-card>:assistant 输出的 <grf-task> 结构块渲染
+// task-card.ts — <goder-task-card>:assistant 输出的 <goder-task> 结构块渲染
 // 成的自动化任务沉淀卡。任务名 + 指令预览 + 「保存为自动化任务」按钮
 // (点击经 save 事件上报,chat-panel 落库到当前操作员名下);已保存
 // (操作员名下存在同名同指令任务)只读展示。
@@ -8,8 +8,8 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { theme } from '../../ui/panel';
 import { icon } from '../../util/icons';
 
-@customElement('grf-task-card')
-export class GrfTaskCard extends LitElement {
+@customElement('goder-task-card')
+export class GoderTaskCard extends LitElement {
   @property() name = '';
   @property() instructions = '';
   /** 操作员名下已有同名同指令任务(保存按钮换成已保存标记) */
@@ -23,9 +23,9 @@ export class GrfTaskCard extends LitElement {
         margin: 8px 0;
       }
       .task-card {
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        background: var(--grf-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        background: var(--goder-bg-raise);
         overflow: hidden;
       }
       .tc-head {
@@ -33,9 +33,9 @@ export class GrfTaskCard extends LitElement {
         align-items: center;
         gap: 7px;
         padding: 8px 10px 6px;
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
         font-weight: 650;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
       }
       .tc-head svg {
         width: 14px;
@@ -49,10 +49,10 @@ export class GrfTaskCard extends LitElement {
       .tc-body {
         margin: 0;
         padding: 2px 10px 8px;
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.55;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         max-height: 140px;
@@ -63,15 +63,15 @@ export class GrfTaskCard extends LitElement {
         align-items: center;
         gap: 8px;
         padding: 7px 10px;
-        border-top: 1px solid var(--grf-border-soft);
+        border-top: 1px solid var(--goder-border-soft);
       }
       .tc-foot .primary {
         border: none;
         border-radius: 6px;
         padding: 4px 12px;
-        background: var(--grf-accent);
+        background: var(--goder-accent);
         color: #fff;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         font-weight: 600;
         cursor: pointer;
       }
@@ -82,8 +82,8 @@ export class GrfTaskCard extends LitElement {
         display: inline-flex;
         align-items: center;
         gap: 5px;
-        color: var(--grf-success);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-success);
+        font-size: var(--goder-font-size-xs);
         font-weight: 600;
       }
       .tc-saved svg {
@@ -91,8 +91,8 @@ export class GrfTaskCard extends LitElement {
         height: 12px;
       }
       .tc-hint {
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
       }
     `,
   ];
@@ -126,6 +126,6 @@ export class GrfTaskCard extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-task-card': GrfTaskCard;
+    'goder-task-card': GoderTaskCard;
   }
 }

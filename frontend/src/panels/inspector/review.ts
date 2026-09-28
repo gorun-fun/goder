@@ -1,10 +1,10 @@
-// review.ts — <grf-review>:git 审查面板(右栏 tab 之一)。
+// review.ts — <goder-review>:git 审查面板(右栏 tab 之一)。
 // 读取当前项目目录的 git 状态(分支/领先落后/文件分组),点文件行内展开
 // diff;经 Desktop 服务执行 git,仅桌面态可用。打开期间 10s 轮询刷新。
 import { css, html, nothing , type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { inWails, gitStatus, gitDiff, type GitStatusDTO, type GitEntryDTO } from '../../host/bridge';
 
@@ -20,8 +20,8 @@ const groupOf = (e: GitEntryDTO): Group | null => {
 
 const GROUP_LABEL: Record<Group, string> = { S: '已暂存', W: '未暂存', '?': '未跟踪' };
 
-@customElement('grf-review')
-export class GrfReview extends GrfPanel {
+@customElement('goder-review')
+export class GoderReview extends GoderPanel {
   /** 审查的项目本地目录 */
   @property({ type: String }) cwd = '';
 
@@ -42,7 +42,7 @@ export class GrfReview extends GrfPanel {
         display: flex;
         flex-direction: column;
         min-height: 0;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         background: transparent;
       }
       .head {
@@ -51,13 +51,13 @@ export class GrfReview extends GrfPanel {
         align-items: center;
         gap: 6px;
         padding: 8px 12px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         user-select: none;
       }
       .branch {
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -66,14 +66,14 @@ export class GrfReview extends GrfPanel {
       }
       .ab {
         flex: none;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       .ab.up {
-        color: var(--grf-success);
+        color: var(--goder-success);
       }
       .ab.down {
-        color: var(--grf-warn);
+        color: var(--goder-warn);
       }
       .head button.ghost {
         padding: 2px 5px;
@@ -88,9 +88,9 @@ export class GrfReview extends GrfPanel {
         margin-bottom: 4px;
       }
       .grp-t {
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         font-weight: 650;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         letter-spacing: 0.4px;
         padding: 6px 6px 3px;
         user-select: none;
@@ -100,37 +100,37 @@ export class GrfReview extends GrfPanel {
         align-items: center;
         gap: 6px;
         padding: 3px 6px;
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         min-width: 0;
       }
       .file:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .file.on {
-        background: var(--grf-bg-active);
-        color: var(--grf-text);
+        background: var(--goder-bg-active);
+        color: var(--goder-text);
       }
       .file .st {
         flex: none;
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
         width: 14px;
         text-align: center;
       }
       .st.mod {
-        color: var(--grf-warn);
+        color: var(--goder-warn);
       }
       .st.add {
-        color: var(--grf-success);
+        color: var(--goder-success);
       }
       .st.del {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
       .st.untr {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .file .p {
         flex: 1;
@@ -138,18 +138,18 @@ export class GrfReview extends GrfPanel {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
       }
       .diff {
         margin: 0 4px 4px;
-        border: 1px solid var(--grf-border-soft);
-        border-radius: var(--grf-radius-sm);
+        border: 1px solid var(--goder-border-soft);
+        border-radius: var(--goder-radius-sm);
         overflow: auto;
         max-height: 320px;
-        background: var(--grf-bg);
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
+        background: var(--goder-bg);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.55;
       }
       .diff .ln {
@@ -158,25 +158,25 @@ export class GrfReview extends GrfPanel {
         min-width: max-content;
       }
       .diff .ln.add {
-        color: var(--grf-success);
-        background: var(--grf-success-soft);
+        color: var(--goder-success);
+        background: var(--goder-success-soft);
       }
       .diff .ln.del {
-        color: var(--grf-error);
-        background: var(--grf-error-soft);
+        color: var(--goder-error);
+        background: var(--goder-error-soft);
       }
       .diff .ln.hunk {
-        color: var(--grf-reasoning);
-        background: var(--grf-reasoning-soft);
+        color: var(--goder-reasoning);
+        background: var(--goder-reasoning-soft);
       }
       .diff .ln.meta {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .hint {
         padding: 40px 18px;
         text-align: center;
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-sm);
         line-height: 1.8;
         display: grid;
         gap: 8px;
@@ -189,19 +189,19 @@ export class GrfReview extends GrfPanel {
       }
       .err {
         margin: 10px 12px;
-        border: 1px solid var(--grf-error);
-        background: var(--grf-error-soft);
-        color: var(--grf-error);
-        border-radius: var(--grf-radius-sm);
+        border: 1px solid var(--goder-error);
+        background: var(--goder-error-soft);
+        color: var(--goder-error);
+        border-radius: var(--goder-radius-sm);
         padding: 8px 12px;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         word-break: break-all;
       }
       .clean {
         padding: 30px 18px;
         text-align: center;
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-sm);
       }
     `,
   ];
@@ -293,7 +293,7 @@ export class GrfReview extends GrfPanel {
     return html`
       <div class="head">
         <span class="branch" title=${st.upstream ? `${st.branch} → ${st.upstream}` : st.branch}>
-          ${st.branch}${st.upstream ? html`<span style="color:var(--grf-text-faint)"> → ${st.upstream}</span>` : nothing}
+          ${st.branch}${st.upstream ? html`<span style="color:var(--goder-text-faint)"> → ${st.upstream}</span>` : nothing}
         </span>
         ${st.ahead ? html`<span class="ab up" title="领先远程 ${st.ahead} 个提交">↑${st.ahead}</span>` : nothing}
         ${st.behind ? html`<span class="ab down" title="落后远程 ${st.behind} 个提交">↓${st.behind}</span>` : nothing}
@@ -328,7 +328,7 @@ export class GrfReview extends GrfPanel {
   private renderDiff(key: string) {
     const text = this.diffs.get(key);
     if (text === undefined) {
-      return html`<div class="diff" style="padding:6px 8px;color:var(--grf-text-faint)">读取 diff…</div>`;
+      return html`<div class="diff" style="padding:6px 8px;color:var(--goder-text-faint)">读取 diff…</div>`;
     }
     const lines = text.split('\n');
     return html`
@@ -350,7 +350,7 @@ export class GrfReview extends GrfPanel {
       <div class="hint">
         ${unsafeHTML(icon.gitBranch)}
         <div>${text}</div>
-        ${sub ? html`<div style="font-size:var(--grf-font-size-xs);color:var(--grf-text-faint)">${sub}</div>` : nothing}
+        ${sub ? html`<div style="font-size:var(--goder-font-size-xs);color:var(--goder-text-faint)">${sub}</div>` : nothing}
       </div>
     `;
   }
@@ -358,6 +358,6 @@ export class GrfReview extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-review': GrfReview;
+    'goder-review': GoderReview;
   }
 }

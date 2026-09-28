@@ -1,4 +1,5 @@
 // client.ts — gh server Responses API 客户端（fetch + SSE 流式解析）。
+import { apiFetch } from './fetch';
 import type {
   CompactResource,
   Conversation,
@@ -9,12 +10,12 @@ import type {
   SendOptions,
 } from './types';
 
-export interface GrfClientConfig {
-  baseUrl: string; // 形如 http://127.0.0.1:7400 或同源网关 /grf-api（不带 /v1）
+export interface GoderClientConfig {
+  baseUrl: string; // 形如 http://127.0.0.1:7400 或同源网关 /goder-api（不带 /v1）
   token: string; // Bearer 令牌;多用户网关模式由服务端注入,浏览器侧可为空
 }
 
-export class GrfApiError extends Error {
+export class GoderApiError extends Error {
   constructor(
     public status: number,
     public code: string,
@@ -22,7 +23,7 @@ export class GrfApiError extends Error {
     public param?: unknown,
   ) {
     super(message);
-    this.name = 'GrfApiError';
+    this.name = 'GoderApiError';
   }
 
   /** 401:网关/gh server 判定未登录(多用户网关模式下应触发登录流程)。 */
@@ -31,18 +32,18 @@ export class GrfApiError extends Error {
   }
 }
 
-export class GrfClient {
-  private cfg: GrfClientConfig;
+export class GoderClient {
+  private cfg: GoderClientConfig;
 
-  constructor(cfg: GrfClientConfig) {
+  constructor(cfg: GoderClientConfig) {
     this.cfg = cfg;
   }
 
-  get config(): GrfClientConfig {
+  get config(): GoderClientConfig {
     return this.cfg;
   }
 
-  setConfig(cfg: Partial<GrfClientConfig>) {
+  setConfig(cfg: Partial<GoderClientConfig>) {
     this.cfg = { ...this.cfg, ...cfg };
   }
 
@@ -59,7 +60,7 @@ export class GrfClient {
     return h;
   }
 
-  private async parseError(res: Response): Promise<GrfApiError> {
+  private async parseError(res: Response): Promise<GoderApiError> {
     let msg = `HTTP ${res.status}`;
     let code = 'http_error';
     try {
@@ -71,30 +72,30 @@ export class GrfClient {
     } catch {
       /* ignore */
     }
-    return new GrfApiError(res.status, code, msg);
+    return new GoderApiError(res.status, code, msg);
   }
 
   async health(): Promise<void> {
-    const res = await fetch(this.url('/health'), { headers: this.headers(false), ...RequestInitWithTimeout(HEALTH_TIMEOUT_MS) });
+    const res = await apiFetch(this.url('/health'), { headers: this.headers(false), ...RequestInitWithTimeout(HEALTH_TIMEOUT_MS) });
     if (!res.ok) throw await this.parseError(res);
   }
 
   async listConversations(): Promise<Conversation[]> {
-    const res = await fetch(this.url('/conversations'), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
+    const res = await apiFetch(this.url('/conversations'), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
     if (!res.ok) throw await this.parseError(res);
     const body = (await res.json()) as { data: Conversation[] };
     return body.data ?? [];
   }
 
   async getConversation(id: string): Promise<ConversationDetail> {
-    const res = await fetch(this.url(`/conversations/${id}`), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
+    const res = await apiFetch(this.url(`/conversations/${id}`), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
     if (!res.ok) throw await this.parseError(res);
     return (await res.json()) as ConversationDetail;
   }
 
   /** 运行时变更会话访问策略(立即生效,仅本会话;旧 server 404/400 时报错)。 */
   async setConversationPolicy(id: string, policy: string): Promise<string> {
-    const res = await fetch(this.url(`/conversations/${id}/policy`), {
+    const res = await apiFetch(this.url(`/conversations/${id}/policy`), {
       method: 'PUT',
       headers: this.headers(),
       body: JSON.stringify({ policy }),
@@ -105,14 +106,14 @@ export class GrfClient {
   }
 
   async conversationItems(id: string): Promise<HistMessage[]> {
-    const res = await fetch(this.url(`/conversations/${id}/items`), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
+    const res = await apiFetch(this.url(`/conversations/${id}/items`), { headers: this.headers(false), ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS) });
     if (!res.ok) throw await this.parseError(res);
     const body = (await res.json()) as { data: HistMessage[] };
     return body.data ?? [];
   }
 
   async archiveConversation(id: string): Promise<void> {
-    const res = await fetch(this.url(`/conversations/${id}`), {
+    const res = await apiFetch(this.url(`/conversations/${id}`), {
       method: 'DELETE',
       headers: this.headers(false),
     });
@@ -120,7 +121,7 @@ export class GrfClient {
   }
 
   async cancelResponse(id: string): Promise<ResponseResource | null> {
-    const res = await fetch(this.url(`/responses/${id}/cancel`), {
+    const res = await apiFetch(this.url(`/responses/${id}/cancel`), {
       method: 'POST',
       headers: this.headers(),
       body: '{}',
@@ -131,7 +132,7 @@ export class GrfClient {
   }
 
   async compact(model: string, previousResponseId: string): Promise<CompactResource> {
-    const res = await fetch(this.url('/responses/compact'), {
+    const res = await apiFetch(this.url('/responses/compact'), {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ model, previous_response_id: previousResponseId }),
@@ -143,7 +144,7 @@ export class GrfClient {
   // send 发送一轮对话。stream:true 走 SSE,事件经 onEvent 透出,
   // resolve 终态 response(completed/failed/cancelled/incomplete)。
   // idleTimeoutMs:流上无字节的看门狗(网络/代理静默断流的兜底),
-  // 超时后中断 fetch 并抛 GrfApiError(stream_idle_timeout)。
+  // 超时后中断 fetch 并抛 GoderApiError(stream_idle_timeout)。
   async send(opts: SendOptions): Promise<ResponseResource> {
     const idleTimeout = opts.idleTimeoutMs ?? 120_000;
     const ac = new AbortController();
@@ -163,7 +164,7 @@ export class GrfClient {
 
     let res: Response;
     try {
-      res = await fetch(this.url('/responses'), {
+      res = await apiFetch(this.url('/responses'), {
         method: 'POST',
         headers: this.headers(),
         body: JSON.stringify(body),
@@ -233,7 +234,7 @@ export class GrfClient {
 
     if (!final) {
       // 流中断且无终态:回合可能蒸发(server 重启)或网络断——上抛让调用方处理。
-      throw new GrfApiError(0, 'stream_interrupted', '事件流中断且未收到终态');
+      throw new GoderApiError(0, 'stream_interrupted', '事件流中断且未收到终态');
     }
     return final;
   }
@@ -243,7 +244,7 @@ export class GrfClient {
   // (5xx/网络)原样上抛 —— 一律 null 会把网关故障吞成「下次再试」,
   // 恢复链路拿不到可重试错误的判定输入。
   async retrieveResponse(id: string): Promise<ResponseResource | null> {
-    const res = await fetch(this.url(`/responses/${encodeURIComponent(id)}`), {
+    const res = await apiFetch(this.url(`/responses/${encodeURIComponent(id)}`), {
       headers: this.headers(false),
       ...RequestInitWithTimeout(RESPONSE_TIMEOUT_MS),
     });
@@ -271,7 +272,7 @@ function RequestInitWithTimeout(ms: number): { signal: AbortSignal } {
 
 function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new GrfApiError(0, 'stream_idle_timeout', `流上 ${ms / 1000}s 无数据,视为中断`)), ms);
+    const timer = setTimeout(() => reject(new GoderApiError(0, 'stream_idle_timeout', `流上 ${ms / 1000}s 无数据,视为中断`)), ms);
     p.then(
       (v) => {
         clearTimeout(timer);

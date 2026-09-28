@@ -1,4 +1,4 @@
-// browser.ts — <grf-browser>:右栏内嵌浏览器(地址栏 + 页面区)。
+// browser.ts — <goder-browser>:右栏内嵌浏览器(地址栏 + 页面区)。
 // 两种实现,同一组件内自动选择:
 //   - 桌面态且平台支持内嵌(wails + Go 侧 Available):原生 webview ——
 //     macOS 是自建并嵌入主窗口 contentView 的 WKWebView,Windows 是
@@ -12,7 +12,7 @@
 import { css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import {
   inWails,
@@ -42,10 +42,10 @@ function normalizeUrl(v: string, native: boolean): string {
 
 /** 本地文件 → 同源只读服务地址 */
 function localFileUrl(path: string): string {
-  return `/grf-api/local-file?path=${encodeURIComponent(path)}`;
+  return `/goder-api/local-file?path=${encodeURIComponent(path)}`;
 }
 
-/** 原生 webview 需要绝对 URL:相对地址(/grf-api/...)按当前 origin 补全 */
+/** 原生 webview 需要绝对 URL:相对地址(/goder-api/...)按当前 origin 补全 */
 function absolutize(u: string): string {
   if (!u || /^[a-z][a-z0-9+.-]*:\/\//i.test(u) || /^(about|data):/i.test(u)) return u;
   try {
@@ -58,7 +58,7 @@ function absolutize(u: string): string {
 /** 地址栏显示值:file:// 与本地文件服务地址均还原为可读的文件路径 */
 function displayUrl(u: string): string {
   if (u.startsWith('file://')) return u.slice('file://'.length);
-  if (u.startsWith('/grf-api/local-file?path=') || u.includes('/grf-api/local-file?path=')) {
+  if (u.startsWith('/goder-api/local-file?path=') || u.includes('/goder-api/local-file?path=')) {
     try {
       const q = u.slice(u.indexOf('?path=') + '?path='.length);
       return decodeURIComponent(q);
@@ -69,8 +69,8 @@ function displayUrl(u: string): string {
   return u;
 }
 
-@customElement('grf-browser')
-export class GrfBrowser extends GrfPanel {
+@customElement('goder-browser')
+export class GoderBrowser extends GoderPanel {
   /** 地址栏输入值 */
   @state() private input = '';
   /** 当前加载的地址(空 = 未导航) */
@@ -106,13 +106,13 @@ export class GrfBrowser extends GrfPanel {
         display: flex;
         gap: 5px;
         padding: 8px 10px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
       }
       .bar input {
         flex: 1;
         min-width: 0;
-        font-size: var(--grf-font-size-xs);
-        font-family: var(--grf-mono);
+        font-size: var(--goder-font-size-xs);
+        font-family: var(--goder-mono);
         padding: 4px 8px;
       }
       .bar button.ghost {
@@ -146,9 +146,9 @@ export class GrfBrowser extends GrfPanel {
         place-content: center;
         justify-items: center;
         gap: 10px;
-        background: var(--grf-card);
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-sm);
+        background: var(--goder-card);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-sm);
         text-align: center;
         padding: 0 24px;
       }
@@ -158,8 +158,8 @@ export class GrfBrowser extends GrfPanel {
         opacity: 0.5;
       }
       .hint .sub {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         line-height: 1.8;
       }
     `,
@@ -245,7 +245,7 @@ export class GrfBrowser extends GrfPanel {
   private onWinChange = (): void => this.scheduleRect();
 
   private storeKey(): string {
-    return `grf-ui:${this.scope}:browser-url`;
+    return `goder:${this.scope}:browser-url`;
   }
 
   /** 上报页面区 rect(视口相对 CSS 像素),Go 侧据此布局原生视图。
@@ -279,10 +279,10 @@ export class GrfBrowser extends GrfPanel {
       void browserShow();
       void browserSetRect(x, y, w, h);
       // 原生 webview 底色跟随主题:页面区自身已透明,取面板卡片色令牌
-      // --grf-card(WebKit 默认白底,深色主题下边缘 1px 发丝缝会露白;
+      // --goder-card(WebKit 默认白底,深色主题下边缘 1px 发丝缝会露白;
       // underPageBackgroundColor 置为主题色后不可见)。
       const cs = getComputedStyle(this);
-      const bg = (cs.getPropertyValue('--grf-card') || '').trim();
+      const bg = (cs.getPropertyValue('--goder-card') || '').trim();
       if (bg && bg !== this.lastBg) {
         this.lastBg = bg;
         void browserSetBackground(bg);
@@ -386,6 +386,6 @@ export class GrfBrowser extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-browser': GrfBrowser;
+    'goder-browser': GoderBrowser;
   }
 }

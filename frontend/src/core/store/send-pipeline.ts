@@ -1,24 +1,24 @@
-// send-pipeline.ts — 发送/恢复管线:三层重试与终态对账,从 GrfScope
+// send-pipeline.ts — 发送/恢复管线:三层重试与终态对账,从 GoderScope
 // 抽出的自愈逻辑(依赖经 SendPipelineDeps 注入,便于独立测试)。
 // 层次:requestWithChainHeal(链尾失配自愈)→ requestWithRetry(工具调用
 // 瞬时 400 有限重试)→ sendWithStreamRetry(断流/连接类失败退避重发,
 // 重发前先 tryRecoverFinal 终态对账)。幂等性由 lastResponseId 链保证。
-import { GrfApiError, type GrfClient } from '../api/client';
+import { GoderApiError, type GoderClient } from '../api/client';
 import { friendlyError, isToolChoiceUnsupported } from '../../util/fmt';
 import type { ResponseResource, SendOptions } from '../api/types';
 import { applyResponseSnapshot, type SessionRuntime } from '../model/chat-model';
 import { getRetryPolicy } from './retry-policy';
 
-/** 错误消息的可读形态(GrfApiError/Error 取 message,再过已知错误翻译)。 */
+/** 错误消息的可读形态(GoderApiError/Error 取 message,再过已知错误翻译)。 */
 export function errText(err: unknown, t?: (key: string, params?: Record<string, string | number>) => string): string {
   const raw =
-    err instanceof GrfApiError || err instanceof Error ? err.message : String(err);
+    err instanceof GoderApiError || err instanceof Error ? err.message : String(err);
   return t ? friendlyError(raw, t) : friendlyError(raw);
 }
 
 /** 管线对宿主(scope)的依赖面。 */
 export interface SendPipelineDeps {
-  client: Pick<GrfClient, 'send' | 'getConversation' | 'retrieveResponse'>;
+  client: Pick<GoderClient, 'send' | 'getConversation' | 'retrieveResponse'>;
   /** 系统日志(事件台可见;level 与 scope 的 ConsoleEntry.level 同集)。 */
   log(level: 'info' | 'warn' | 'error' | 'event', text: string): void;
   /** i18n 翻译(key 即中文默认文案)。 */
@@ -145,7 +145,7 @@ export function createSendPipeline(deps: SendPipelineDeps): SendPipeline {
       return await requestWithRetry(rt, sid, opts);
     } catch (err) {
       const mismatch =
-        err instanceof GrfApiError && /not the latest response|forking history/i.test(err.message);
+        err instanceof GoderApiError && /not the latest response|forking history/i.test(err.message);
       if (!mismatch || opts.signal?.aborted) throw err;
       const detail = await deps.client.getConversation(sid).catch(() => null);
       const tail = detail?.last_response_id;

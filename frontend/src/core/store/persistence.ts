@@ -81,7 +81,7 @@ export interface Persistence {
 
 class LocalStoragePersistence implements Persistence {
   private key(scope: string): string {
-    return `grf-ui:${scope}:index`;
+    return `goder:${scope}:index`;
   }
   async load(scope: string): Promise<ProjectsIndex | null> {
     try {

@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>goder-ui 测试装具(test-harness)</title>
+    <style>
+      /* 宿主自绘样式:验证 shadow DOM 双向样式隔离的「宿主侧」 */
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+        background: #0f1014;
+        color: #d7dae0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .kit-bar {
+        background: #16171d;
+        border-bottom: 1px solid #2a2d36;
+        font-size: 12px;
+        flex: none;
+      }
+      .kit-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        flex-wrap: wrap;
+      }
+      .kit-row + .kit-row {
+        border-top: 1px dashed #23252e;
+      }
+      .kit-title {
+        font-weight: 700;
+        color: #9aa3b2;
+        min-width: 84px;
+      }
+      .kit-btn {
+        background: #1e2028;
+        color: #c7ccd6;
+        border: 1px solid #33363f;
+        border-radius: 6px;
+        padding: 3px 10px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .kit-btn:hover {
+        border-color: #4a4e5a;
+      }
+      .kit-btn.on {
+        background: #2b2f3a;
+        color: #fff;
+        border-color: #5a6172;
+      }
+      .kit-btn[data-scenario].on {
+        border-color: var(--goder-accent, #e05d27);
+        color: #ffb185;
+      }
+      .kit-events {
+        color: #7c8596;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        min-width: 200px;
+      }
+      .kit-shell {
+        flex: 1;
+        min-height: 0;
+      }
+      .kit-badge {
+        border-radius: 4px;
+        padding: 1px 8px;
+        font-weight: 700;
+      }
+      .kit-badge.fake {
+        background: #3a2e14;
+        color: #ffc861;
+      }
+      .kit-badge.real {
+        background: #14321f;
+        color: #6fe3a1;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      test-harness — goder 嵌入库的官方测试装具页(接入方 AI 自动化测试入口)。
+      纯静态页,唯一依赖同目录 ./goder.js;用法与扩展点测法见
+      docs/integration-testing.md。URL 参数:
+        ?api=fake   默认。注入 scripted-api 假后端 + MemoryStorage,零网络零依赖,
+                    打开即测全部 UI 流;场景与脚本经工具栏 / window.goderKit 控制。
+        ?api=real   真实连接(同源 /goder-api 网关;?server= 可指定 baseUrl)。
+        ?scenario=<名> 初始场景(fake 模式)。
+      window.goderKit(测试面,不承诺语义稳定):
+        goderKit.mode / .api / .scenario(name) / .snapshot() / .requests() /
+        .scriptNext(matcher, frames) / .failNext(matcher, spec) / .ext / .reset()
+    -->
+    <div class="kit-bar">
+      <div class="kit-row">
+        <span class="kit-title">测试装具</span>
+        <span class="kit-badge fake" id="kit-mode">fake</span>
+        <span class="kit-title" style="min-width: auto">场景</span>
+        <button class="kit-btn" data-scenario="echo">回声</button>
+        <button class="kit-btn" data-scenario="markdown">长markdown</button>
+        <button class="kit-btn" data-scenario="slow-stream">慢流</button>
+        <button class="kit-btn" data-scenario="tool-call">工具调用</button>
+        <button class="kit-btn" data-scenario="approval-pause">审批暂停</button>
+        <button class="kit-btn" data-scenario="ask-pause">提问暂停</button>
+        <button class="kit-btn" data-scenario="stream-break">断流</button>
+        <button class="kit-btn" data-scenario="server-error">5xx</button>
+        <button class="kit-btn" data-scenario="server-fail-frame">失败帧</button>
+        <button class="kit-btn" data-scenario="task-block">任务块</button>
+        <button class="kit-btn" data-scenario="skill-block">技能块</button>
+        <button class="kit-btn" data-scenario="notice-todos">notice</button>
+        <button class="kit-btn" id="kit-reset">重置</button>
+        <span class="kit-events" id="kit-events">事件:</span>
+      </div>
+      <div class="kit-row">
+        <span class="kit-title">扩展点</span>
+        <button class="kit-btn" data-ext="nav">导航条目</button>
+        <button class="kit-btn" data-ext="side">右栏条目</button>
+        <button class="kit-btn" data-ext="settings">设置分区</button>
+        <button class="kit-btn" data-ext="toolmeta">工具展示名</button>
+        <button class="kit-btn" data-ext="renderer">消息渲染器</button>
+        <button class="kit-btn" data-ext="beforesend">发送钩子</button>
+        <button class="kit-btn" data-ext="approval">审批自动应答</button>
+        <button class="kit-btn" data-ext="i18n">文案覆盖</button>
+        <button class="kit-btn" data-ext="theme">换肤</button>
+        <button class="kit-btn" data-ext="hideconsole">裁剪事件台</button>
+      </div>
+    </div>
+    <goder-app-shell class="kit-shell" id="kit-shell" scope="harness" panels="sessions,chat,sidebar,bottom,console"></goder-app-shell>
+
+    <script type="module">
+      import {
+        configure,
+        getScope,
+        registry,
+        setKeyValueStorage,
+        MemoryStorage,
+        setApiFetch,
+        createScriptedApi,
+        setSendInterceptor,
+        setApprovalHook,
+        setI18n,
+      } from './goder.js';
+
+      const qs = new URLSearchParams(location.search);
+      const mode = qs.get('api') === 'real' ? 'real' : 'fake';
+      const SCOPES = { scope: 'harness' };
+      const el = (id) => document.getElementById(id);
+
+      // ---------- 事件观测条(DOM 可读的事件轨迹) ----------
+      const eventTrail = [];
+      for (const type of ['goder:round-completed', 'goder:conn-state', 'goder:session-selected', 'goder:session-archived']) {
+        window.addEventListener(type, (e) => {
+          eventTrail.unshift(`${type} ${JSON.stringify(e.detail)}`);
+          if (eventTrail.length > 8) eventTrail.pop();
+          el('kit-events').textContent = '事件: ' + eventTrail.join(' | ');
+        });
+      }
+
+      // ---------- fake 装配 ----------
+      let api = null;
+      if (mode === 'fake') {
+        setKeyValueStorage(new MemoryStorage()); // 刷新即净,AI 每轮干净起点
+        api = createScriptedApi({
+          conversations: [
+            {
+              id: 'fc_seed_history',
+              lastResponseId: 'resp_seed_history',
+              history: [
+                { role: 'user', content: '介绍一下这个测试装具' },
+                { role: 'assistant', content: '这是 scripted-api 的种子会话:历史回放走真实 wire 形状(HistMessage[]),用于验证会话列表、历史加载与消息渲染。' },
+              ],
+            },
+            { id: 'fc_seed_empty' },
+          ],
+        });
+        setApiFetch(api.asFetch());
+        const initScenario = qs.get('scenario');
+        if (initScenario) api.scenario(initScenario);
+        configure(SCOPES.scope, { baseUrl: '/goder-api', model: 'fake/chat' });
+      } else {
+        el('kit-mode').textContent = 'real';
+        el('kit-mode').className = 'kit-badge real';
+        configure(SCOPES.scope, { baseUrl: qs.get('server') ?? '/goder-api' });
+        document.querySelectorAll('[data-scenario]').forEach((b) => (b.disabled = true));
+      }
+
+      // ---------- 场景切换 ----------
+      document.querySelectorAll('[data-scenario]').forEach((btn) => {
+        if (api && qs.get('scenario') === btn.dataset.scenario) btn.classList.add('on');
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('[data-scenario]').forEach((b) => b.classList.remove('on'));
+          btn.classList.add('on');
+          api.scenario(btn.dataset.scenario);
+        });
+      });
+      el('kit-reset').addEventListener('click', () => location.reload());
+
+      // ---------- 扩展点演示(全部用 HTMLElement,宿主无 lit 的接入方式) ----------
+      const inline = (tag, text, color) => {
+        const n = document.createElement(tag);
+        n.textContent = text;
+        if (color) n.style.color = color;
+        n.style.padding = '10px 12px';
+        n.style.fontSize = '13px';
+        return n;
+      };
+      const extDefs = {
+        nav: {
+          on: () =>
+            registry.nav.add({
+              id: 'host-help',
+              label: '帮助中心',
+              order: 50,
+              view: () => inline('div', '宿主自定义导航视图:registry.nav.add 注册,返回普通 HTMLElement 即可(无需 lit)。'),
+            }),
+          off: () => registry.nav.remove('host-help'),
+        },
+        side: {
+          on: () =>
+            registry.side.add({
+              id: 'host-metrics',
+              label: '宿主指标',
+              width: 320,
+              render: (ctx) => {
+                const wrap = document.createElement('div');
+                wrap.style.padding = '12px';
+                wrap.append(inline('div', `会话:${ctx.sessionId ?? '(未选择)'}`));
+                wrap.append(inline('div', `连接:${ctx.store?.connState ?? '?'}`));
+                wrap.append(inline('div', '跨 tab 开关保活(HTMLElement)。'));
+                return wrap;
+              },
+            }),
+          off: () => registry.side.remove('host-metrics'),
+        },
+        settings: {
+          on: () =>
+            registry.settings.add({
+              id: 'host-brand',
+              label: '平台设置',
+              group: '平台',
+              order: 15,
+              render: () => inline('div', '宿主自定义设置分区:registry.settings.add 注册,同 id 重复 add 即覆写内置分区。'),
+            }),
+          off: () => registry.settings.remove('host-brand'),
+        },
+        toolmeta: {
+          on: () => registry.chat.addToolMeta({ name: 'bash', label: '终端命令(宿主改名)' }),
+          off: () => registry.chat.removeToolMeta('bash'),
+        },
+        renderer: {
+          on: () =>
+            registry.chat.addRenderer({
+              id: 'host-notice',
+              kind: 'notice',
+              render: (it) => {
+                const n = inline('div', `[宿主接管] notice(${it.noticeKind}):${it.detail ?? ''}`, '#ffc861');
+                n.style.border = '1px dashed #ffc861';
+                n.style.borderRadius = '8px';
+                n.style.margin = '4px 0';
+                return n;
+              },
+            }),
+          off: () => registry.chat.removeRenderer('host-notice'),
+        },
+        beforesend: {
+          on: () => setSendInterceptor(SCOPES.scope, (p) => ({ ...p, text: `${p.text}\n[host-hook 已注入]` })),
+          off: () => setSendInterceptor(SCOPES.scope, undefined),
+        },
+        approval: {
+          on: () => setApprovalHook(SCOPES.scope, () => ({ approved: true })),
+          off: () => setApprovalHook(SCOPES.scope, undefined),
+        },
+        i18n: {
+          on: () => setI18n(SCOPES.scope, { locale: 'en', messages: { 新会话: 'New chat' } }),
+          off: () => setI18n(SCOPES.scope, { messages: {} }),
+        },
+        theme: {
+          on: () => document.documentElement.style.setProperty('--goder-accent', '#3f8cff'),
+          off: () => document.documentElement.style.removeProperty('--goder-accent'),
+        },
+        hideconsole: {
+          on: () => registry.side.hide('console'),
+          off: () => registry.side.show('console'),
+        },
+      };
+      document.querySelectorAll('[data-ext]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const def = extDefs[btn.dataset.ext];
+          const turningOn = !btn.classList.contains('on');
+          (turningOn ? def.on : def.off)();
+          btn.classList.toggle('on', turningOn);
+        });
+      });
+
+      // ---------- window.goderKit(测试面;不承诺语义稳定) ----------
+      const snap = () => {
+        const s = getScope(SCOPES.scope);
+        const rt = s.activeSessionId ? s.runtimes.get(s.activeSessionId) : undefined;
+        return {
+          mode,
+          scenario: api ? currentScenario() : '(real)',
+          registry: {
+            nav: registry.nav.items().map((d) => d.id),
+            side: registry.side.items().map((d) => d.id),
+            bottom: registry.bottom.items().map((d) => d.id),
+            settings: registry.settings.items().map((d) => d.id),
+          },
+          conn: { state: s.connState, error: s.connError ?? null },
+          sessions: [...s.conversations.keys()],
+          activeSession: s.activeSessionId ?? null,
+          messages: (rt?.items ?? []).map((i) => ({
+            kind: i.kind,
+            name: i.name ?? null,
+            status: i.status ?? null,
+            text: typeof i.text === 'string' ? i.text.slice(0, 120) : null,
+          })),
+          events: [...eventTrail],
+        };
+      };
+      let scenarioNow = qs.get('scenario') ?? 'echo';
+      const currentScenario = () => scenarioNow;
+
+      window.goderKit = {
+        mode,
+        api,
+        scenario(name) {
+          scenarioNow = name;
+          api.scenario(name);
+          document.querySelectorAll('[data-scenario]').forEach((b) => b.classList.toggle('on', b.dataset.scenario === name));
+        },
+        snapshot: snap,
+        requests: () => (api ? api.requests() : []),
+        scriptNext: (matcher, frames) => api.scriptNext(matcher, frames),
+        failNext: (matcher, spec) => api.failNext(matcher, spec),
+        ext: { toggle(name, on) { ((on === undefined ? !document.querySelector(`[data-ext="${name}"]`)?.classList.contains('on') : on) ? extDefs[name].on : extDefs[name].off)(); document.querySelector(`[data-ext="${name}"]`)?.classList.toggle('on', on ?? true); } },
+        reset: () => location.reload(),
+      };
+      // 场景按钮同步 goderKit.scenario 的内部记录
+      document.querySelectorAll('[data-scenario]').forEach((btn) =>
+        btn.addEventListener('click', () => (scenarioNow = btn.dataset.scenario)),
+      );
+    </script>
+  </body>
+</html>

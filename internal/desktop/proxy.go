@@ -1,6 +1,6 @@
-// proxy.go — 桌面态 /grf-api/* 同源反代与根路由组合。反代核心在
+// proxy.go — 桌面态 /goder-api/* 同源反代与根路由组合。反代核心在
 // internal/ghserver.NewProxy;这里只负责解析桌面配置(托管实例优先,
-// 远程模式取配置)并挂接 /grf-api/token 端点(前端冷启动零 wails 依赖
+// 远程模式取配置)并挂接 /goder-api/token 端点(前端冷启动零 wails 依赖
 // 拿连接信息)。
 package desktop
 
@@ -17,10 +17,10 @@ import (
 	"git.gorun.fun/share/goder/pkg/ghserver"
 )
 
-const proxyPrefix = "/grf-api"
+const proxyPrefix = "/goder-api"
 
-// rootHandler 组合:/grf-api/* → 代理;/grf-api/token → 托管服务信息
-// (同源直读,前端冷启动无需等 wails 调用通道);/grf-api/local-file → 本地
+// rootHandler 组合:/goder-api/* → 代理;/goder-api/token → 托管服务信息
+// (同源直读,前端冷启动无需等 wails 调用通道);/goder-api/local-file → 本地
 // 文件只读服务(右栏浏览器按路径渲染 html 等,替代 data URL);其余 → 前端
 // 静态资源。
 func RootHandler(fallback http.Handler) http.Handler {
@@ -28,8 +28,8 @@ func RootHandler(fallback http.Handler) http.Handler {
 	// 敏感端点(令牌下发/本地文件读取)先过本机 Host 校验:服务只监听
 	// 回环,但 DNS rebinding 可让恶意网页以自有域名解析到 127.0.0.1
 	// 再携带伪造 Host 访问 —— 只放行本机已知主机名。
-	mux.HandleFunc("/grf-api/token", guardLocalHost(serveManagedToken))
-	mux.HandleFunc("/grf-api/local-file", guardLocalHost(serveLocalFile))
+	mux.HandleFunc("/goder-api/token", guardLocalHost(serveManagedToken))
+	mux.HandleFunc("/goder-api/local-file", guardLocalHost(serveLocalFile))
 	mux.Handle(proxyPrefix+"/", desktopProxy())
 	mux.Handle(proxyPrefix, desktopProxy())
 	mux.Handle("/", fallback)
@@ -70,7 +70,7 @@ var localFileTypes = map[string]string{
 	".txt":  "text/plain; charset=utf-8",
 }
 
-// serveLocalFile GET /grf-api/local-file?path=<绝对路径>:只读返回本地文件。
+// serveLocalFile GET /goder-api/local-file?path=<绝对路径>:只读返回本地文件。
 // 右栏内嵌浏览器用它在 iframe 里按本地路径渲染 html(file:// 被 webview
 // 的源隔离拦下,data URL 又丢路径上下文,同源路径服务两者皆得)。
 // 仅桌面本机场景,不做目录白名单;限制普通文件 + 64MB 上限。

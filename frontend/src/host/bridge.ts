@@ -10,7 +10,7 @@ import type { ProviderDTO, ModelConfigDTO, DetectedModelDTO, PluginsDTO, SkillsD
 // @wailsio/runtime 包加载时自设,普通浏览器懒加载后也会有;也不能依赖
 // 注入 runtime(它可能跑在独立 JS world)。可靠信号是"真的调通了 wails
 // 服务"(initHostBridge 探针)与桌面 origin 形态;test-serve 无头测试态
-// (http://127.0.0.1:<port>)经 /grf-host-probe 标记端点识别
+// (http://127.0.0.1:<port>)经 /goder-host-probe 标记端点识别
 // (detectDesktopHost,见 main.go testserve.go)。
 let wailsProbe = false;
 let hostProbe = false;
@@ -29,7 +29,7 @@ export function inWails(): boolean {
 }
 
 /** 探测当前 origin 是否 goder test-serve 宿主(无头测试形态)。
- * 命中 /grf-host-probe 标记端点(204)即视为桌面形态:界面按桌面装配
+ * 命中 /goder-host-probe 标记端点(204)即视为桌面形态:界面按桌面装配
  * (终端等桌面面板),wails 调用通道就绪由 initHostBridge 的带重试探针
  * 兜底;同时启动事件 SSE 中继(无头形态没有窗口,Go 侧 ExecJS 推送不
  * 存在,事件经 /test-serve/events 回流)。
@@ -41,7 +41,7 @@ export function inWails(): boolean {
 export async function detectDesktopHost(): Promise<boolean> {
   const originDesktop = inWails();
   try {
-    const r = await fetch('/grf-host-probe', { method: 'HEAD' });
+    const r = await fetch('/goder-host-probe', { method: 'HEAD' });
     if (r.status === 204) {
       hostProbe = true;
       startEventRelay();
@@ -56,7 +56,7 @@ export async function detectDesktopHost(): Promise<boolean> {
 let eventRelayStarted = false;
 
 /** test-serve 事件中继:订阅 /test-serve/events SSE,把 wails 自定义事件
- * (grf:term-* / grf:console-ui / grf:update-progress)喂回
+ * (goder:term-* / goder:console-ui / goder:update-progress)喂回
  * window._wails.dispatchWailsEvent —— 与官方 server 模式 custom.js 的
  * WebSocket 中继同一机制,Events.On 订阅者无感复用。 */
 function startEventRelay(): void {
@@ -492,7 +492,7 @@ export async function readTerm(id: string, from: number): Promise<TermReadDTO | 
 
 // ---------- goder-console 智能体控制面(ConsoleMCP service,仅桌面) ----------
 
-/** Go 侧下发的界面操作载荷(grf:console-ui 事件)。 */
+/** Go 侧下发的界面操作载荷(goder:console-ui 事件)。 */
 export interface ConsoleUiPayload {
   action: string;
   params?: Record<string, unknown>;
@@ -507,7 +507,7 @@ export function consoleUiListen(cb: (p: ConsoleUiPayload) => void): () => void {
     try {
       const mod = (await import('@wailsio/runtime')) as unknown as { Events: WailsEvents };
       if (cancelled) return;
-      off = mod.Events.On('grf:console-ui', (ev) => {
+      off = mod.Events.On('goder:console-ui', (ev) => {
         const raw = ev?.data;
         const v = Array.isArray(raw) ? raw[0] : raw;
         if (v && typeof v === 'object') cb(v as ConsoleUiPayload);
@@ -699,7 +699,7 @@ export async function ensureHomeDir(name: string): Promise<string | null> {
 }
 
 // ---------- 自动更新(Updater service,仅桌面) ----------
-// goder 自身与 gh(grf-harness)的更新检查/应用;进度经 grf:update-progress
+// goder 自身与 gh(grf-harness)的更新检查/应用;进度经 goder:update-progress
 // 事件下发(下载耗时数分钟,Apply 只做启动确认)。
 
 /** 单个组件(goder/gh)的版本对比;与 Go 侧 UpdateCompDTO 对齐。 */
@@ -761,7 +761,7 @@ export function onUpdateProgress(cb: (p: UpdateProgressDTO) => void): () => void
     try {
       const mod = (await import('@wailsio/runtime')) as unknown as { Events: WailsEvents };
       if (cancelled) return;
-      off = mod.Events.On('grf:update-progress', (ev) => {
+      off = mod.Events.On('goder:update-progress', (ev) => {
         const raw = ev?.data;
         const v = Array.isArray(raw) ? raw[0] : raw;
         if (v && typeof v === 'object') cb(v as UpdateProgressDTO);

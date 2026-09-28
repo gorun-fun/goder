@@ -1,6 +1,6 @@
 // js.go — 浏览器工具注入页面的 JS 片段。snapshot/dq 机制移植自
 // grf-harness 的 plugins/browser(snapshot.go),ref 语义与其一致:
-// 快照给可交互元素打 data-grf-ref,后续 click/type 等按 ref 深度定位
+// 快照给可交互元素打 data-goder-ref,后续 click/type 等按 ref 深度定位
 // (穿透 shadow DOM 与同源 iframe)。合成事件无 isTrusted,本地开发
 // 调试场景足够(反爬/canvas 自绘交互请用 grf-browser 插件的真 Chrome)。
 package console
@@ -17,10 +17,10 @@ func jsString(s string) string {
 	return string(b)
 }
 
-// deepQueryJS 定义 window.__grfDeepQuery:按 CSS 选择器深度查找
+// deepQueryJS 定义 window.__goderDeepQuery:按 CSS 选择器深度查找
 // (document → shadow root → 同源 iframe 文档,递归)。与 gh 同名实现
 // 逐字一致,保持两套工具的行为对齐。
-const deepQueryJS = `window.__grfDeepQuery = window.__grfDeepQuery || ((sel) => {
+const deepQueryJS = `window.__goderDeepQuery = window.__goderDeepQuery || ((sel) => {
   const search = (root) => {
     const hit = root.querySelector(sel);
     if (hit) return hit;
@@ -44,7 +44,7 @@ const deepQueryJS = `window.__grfDeepQuery = window.__grfDeepQuery || ((sel) => 
 });`
 
 // dqHelper 操作表达式里取深度查找函数(未定义则退化为仅主文档)。
-const dqHelper = `const dq = window.__grfDeepQuery || (s => document.querySelector(s));`
+const dqHelper = `const dq = window.__goderDeepQuery || (s => document.querySelector(s));`
 
 // snapshotJS DOM 大快照:返回大纲文本(角色 + 名称 + [ref=eN])。与 gh
 // 同名实现一致,仅把溢出提示里的工具名改为本套工具。
@@ -52,7 +52,7 @@ const snapshotJS = `(() => {
   ` + deepQueryJS + `
   const sweep = (root) => {
     root.querySelectorAll('*').forEach(el => {
-      el.removeAttribute('data-grf-ref');
+      el.removeAttribute('data-goder-ref');
       if (el.shadowRoot) sweep(el.shadowRoot);
     });
     for (const f of root.querySelectorAll('iframe')) {
@@ -113,7 +113,7 @@ const snapshotJS = `(() => {
   };
   const markRef = (el) => {
     const ref = 'e' + (++n);
-    el.setAttribute('data-grf-ref', ref);
+    el.setAttribute('data-goder-ref', ref);
     return ref;
   };
   const walk = (el, depth) => {
@@ -163,7 +163,7 @@ const snapshotJS = `(() => {
 })()`
 
 // refSelector ref → CSS 选择器(快照标注的属性选择器;与 gh 一致)。
-func refSelector(ref string) string { return `[data-grf-ref="` + ref + `"]` }
+func refSelector(ref string) string { return `[data-goder-ref="` + ref + `"]` }
 
 // jsRefOrSelector 工具参数(ref/selector)→ CSS 选择器表达式;两者皆空
 // 返回空串(调用方自行报参数错误)。

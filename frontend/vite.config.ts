@@ -2,15 +2,15 @@ import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
-// grf-auto 技能正文构建期注入(单一源文件在 Go 侧目录,与 go:embed
+// goder-auto 技能正文构建期注入(单一源文件在 Go 侧目录,与 go:embed
 // 同一份;core 不再跨树 ?raw 引用,见 core/store/automation.ts)。
-const grfAutoSkill = readFileSync(resolve(__dirname, '../internal/desktop/agentskills/grf-auto.md'), 'utf8');
+const goderAutoSkill = readFileSync(resolve(__dirname, '../internal/desktop/agentskills/goder-auto.md'), 'utf8');
 
 // 桌面 app 构建(也用于浏览器直开调试):入口 main.ts + embed-demo。
 export default defineConfig({
   define: {
-    __GRF_AUTO_SKILL_MD__: JSON.stringify(grfAutoSkill),
-    __GRF_UI_VERSION__: JSON.stringify("0.1.0"),
+    __GODER_AUTO_SKILL_MD__: JSON.stringify(goderAutoSkill),
+    __GODER_UI_VERSION__: JSON.stringify("0.1.0"),
   },
   base: './',
   build: {

@@ -73,8 +73,8 @@ const EFFORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'max', label: '最高' },
 ];
 
-@customElement('grf-composer')
-export class GrfComposer extends LitElement {
+@customElement('goder-composer')
+export class GoderComposer extends LitElement {
   /** 数据域名(发送钩子等嵌入方策略按 scope 生效;宿主/chat-panel 下发) */
   @property({ type: String }) scope = 'default';
   /** 运行中(切换为停止) */
@@ -140,7 +140,7 @@ export class GrfComposer extends LitElement {
       }
       .wrap {
         position: relative;
-        border: 1px solid var(--grf-border);
+        border: 1px solid var(--goder-border);
         border-radius: 12px;
         /* 背景与卡片同黑拉通,仅以描边勾勒输入框 */
         background: transparent;
@@ -152,12 +152,12 @@ export class GrfComposer extends LitElement {
         container-type: inline-size;
       }
       .wrap:focus-within {
-        border-color: var(--grf-border-hover);
+        border-color: var(--goder-border-hover);
       }
       /* 应答态:输入框整体变高,内嵌问题与选项 */
       .wrap.asking {
-        border-color: var(--grf-accent);
-        background: var(--grf-accent-soft);
+        border-color: var(--goder-accent);
+        background: var(--goder-accent-soft);
         padding: 14px 16px;
       }
       .ask-wrap {
@@ -168,8 +168,8 @@ export class GrfComposer extends LitElement {
         display: flex;
         align-items: center;
         gap: 7px;
-        color: var(--grf-accent-text);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-accent-text);
+        font-size: var(--goder-font-size-sm);
         font-weight: 600;
       }
       .ask-head svg {
@@ -180,13 +180,13 @@ export class GrfComposer extends LitElement {
         background: transparent;
         border: none;
         padding: 0;
-        font-size: var(--grf-font-size);
+        font-size: var(--goder-font-size);
         line-height: 1.6;
         resize: none;
         min-height: 24px;
         max-height: 200px;
-        font-family: var(--grf-font);
-        color: var(--grf-text);
+        font-family: var(--goder-font);
+        color: var(--goder-text);
         outline: none;
         width: 100%;
         box-sizing: border-box;
@@ -229,8 +229,8 @@ export class GrfComposer extends LitElement {
       }
       .hint {
         flex: 1;
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -249,17 +249,17 @@ export class GrfComposer extends LitElement {
         display: flex;
         align-items: center;
         gap: 8px;
-        border: 1px dashed var(--grf-border);
-        border-radius: var(--grf-radius-sm);
-        background: var(--grf-bg-raise);
+        border: 1px dashed var(--goder-border);
+        border-radius: var(--goder-radius-sm);
+        background: var(--goder-bg-raise);
         padding: 6px 10px;
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text-dim);
       }
       .queue-item .badge {
         flex: none;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       .queue-item .txt {
         flex: 1;
@@ -274,10 +274,10 @@ export class GrfComposer extends LitElement {
         flex: none;
         padding: 2px 5px;
         line-height: 1;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .queue-item button:hover {
-        color: var(--grf-danger, #d33);
+        color: var(--goder-danger, #d33);
       }
       .queue-item button svg {
         width: 12px;
@@ -285,8 +285,8 @@ export class GrfComposer extends LitElement {
       }
       .img-chip {
         position: relative;
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius-sm);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius-sm);
         overflow: hidden;
         width: 64px;
         height: 64px;
@@ -338,7 +338,7 @@ export class GrfComposer extends LitElement {
         filter: brightness(0.9);
       }
       .attach {
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
       }
       input[type='file'] {
         display: none;
@@ -349,11 +349,11 @@ export class GrfComposer extends LitElement {
         align-items: center;
         gap: 5px;
         border: none; /* 策略/模型/思考强度:融入输入框,不加外框 */
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
         background: transparent;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-xs);
-        font-family: var(--grf-font);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-xs);
+        font-family: var(--goder-font);
         line-height: 1;
         padding: 5px 8px;
         cursor: pointer;
@@ -362,8 +362,8 @@ export class GrfComposer extends LitElement {
       }
       .bar-btn:hover,
       .bar-btn.open {
-        border-color: var(--grf-border-hover);
-        color: var(--grf-text);
+        border-color: var(--goder-border-hover);
+        color: var(--goder-text);
       }
       .bar-btn svg {
         width: 1em; /* 与按钮文字同高(策略盾牌/思考大脑/下拉箭头) */
@@ -385,10 +385,10 @@ export class GrfComposer extends LitElement {
       .tip {
         position: fixed;
         transform: translateY(-100%);
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius-sm);
-        background: var(--grf-card);
-        box-shadow: var(--grf-shadow);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius-sm);
+        background: var(--goder-card);
+        box-shadow: var(--goder-shadow);
         z-index: 80;
       }
       .pop {
@@ -403,15 +403,15 @@ export class GrfComposer extends LitElement {
         overflow-y: auto;
       }
       .pop-title {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         padding: 5px 8px 4px;
       }
       .pop-group {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         padding: 6px 8px 2px;
-        border-top: 1px solid var(--grf-border-soft);
+        border-top: 1px solid var(--goder-border-soft);
         margin-top: 3px;
       }
       .pop-item {
@@ -422,22 +422,22 @@ export class GrfComposer extends LitElement {
         text-align: left;
         border: none;
         background: transparent;
-        color: var(--grf-text-dim);
-        border-radius: var(--grf-radius-sm);
+        color: var(--goder-text-dim);
+        border-radius: var(--goder-radius-sm);
         padding: 6px 8px;
         cursor: pointer;
-        font-size: var(--grf-font-size-sm);
-        font-family: var(--grf-font);
+        font-size: var(--goder-font-size-sm);
+        font-family: var(--goder-font);
       }
       .pop-item:hover,
       .pop-item.sel {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .pop-item .check {
         width: 13px;
         flex: none;
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
         padding-top: 2px;
       }
       .pop-item .check svg {
@@ -451,15 +451,15 @@ export class GrfComposer extends LitElement {
       .pop-item .tx b {
         display: block;
         font-weight: 500;
-        color: var(--grf-text);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-text);
+        font-size: var(--goder-font-size-sm);
         overflow-wrap: anywhere; /* 模型 ID 可能很长:换行完整显示,不省略截断 */
       }
       .pop-item .tx i {
         display: block;
         font-style: normal;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         margin-top: 1px;
       }
       /* 指令菜单:与输入框同宽,一条指令一行,说明跟在指令名后面 */
@@ -501,12 +501,12 @@ export class GrfComposer extends LitElement {
       }
       .ctx .track {
         fill: none;
-        stroke: var(--grf-border);
+        stroke: var(--goder-border);
         stroke-width: 2.5;
       }
       .ctx .fill {
         fill: none;
-        stroke: var(--grf-accent);
+        stroke: var(--goder-accent);
         stroke-width: 2.5;
         stroke-linecap: round;
         transform: rotate(-90deg);
@@ -530,21 +530,21 @@ export class GrfComposer extends LitElement {
         display: flex;
         justify-content: space-between;
         gap: 16px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
       }
       .tip .row b {
         font-weight: 500;
-        color: var(--grf-text);
+        color: var(--goder-text);
         text-align: right;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
       .tip .row.head {
-        color: var(--grf-text);
+        color: var(--goder-text);
         padding-bottom: 4px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         margin-bottom: 2px;
       }
     `,
@@ -565,7 +565,7 @@ export class GrfComposer extends LitElement {
                 </div>
                 ${this.asks.map(
                   (a) => html`
-                    <grf-ask-form flat .item=${a} show-dismiss></grf-ask-form>
+                    <goder-ask-form flat .item=${a} show-dismiss></goder-ask-form>
                   `,
                 )}
               </div>
@@ -1150,7 +1150,7 @@ function posStyle(pos: PopPos): string {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-composer': GrfComposer;
+    'goder-composer': GoderComposer;
   }
 }
 

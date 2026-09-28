@@ -1,4 +1,4 @@
-// file-view.ts — <grf-file-view>:右栏「文件」tab 的文件预览(桌面态,
+// file-view.ts — <goder-file-view>:右栏「文件」tab 的文件预览(桌面态,
 // 左栏文件树点击文件打开,每个文件一个 tab)。按扩展名分三类:
 // 文本(等宽字体 + 行号,Desktop.ReadFile,上限 2MB)、图片(<img> data
 // URL,Desktop.ReadImage,上限 10MB)、markdown(默认源码,头部眼睛图标
@@ -6,7 +6,7 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import type { PropertyValues } from 'lit';
 import { icon } from '../../util/icons';
 import { renderMarkdown } from '../../util/markdown';
@@ -25,8 +25,8 @@ function extOf(path: string): string {
   return i > 0 ? seg.slice(i + 1).toLowerCase() : '';
 }
 
-@customElement('grf-file-view')
-export class GrfFileView extends GrfPanel {
+@customElement('goder-file-view')
+export class GoderFileView extends GoderPanel {
   /** 文件绝对路径 */
   @property({ type: String }) path = '';
   /** 文件名(缺省取 path 尾段) */
@@ -85,7 +85,7 @@ export class GrfFileView extends GrfPanel {
   private openHtmlPreview(): void {
     if (!this.text) return;
     const url = inWails() ? this.path : `data:text/html;charset=utf-8,${encodeURIComponent(this.text)}`;
-    this.dispatchEvent(new CustomEvent('grf-open-browser-url', { detail: { url }, bubbles: true, composed: true }));
+    this.dispatchEvent(new CustomEvent('goder-open-browser-url', { detail: { url }, bubbles: true, composed: true }));
   }
 
   render() {
@@ -151,9 +151,9 @@ export class GrfFileView extends GrfPanel {
         height: 100%;
         min-height: 0;
         background: transparent;
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
       }
       .head {
         flex: none;
@@ -161,16 +161,16 @@ export class GrfFileView extends GrfPanel {
         align-items: center;
         gap: 6px;
         padding: 8px 12px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         font-weight: 650;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         user-select: none;
         min-width: 0;
       }
       .head .ic {
         flex: none;
         display: inline-flex;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .head .ic svg {
         width: 13px;
@@ -183,25 +183,25 @@ export class GrfFileView extends GrfPanel {
         overflow: hidden;
         text-overflow: ellipsis;
         /* 相对路径含目录段,用小一号避免挤占操作按钮 */
-        font-family: var(--grf-mono);
+        font-family: var(--goder-mono);
         font-weight: 500;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
       }
       .head button {
         flex: none;
         padding: 3px 5px;
       }
       .head .eye.on {
-        color: var(--grf-accent-text);
-        background: var(--grf-accent-soft);
+        color: var(--goder-accent-text);
+        background: var(--goder-accent-soft);
       }
       .body {
         flex: 1;
         min-height: 0;
         display: flex;
         overflow: auto;
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.6;
       }
       /* 行号列固定宽,内容横向滚动时行号固定在左侧 */
@@ -213,9 +213,9 @@ export class GrfFileView extends GrfPanel {
         box-sizing: border-box;
         text-align: right;
         padding-right: 10px;
-        color: var(--grf-text-faint);
-        background: var(--grf-bg-raise);
-        border-right: 1px solid var(--grf-border-soft);
+        color: var(--goder-text-faint);
+        background: var(--goder-bg-raise);
+        border-right: 1px solid var(--goder-border-soft);
         user-select: none;
         white-space: pre;
       }
@@ -224,7 +224,7 @@ export class GrfFileView extends GrfPanel {
         margin: 0;
         padding: 8px 12px 12px;
         white-space: pre;
-        color: var(--grf-text);
+        color: var(--goder-text);
         min-width: 0;
       }
       /* 图片:居中展示,可滚动,不放大超过面板宽 */
@@ -238,8 +238,8 @@ export class GrfFileView extends GrfPanel {
       }
       .img-wrap img {
         max-width: 100%;
-        border-radius: var(--grf-radius-sm);
-        border: 1px solid var(--grf-border-soft);
+        border-radius: var(--goder-radius-sm);
+        border: 1px solid var(--goder-border-soft);
       }
       /* markdown 渲染预览 */
       .md {
@@ -268,7 +268,7 @@ export class GrfFileView extends GrfPanel {
       .md h1.md-h,
       .md h2.md-h {
         font-size: 16px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         padding-bottom: 4px;
       }
       .md h3.md-h {
@@ -280,16 +280,16 @@ export class GrfFileView extends GrfPanel {
         font-size: 13.5px;
       }
       .md code {
-        font-family: var(--grf-mono);
+        font-family: var(--goder-mono);
         font-size: 0.9em;
-        background: var(--grf-bg-hover);
+        background: var(--goder-bg-hover);
         border-radius: 4px;
         padding: 1px 5px;
       }
       .md pre.md-code {
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border-soft);
-        border-radius: var(--grf-radius-sm);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border-soft);
+        border-radius: var(--goder-radius-sm);
         padding: 10px 12px;
         overflow: auto;
         margin: 0 0 8px;
@@ -297,7 +297,7 @@ export class GrfFileView extends GrfPanel {
       .md pre.md-code code {
         background: none;
         padding: 0;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.6;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
@@ -311,17 +311,17 @@ export class GrfFileView extends GrfPanel {
         margin: 2px 0;
       }
       .md a {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .md blockquote.md-quote {
         margin: 0 0 8px;
         padding: 2px 12px;
-        border-left: 3px solid var(--grf-border);
-        color: var(--grf-text-dim);
+        border-left: 3px solid var(--goder-border);
+        color: var(--goder-text-dim);
       }
       .md hr.md-hr {
         border: none;
-        border-top: 1px solid var(--grf-border);
+        border-top: 1px solid var(--goder-border);
         margin: 12px 0;
       }
       .md table {
@@ -330,28 +330,28 @@ export class GrfFileView extends GrfPanel {
         max-width: 100%;
         border-collapse: collapse;
         margin: 0 0 8px;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
       }
       .md th,
       .md td {
-        border: 1px solid var(--grf-border-soft);
+        border: 1px solid var(--goder-border-soft);
         padding: 4px 9px;
         text-align: left;
         vertical-align: top;
       }
       .md th {
-        background: var(--grf-bg-hover);
+        background: var(--goder-bg-hover);
         font-weight: 650;
         white-space: nowrap;
       }
       .empty {
         padding: 40px 16px;
         text-align: center;
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
       }
       .empty.err {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
     `,
   ];
@@ -359,6 +359,6 @@ export class GrfFileView extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-file-view': GrfFileView;
+    'goder-file-view': GoderFileView;
   }
 }

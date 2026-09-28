@@ -15,7 +15,7 @@ package browser
 // Manager 从 wails 服务 goroutine(Navigate、首次创建)与主线程关闭
 // 路径(Close)两处调用,已在主线程时直接执行 —— 否则 dispatch_sync
 // 到主队列会死锁。
-static void grf_onMainSync(void(^work)(void)) {
+static void goder_onMainSync(void(^work)(void)) {
 	if ([NSThread isMainThread]) {
 		work();
 	} else {
@@ -26,7 +26,7 @@ static void grf_onMainSync(void(^work)(void)) {
 // WKWebView 默认 acceptsFirstMouse: 返回 NO:主窗口非 key(比如别的
 // 子视图持有焦点)时,第一次点击只激活窗口、不投递给 JS —— 切面板要
 // 点两下。给类打一次补丁,让首击既激活又命中。
-static void grf_allowFirstMouseWebviews(void) {
+static void goder_allowFirstMouseWebviews(void) {
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
 		Method m = class_getInstanceMethod([WKWebView class], @selector(acceptsFirstMouse:));
@@ -49,22 +49,22 @@ static void grf_allowFirstMouseWebviews(void) {
 // 仍在。重置浏览器配置:删除该目录。
 
 // 共享持久浏览器配置的固定身份。
-#define GRF_BROWSER_STORE_UUID "6D9A2C31-9F4B-4A8D-83C2-2B7E5C0A41F6"
+#define GODER_BROWSER_STORE_UUID "6D9A2C31-9F4B-4A8D-83C2-2B7E5C0A41F6"
 
 // 创建浏览器 WKWebView(共享 data store),作为隐藏、零尺寸子视图加入
 // mainWin 的 contentView。hooks 非 NULL 时作为 document start 用户脚本
 // 注入(每个新文档执行前跑一次:goder-console 的 console/网络捕获钩子)。
-// 返回指针多持一次 retain(grf_detachView 释放),嵌入期间保持有效。
+// 返回指针多持一次 retain(goder_detachView 释放),嵌入期间保持有效。
 // 位置由 Manager 按前端 rect 上报布局。失败返回 NULL。
-static void* grf_createBrowserView(void* mainWin, const char* hooks) {
+static void* goder_createBrowserView(void* mainWin, const char* hooks) {
 	if (!mainWin) return NULL;
 	__block WKWebView* created = nil;
-	grf_onMainSync(^{
+	goder_onMainSync(^{
 		@autoreleasepool {
 			static WKWebsiteDataStore* store = nil;
 			static dispatch_once_t once;
 			dispatch_once(&once, ^{
-				NSUUID* u = [[NSUUID alloc] initWithUUIDString:@GRF_BROWSER_STORE_UUID];
+				NSUUID* u = [[NSUUID alloc] initWithUUIDString:@GODER_BROWSER_STORE_UUID];
 				store = [WKWebsiteDataStore dataStoreForIdentifier:u];
 			});
 			WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
@@ -91,9 +91,9 @@ static void* grf_createBrowserView(void* mainWin, const char* hooks) {
 }
 
 // 在浏览器视图中加载绝对 URL。
-static void grf_viewLoadURL(void* view, const char* url) {
+static void goder_viewLoadURL(void* view, const char* url) {
 	if (!view || !url) return;
-	grf_onMainSync(^{
+	goder_onMainSync(^{
 		@autoreleasepool {
 			NSString* s = [NSString stringWithUTF8String:url];
 			NSURLRequest* req = [NSURLRequest requestWithURL:[NSURL URLWithString:s]];
@@ -103,26 +103,26 @@ static void grf_viewLoadURL(void* view, const char* url) {
 }
 
 // 真导航的后退/前进与刷新(自有视图,无需 ExecJS 往返)。
-static void grf_viewGoBack(void* view) {
+static void goder_viewGoBack(void* view) {
 	if (!view) return;
-	grf_onMainSync(^{ @autoreleasepool { [(__bridge WKWebView*)view goBack]; } });
+	goder_onMainSync(^{ @autoreleasepool { [(__bridge WKWebView*)view goBack]; } });
 }
 
-static void grf_viewGoForward(void* view) {
+static void goder_viewGoForward(void* view) {
 	if (!view) return;
-	grf_onMainSync(^{ @autoreleasepool { [(__bridge WKWebView*)view goForward]; } });
+	goder_onMainSync(^{ @autoreleasepool { [(__bridge WKWebView*)view goForward]; } });
 }
 
-static void grf_viewReload(void* view) {
+static void goder_viewReload(void* view) {
 	if (!view) return;
-	grf_onMainSync(^{ @autoreleasepool { [(__bridge WKWebView*)view reload]; } });
+	goder_onMainSync(^{ @autoreleasepool { [(__bridge WKWebView*)view reload]; } });
 }
 
 // 把内嵌子视图放到 (x, y, w, h):主窗口视口相对 CSS 像素(左上原点),
 // 翻转为 AppKit 左下原点的 contentView 坐标。对隐藏视图设置 frame 安全。
-static void grf_layoutView(void* mainWin, void* view, int x, int y, int w, int h) {
+static void goder_layoutView(void* mainWin, void* view, int x, int y, int w, int h) {
 	if (!mainWin || !view) return;
-	grf_onMainSync(^{
+	goder_onMainSync(^{
 		@autoreleasepool {
 			NSWindow* mw = (__bridge NSWindow*)mainWin;
 			NSView* v = (__bridge NSView*)view;
@@ -135,9 +135,9 @@ static void grf_layoutView(void* mainWin, void* view, int x, int y, int w, int h
 
 // 设置 webview 底色(underPageBackgroundColor 与 layer 背景同时置),
 // 消除边缘发丝缝露出的 WebKit 默认白。
-static void grf_setViewBackground(void* view, double r, double g, double b, double a) {
+static void goder_setViewBackground(void* view, double r, double g, double b, double a) {
 	if (!view) return;
-	grf_onMainSync(^{
+	goder_onMainSync(^{
 		@autoreleasepool {
 			NSView* v = (__bridge NSView*)view;
 			NSColor* c = [NSColor colorWithCalibratedRed:r green:g blue:b alpha:a];
@@ -150,9 +150,9 @@ static void grf_setViewBackground(void* view, double r, double g, double b, doub
 }
 
 // 显示/隐藏内嵌子视图。
-static void grf_setViewHidden(void* view, bool hidden) {
+static void goder_setViewHidden(void* view, bool hidden) {
 	if (!view) return;
-	grf_onMainSync(^{
+	goder_onMainSync(^{
 		@autoreleasepool {
 			((__bridge NSView*)view).hidden = hidden;
 		}
@@ -160,9 +160,9 @@ static void grf_setViewHidden(void* view, bool hidden) {
 }
 
 // 从主窗口移除内嵌子视图并释放创建时多持的 retain。
-static void grf_detachView(void* view) {
+static void goder_detachView(void* view) {
 	if (!view) return;
-	grf_onMainSync(^{
+	goder_onMainSync(^{
 		@autoreleasepool {
 			NSView* v = (__bridge NSView*)view;
 			[v removeFromSuperview];
@@ -183,7 +183,7 @@ import (
 const supported = true
 
 func allowFirstMouseWebviews() {
-	C.grf_allowFirstMouseWebviews()
+	C.goder_allowFirstMouseWebviews()
 }
 
 // createBrowserView 创建共享持久 data store 的 WKWebView,隐藏嵌入
@@ -198,7 +198,7 @@ func createBrowserView(_ *application.App, mainWin unsafe.Pointer, hooks string)
 		ch = C.CString(hooks)
 		defer C.free(unsafe.Pointer(ch))
 	}
-	p := C.grf_createBrowserView(mainWin, ch)
+	p := C.goder_createBrowserView(mainWin, ch)
 	if p == nil {
 		return nil
 	}
@@ -212,25 +212,25 @@ func viewLoadURL(v *view, url string) {
 	}
 	c := C.CString(url)
 	defer C.free(unsafe.Pointer(c))
-	C.grf_viewLoadURL(v.h, c)
+	C.goder_viewLoadURL(v.h, c)
 }
 
 // viewGoBack / viewGoForward 步进视图自身导航历史;viewReload 刷新。
 func viewGoBack(v *view) {
 	if v != nil && v.h != nil {
-		C.grf_viewGoBack(v.h)
+		C.goder_viewGoBack(v.h)
 	}
 }
 
 func viewGoForward(v *view) {
 	if v != nil && v.h != nil {
-		C.grf_viewGoForward(v.h)
+		C.goder_viewGoForward(v.h)
 	}
 }
 
 func viewReload(v *view) {
 	if v != nil && v.h != nil {
-		C.grf_viewReload(v.h)
+		C.goder_viewReload(v.h)
 	}
 }
 
@@ -240,7 +240,7 @@ func layoutChildView(mainWin unsafe.Pointer, v *view, x, y, w, h int) {
 	if mainWin == nil || v == nil || v.h == nil {
 		return
 	}
-	C.grf_layoutView(mainWin, v.h, C.int(x), C.int(y), C.int(w), C.int(h))
+	C.goder_layoutView(mainWin, v.h, C.int(x), C.int(y), C.int(w), C.int(h))
 }
 
 // setViewVisible 显示/隐藏内嵌子视图。
@@ -248,7 +248,7 @@ func setViewVisible(v *view, visible bool) {
 	if v == nil || v.h == nil {
 		return
 	}
-	C.grf_setViewHidden(v.h, C.bool(!visible))
+	C.goder_setViewHidden(v.h, C.bool(!visible))
 }
 
 // setViewBackground 设置视图底色,消除边缘发丝缝露出的 WebKit 默认白。
@@ -260,7 +260,7 @@ func setViewBackground(v *view, css string) {
 	if !ok {
 		return
 	}
-	C.grf_setViewBackground(v.h, C.double(r), C.double(g), C.double(b), C.double(a))
+	C.goder_setViewBackground(v.h, C.double(r), C.double(g), C.double(b), C.double(a))
 }
 
 // closeView 从主窗口移除内嵌子视图并释放嵌入时的 retain。
@@ -268,6 +268,6 @@ func closeView(v *view) {
 	if v == nil || v.h == nil {
 		return
 	}
-	C.grf_detachView(v.h)
+	C.goder_detachView(v.h)
 	v.h = nil
 }

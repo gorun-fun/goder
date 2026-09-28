@@ -481,7 +481,7 @@ func (s *Server) registerBrowserTools() {
 			_ = json.Unmarshal(args, &a)
 			s.bmu.Lock()
 			defer s.bmu.Unlock()
-			v, err := s.browserEval(`(() => { const arr = window.__grfLog ? window.__grfLog.splice(0) : null; return arr; })()`)
+			v, err := s.browserEval(`(() => { const arr = window.__goderLog ? window.__goderLog.splice(0) : null; return arr; })()`)
 			if err != nil {
 				return textErr("%v", err)
 			}
@@ -515,7 +515,7 @@ func (s *Server) registerBrowserTools() {
 			}
 			s.bmu.Lock()
 			defer s.bmu.Unlock()
-			v, err := s.browserEval(`(() => { const arr = window.__grfNet ? window.__grfNet.splice(0) : null; return arr; })()`)
+			v, err := s.browserEval(`(() => { const arr = window.__goderNet ? window.__goderNet.splice(0) : null; return arr; })()`)
 			if err != nil {
 				return textErr("%v", err)
 			}

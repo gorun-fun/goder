@@ -9,8 +9,8 @@ import { theme, controls } from '../../ui/panel';
 import type { AskItem } from '../../core/model/chat-model';
 import type { AskQuestion } from '../../core/api/types';
 
-@customElement('grf-ask-form')
-export class GrfAskForm extends LitElement {
+@customElement('goder-ask-form')
+export class GoderAskForm extends LitElement {
   /** 卡片数据 */
   @property({ type: Object }) item!: AskItem;
   /** 提交回调:(answers | dismiss) */
@@ -26,9 +26,9 @@ export class GrfAskForm extends LitElement {
         display: block;
       }
       .card {
-        border: 1px solid var(--grf-accent);
-        border-radius: var(--grf-radius);
-        background: var(--grf-accent-soft);
+        border: 1px solid var(--goder-accent);
+        border-radius: var(--goder-radius);
+        background: var(--goder-accent-soft);
         padding: 14px 16px;
         margin: 8px 0;
         display: grid;
@@ -51,8 +51,8 @@ export class GrfAskForm extends LitElement {
         display: flex;
         align-items: center;
         gap: 7px;
-        color: var(--grf-accent-text);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-accent-text);
+        font-size: var(--goder-font-size-sm);
         font-weight: 600;
       }
       .banner svg {
@@ -64,13 +64,13 @@ export class GrfAskForm extends LitElement {
         gap: 8px;
       }
       .q .head {
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
         line-height: 1.6;
       }
       .q .head .tag {
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
         margin-left: 6px;
       }
       .opts {
@@ -82,24 +82,24 @@ export class GrfAskForm extends LitElement {
         gap: 10px;
         align-items: flex-start;
         padding: 9px 12px;
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius-sm);
-        background: var(--grf-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius-sm);
+        background: var(--goder-bg-raise);
         cursor: pointer;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         user-select: none;
       }
       /* 选项边框色恒定:悬停/选中只改底色(选中另有指示点着色),
        * 避免选项在鼠标经过时边框跳色 */
       .opt:hover {
-        background: var(--grf-bg-hover);
+        background: var(--goder-bg-hover);
       }
       .opt.sel {
-        background: var(--grf-accent-soft);
+        background: var(--goder-accent-soft);
       }
       .opt input {
         margin-top: 2px;
-        accent-color: var(--grf-accent);
+        accent-color: var(--goder-accent);
       }
       /* 单选:无原生控件,自绘指示点 */
       .opt .dot {
@@ -108,12 +108,12 @@ export class GrfAskForm extends LitElement {
         height: 14px;
         margin-top: 2px;
         border-radius: 50%;
-        border: 1.5px solid var(--grf-text-faint);
+        border: 1.5px solid var(--goder-text-faint);
         box-sizing: border-box;
       }
       .opt.sel .dot {
-        border-color: var(--grf-accent);
-        background: radial-gradient(circle, var(--grf-accent) 0 4px, transparent 4.5px);
+        border-color: var(--goder-accent);
+        background: radial-gradient(circle, var(--goder-accent) 0 4px, transparent 4.5px);
       }
       .opt .t {
         display: grid;
@@ -122,15 +122,15 @@ export class GrfAskForm extends LitElement {
         overflow-wrap: anywhere;
       }
       .opt .d {
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-xs);
       }
       .q textarea {
         width: 100%;
         min-height: 72px;
         resize: vertical;
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
         line-height: 1.6;
       }
       /* 「自定义答案」入口行:样式贴近选项但视觉弱化,区分于常规选项 */
@@ -139,16 +139,16 @@ export class GrfAskForm extends LitElement {
         align-items: center;
         gap: 6px;
         padding: 6px 12px;
-        border: 1px dashed var(--grf-border);
-        border-radius: var(--grf-radius-sm);
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        border: 1px dashed var(--goder-border);
+        border-radius: var(--goder-radius-sm);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
         cursor: pointer;
         user-select: none;
       }
       .other-row:hover {
-        color: var(--grf-text-dim);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text-dim);
+        background: var(--goder-bg-hover);
       }
       .other-row svg {
         width: 12px;
@@ -167,8 +167,8 @@ export class GrfAskForm extends LitElement {
       }
       .actions .hint {
         margin-right: auto;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       /* 已应答/已取消:收成一行灰色文字,点击可展开答案明细 */
       .done {
@@ -176,14 +176,14 @@ export class GrfAskForm extends LitElement {
         align-items: center;
         gap: 6px;
         padding: 2px 2px;
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
         cursor: pointer;
         user-select: none;
         min-width: 0;
       }
       .done:hover {
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
       }
       .done .chev {
         width: 11px;
@@ -206,10 +206,10 @@ export class GrfAskForm extends LitElement {
       }
       .done-detail pre {
         margin: 2px 0 4px 17px;
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.55;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         white-space: pre-wrap;
         word-break: break-word;
       }
@@ -446,6 +446,6 @@ function prettyAnswers(answers?: Record<string, unknown>): string {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-ask-form': GrfAskForm;
+    'goder-ask-form': GoderAskForm;
   }
 }

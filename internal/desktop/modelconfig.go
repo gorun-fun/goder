@@ -203,7 +203,7 @@ func (m *ModelConfig) writable(path string) bool {
 		return false
 	}
 	// 探测文件:建完即删,不在配置目录留下垃圾。
-	f, err := os.CreateTemp(dir, ".grf-write-test")
+	f, err := os.CreateTemp(dir, ".goder-write-test")
 	if err != nil {
 		return false
 	}

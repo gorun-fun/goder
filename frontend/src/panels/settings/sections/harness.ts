@@ -6,8 +6,8 @@ import { sectionSharedCss, SettingsSectionPanel } from './shared';
 import { settingsStore } from '../../../core/settings/settings-store';
 import { inWails } from '../../../host/bridge';
 
-@customElement('grf-settings-harness')
-export class GrfSettingsHarness extends SettingsSectionPanel {
+@customElement('goder-settings-harness')
+export class GoderSettingsHarness extends SettingsSectionPanel {
   private srvTimer?: ReturnType<typeof setInterval>;
 
   static styles = [
@@ -25,8 +25,8 @@ export class GrfSettingsHarness extends SettingsSectionPanel {
         width: auto;
       }
       .srv-line {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
         display: flex;
         align-items: center;
         gap: 8px;
@@ -34,10 +34,10 @@ export class GrfSettingsHarness extends SettingsSectionPanel {
         margin: 2px 0 12px;
       }
       .srv-line .ok {
-        color: var(--grf-success);
+        color: var(--goder-success);
       }
       .srv-line .bad {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
     `,
   ];
@@ -60,7 +60,7 @@ export class GrfSettingsHarness extends SettingsSectionPanel {
     const cfg = settingsStore.cfg;
     if (!inWails()) {
       // 纯 web 态:无托管,允许配置直连地址(注意 gh server 无 CORS 头,
-      // 浏览器直连需经同源反代,如 grf-web-serve 的 /grf-api)。
+      // 浏览器直连需经同源反代,如 goder-web-serve 的 /goder-api)。
       return html`
         <div class="sec">
           <h4>连接</h4>
@@ -82,7 +82,7 @@ export class GrfSettingsHarness extends SettingsSectionPanel {
           </label>
           <div class="hint">
             浏览器模式:配置即时应用到当前页面并镜像到本地。gh server 不带
-            CORS 头,直连需经同源反代(如 grf-web-serve 的 /grf-api)。
+            CORS 头,直连需经同源反代(如 goder-web-serve 的 /goder-api)。
           </div>
         </div>
         ${this.renderGhSettings()}

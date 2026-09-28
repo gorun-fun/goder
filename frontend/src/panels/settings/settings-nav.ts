@@ -1,13 +1,13 @@
-// settings-nav.ts — <grf-settings-nav>:设置视图的左栏导航。
+// settings-nav.ts — <goder-settings-nav>:设置视图的左栏导航。
 // 顶部返回工作区,下方分组列分区:条目一律经 registry.settings 装配
 // (内置「基础设置」「智能体」两组在 builtin-common 注册,三方自定义分区
 // 经 registry.settings.add 注入,缺省归入「扩展」分组)。当前分区由宿主
-// (app-shell)持有,经 section 属性下发,切换时冒泡 grf-settings-section
-// 事件。底部身份区与 <grf-session-list> 一致。
+// (app-shell)持有,经 section 属性下发,切换时冒泡 goder-settings-section
+// 事件。底部身份区与 <goder-session-list> 一致。
 import { css, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { inWails } from '../../host/bridge';
 import { registry, getSettingsConfig, onSettingsChange, type PanelContext, type SettingsSectionDef } from '../../registry/registry';
@@ -22,8 +22,8 @@ const AGENT_GROUP = '智能体';
 /** 三方自定义分区缺省归入的分组标题 */
 const DEFAULT_GROUP = '扩展';
 
-@customElement('grf-settings-nav')
-export class GrfSettingsNav extends GrfPanel {
+@customElement('goder-settings-nav')
+export class GoderSettingsNav extends GoderPanel {
   /** 当前分区(宿主下发) */
   @property({ type: String }) section: SettingsSection = 'appearance';
   /** 与 session-list 对齐:嵌入态宿主自管身份区时可隐藏底部 */
@@ -42,10 +42,10 @@ export class GrfSettingsNav extends GrfPanel {
         flex-direction: column;
         height: 100%;
         min-height: 0;
-        background: var(--grf-bg-raise);
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        background: var(--goder-bg-raise);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
       }
       /* 整行可点的返回条目(与 file-list 一致) */
       .back {
@@ -54,16 +54,16 @@ export class GrfSettingsNav extends GrfPanel {
         align-items: center;
         gap: 6px;
         padding: 9px 12px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         font-weight: 650;
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text-dim);
         cursor: pointer;
         user-select: none;
       }
       .back:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .back svg {
         width: 13px;
@@ -79,8 +79,8 @@ export class GrfSettingsNav extends GrfPanel {
       .title {
         flex: none;
         padding: 8px 12px 2px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         font-weight: 650;
         letter-spacing: 0.4px;
         user-select: none;
@@ -93,19 +93,19 @@ export class GrfSettingsNav extends GrfPanel {
         align-items: center;
         gap: 7px;
         padding: 6px 8px;
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-sm);
         user-select: none;
       }
       .item:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .item.on {
-        background: var(--grf-accent-soft);
-        color: var(--grf-accent-text);
+        background: var(--goder-accent-soft);
+        color: var(--goder-accent-text);
       }
       .item svg {
         width: 14px;
@@ -114,7 +114,7 @@ export class GrfSettingsNav extends GrfPanel {
       }
       .footbar {
         flex: none;
-        border-top: 1px solid var(--grf-border-soft);
+        border-top: 1px solid var(--goder-border-soft);
         padding: 8px 12px;
         display: flex;
         align-items: center;
@@ -144,7 +144,7 @@ export class GrfSettingsNav extends GrfPanel {
     // 渲染死角)
     const list = this.visibleDefs();
     if (list.length && !list.some((d) => d.id === this.section)) {
-      this.fire('grf-settings-section', list[0].id);
+      this.fire('goder-settings-section', list[0].id);
     }
   }
 
@@ -174,7 +174,7 @@ export class GrfSettingsNav extends GrfPanel {
       g[1].push(def);
     }
     return html`
-      <div class="back" title="返回工作区" @click=${() => this.fire('grf-close-settings')}>
+      <div class="back" title="返回工作区" @click=${() => this.fire('goder-close-settings')}>
         ${unsafeHTML(icon.arrowLeft)}
         <span>返回工作区</span>
       </div>
@@ -184,7 +184,7 @@ export class GrfSettingsNav extends GrfPanel {
             <div class="title">${glabel}</div>
             ${items.map(
               (def) => html`
-                <div class="item ${this.section === def.id ? 'on' : ''}" @click=${() => this.fire('grf-settings-section', def.id)}>
+                <div class="item ${this.section === def.id ? 'on' : ''}" @click=${() => this.fire('goder-settings-section', def.id)}>
                   ${unsafeHTML(def.icon ?? icon.settings)}
                   <span>${def.label}</span>
                 </div>
@@ -197,7 +197,7 @@ export class GrfSettingsNav extends GrfPanel {
         ? nothing
         : html`
             <div class="footbar">
-              <grf-user-chip scope=${this.scope}></grf-user-chip>
+              <goder-user-chip scope=${this.scope}></goder-user-chip>
             </div>
           `}
     `;
@@ -206,6 +206,6 @@ export class GrfSettingsNav extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-settings-nav': GrfSettingsNav;
+    'goder-settings-nav': GoderSettingsNav;
   }
 }

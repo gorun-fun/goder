@@ -29,7 +29,7 @@ export function registerBuiltinDesktop(): void {
     icon: icon.gitBranch,
     width: 380,
     visible: (ctx) => ctx.desktop,
-    render: (ctx) => html`<grf-review .cwd=${ctx.store.activeProjectPath() ?? ''}></grf-review>`,
+    render: (ctx) => html`<goder-review .cwd=${ctx.store.activeProjectPath() ?? ''}></goder-review>`,
   });
 
   registry.side.add({
@@ -37,10 +37,10 @@ export function registerBuiltinDesktop(): void {
     label: '终端',
     icon: icon.terminal,
     width: 460,
-    visible: () => inWails() && panelRegistered('grf-terminal'),
+    visible: () => inWails() && panelRegistered('goder-terminal'),
     // 返回 HTMLElement:跨 tab 开关与会话切换保活(shell 维护元素池)
     render: (ctx) => {
-      const el = document.createElement('grf-terminal');
+      const el = document.createElement('goder-terminal');
       el.setAttribute('scope', ctx.scope);
       (el as unknown as { cwd: string }).cwd = ctx.store.activeProjectPath() ?? '';
       return el;
@@ -57,7 +57,7 @@ export function registerBuiltinDesktop(): void {
     // 不出现在右栏手动打开入口 —— 主动打开只会得到空预览,没有意义
     passive: true,
     visible: (ctx) => ctx.desktop,
-    render: (_ctx, key) => html`<grf-file-view .path=${key ?? ''}></grf-file-view>`,
+    render: (_ctx, key) => html`<goder-file-view .path=${key ?? ''}></goder-file-view>`,
     titleFor: (key) => key?.split('/').pop() || '文件',
   });
 
@@ -66,9 +66,9 @@ export function registerBuiltinDesktop(): void {
     id: 'terminal',
     label: '终端',
     icon: icon.terminal,
-    visible: () => inWails() && panelRegistered('grf-terminal'),
+    visible: () => inWails() && panelRegistered('goder-terminal'),
     create: (ctx) => {
-      const el = document.createElement('grf-terminal');
+      const el = document.createElement('goder-terminal');
       el.setAttribute('scope', ctx.scope);
       (el as unknown as { cwd: string }).cwd = ctx.store.activeProjectPath() ?? '';
       return el;

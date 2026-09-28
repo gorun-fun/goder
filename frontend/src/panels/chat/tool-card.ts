@@ -9,8 +9,8 @@ import { fileEditStat, fmtToolDuration, toolDetail, toolFilePath, toolLabel, too
 import { clickCoordOf, isClickTool, parseShotMeta } from '../../core/model/chat-model';
 import type { ToolItem } from '../../core/model/chat-model';
 
-@customElement('grf-tool-card')
-export class GrfToolCard extends LitElement {
+@customElement('goder-tool-card')
+export class GoderToolCard extends LitElement {
   @property({ type: Object }) item!: ToolItem;
   /** 点击类工具的定位底图:它之前最近一张截图(data URL);缺省则不显示「查看」。 */
   @property({ type: Object, attribute: false }) ctxShot?: string;
@@ -38,21 +38,21 @@ export class GrfToolCard extends LitElement {
         padding: 1px 2px;
         cursor: pointer;
         user-select: none;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.7;
         overflow-wrap: anywhere;
       }
       .line:hover {
-        color: var(--grf-text);
+        color: var(--goder-text);
       }
       /* 运行中:整行用主题强调色提示;调用结束回归默认弱化色 */
       .line.running,
       .line.running:hover {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .line.running .subject.file:hover {
-        color: var(--grf-accent);
+        color: var(--goder-accent);
       }
       .lab {
         flex: none;
@@ -60,7 +60,7 @@ export class GrfToolCard extends LitElement {
       .stat {
         display: inline-flex;
         gap: 5px;
-        font-family: var(--grf-mono);
+        font-family: var(--goder-mono);
       }
       .subject {
         flex: 0 1 auto;
@@ -68,7 +68,7 @@ export class GrfToolCard extends LitElement {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-family: var(--grf-mono);
+        font-family: var(--goder-mono);
       }
       /* 文件类工具:文件名可点击,在右栏直接开 tab 打开 */
       .subject.file {
@@ -77,30 +77,30 @@ export class GrfToolCard extends LitElement {
         text-underline-offset: 3px;
       }
       .subject.file:hover {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .time {
         flex: none;
-        color: var(--grf-text-faint);
-        font-family: var(--grf-mono);
+        color: var(--goder-text-faint);
+        font-family: var(--goder-mono);
       }
       .stat {
         display: inline-flex;
         flex: none;
         gap: 5px;
-        font-family: var(--grf-mono);
+        font-family: var(--goder-mono);
       }
       .stat .add {
-        color: var(--grf-success);
+        color: var(--goder-success);
       }
       .stat .del {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
       .chev {
         width: 12px;
         height: 12px;
         flex: none;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         transition: transform 0.15s;
       }
       /* 状态尾注(运行中/失败/已拒绝):固定不收缩,长命令由 subject 截断 */
@@ -113,10 +113,10 @@ export class GrfToolCard extends LitElement {
       }
       .detail {
         margin: 2px 0 4px 18px;
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.6;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         max-height: 240px;
@@ -145,13 +145,13 @@ export class GrfToolCard extends LitElement {
       /* 点击类工具:行内「查看」链接 + 展开的定位图(截图上圈出点击位置) */
       .view {
         flex: none;
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
         text-decoration: underline dotted;
         text-underline-offset: 3px;
         cursor: pointer;
       }
       .view:hover {
-        color: var(--grf-accent);
+        color: var(--goder-accent);
       }
       .spot {
         position: relative;
@@ -167,23 +167,23 @@ export class GrfToolCard extends LitElement {
         position: absolute;
         width: 18px;
         height: 18px;
-        border: 2px solid var(--grf-accent);
+        border: 2px solid var(--goder-accent);
         border-radius: 50%;
         transform: translate(-50%, -50%);
         pointer-events: none;
         /* 呼吸圈:提示这就是本次点击的位置 */
-        animation: grf-ring 1.4s ease-in-out infinite;
+        animation: goder-ring 1.4s ease-in-out infinite;
       }
       .spot .dot {
         position: absolute;
         width: 4px;
         height: 4px;
         border-radius: 50%;
-        background: var(--grf-accent);
+        background: var(--goder-accent);
         transform: translate(-50%, -50%);
         pointer-events: none;
       }
-      @keyframes grf-ring {
+      @keyframes goder-ring {
         0%,
         100% {
           box-shadow: 0 0 0 0 rgb(0 0 0 / 0);
@@ -208,7 +208,7 @@ export class GrfToolCard extends LitElement {
     // 就上屏,不再只剩"运行中"转圈。
     const subject = toolPrimaryText(it.name, it.args);
     // 文件类工具:行内展示文件名(悬停看全路径),点击在右栏开 tab 打开
-    // (grf-open-file 由 app-shell 接管,已开则激活)。
+    // (goder-open-file 由 app-shell 接管,已开则激活)。
     const filePath = toolFilePath(it.name, it.args);
     const fileName = filePath ? (filePath.split('/').pop() || filePath) : undefined;
     // 执行耗时紧跟工具名之后,文件/命令再跟其后。
@@ -231,7 +231,7 @@ export class GrfToolCard extends LitElement {
               @click=${(e: Event) => {
                 e.stopPropagation();
                 this.dispatchEvent(
-                  new CustomEvent('grf-open-file', {
+                  new CustomEvent('goder-open-file', {
                     detail: { path: filePath, name: fileName, rel: fileName },
                     bubbles: true,
                     composed: true,
@@ -326,6 +326,6 @@ export class GrfToolCard extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-tool-card': GrfToolCard;
+    'goder-tool-card': GoderToolCard;
   }
 }

@@ -1,4 +1,4 @@
-// panel.ts — GrfPanel:全部 grf-* 面板的公共基类。
+// panel.ts — GoderPanel:全部 goder-* 面板的公共基类。
 // - scope 属性选择共享数据域(嵌入态多实例互不干扰)
 // - 订阅 scope 版本号驱动重渲染
 // - server/token 属性可直接配置连接(不必走 JS API)
@@ -6,18 +6,18 @@
 import { LitElement, type PropertyValues } from 'lit';
 import { property } from 'lit/decorators.js';
 export { theme, controls } from './theme';
-import { configureScope, acquireScope, releaseScope, type GrfScope } from '../core/store/scope';
+import { configureScope, acquireScope, releaseScope, type GoderScope } from '../core/store/scope';
 import type { Unsubscribe } from '../core/store/emitter';
 import { translate } from '../core/i18n';
 
-export class GrfPanel extends LitElement {
+export class GoderPanel extends LitElement {
   @property({ reflect: true }) scope = 'default';
   /** 直连 gh server 地址(形如 http://127.0.0.1:7400),可选;网关模式下留空走同源 */
   @property({ attribute: 'server' }) serverAttr?: string;
   /** Bearer 令牌,可选;网关(服务端注入令牌)模式下可省 */
   @property({ attribute: 'token' }) tokenAttr?: string;
 
-  protected store!: GrfScope;
+  protected store!: GoderScope;
   private unsub?: Unsubscribe;
   private sessUnsub?: Unsubscribe;
   private watchSid?: string;
@@ -104,7 +104,7 @@ export class GrfPanel extends LitElement {
   }
 }
 
-/** 面板元素是否已注册(如 grf-terminal 仅桌面入口注册;嵌入态据此降级隐藏)。 */
+/** 面板元素是否已注册(如 goder-terminal 仅桌面入口注册;嵌入态据此降级隐藏)。 */
 export function panelRegistered(tag: string): boolean {
   return typeof customElements !== 'undefined' && customElements.get(tag) != null;
 }

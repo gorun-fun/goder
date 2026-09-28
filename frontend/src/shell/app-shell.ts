@@ -1,4 +1,4 @@
-// app-shell.ts — <grf-app-shell>:ZCode 风格桌面布局(左导航 + 黑色圆角
+// app-shell.ts — <goder-app-shell>:ZCode 风格桌面布局(左导航 + 黑色圆角
 // 工作卡)。布局骨架固定,内容全部经 registry(registry/registry.ts)装配:
 // 左栏 = 当前导航视图(nav),中央 = 导航的 center(缺省聊天),右栏/底栏
 // tab 由 chat 面板按 registry.side/bottom 渲染 —— 内置与三方自定义条目
@@ -9,7 +9,7 @@
 import { css, html, nothing, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, panelRegistered } from '../ui/panel';
+import { GoderPanel, theme, panelRegistered } from '../ui/panel';
 import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
 import { isMacDesktop } from '../host/platform';
@@ -29,8 +29,8 @@ import './bottom-dock';
  */
 export type PanelName = 'sessions' | 'chat' | 'sidebar' | 'console';
 
-@customElement('grf-app-shell')
-export class GrfAppShell extends GrfPanel {
+@customElement('goder-app-shell')
+export class GoderAppShell extends GoderPanel {
   /** 启用哪些区域,逗号分隔:sessions,chat,sidebar,console(默认全开) */
   @property({ type: String }) panels = 'sessions,chat,sidebar,console';
   /** 初始展开状态覆写,如 "sidebar=false,console=false,leftWidth=300" */
@@ -46,7 +46,7 @@ export class GrfAppShell extends GrfPanel {
   @state() private showSessions = true;
   /** 当前激活的导航条目 id(默认 'sessions') */
   @state() private activeNavId = 'sessions';
-  /** 各导航条目的壳侧状态(如设置分区;经 grf-nav-state 事件上行) */
+  /** 各导航条目的壳侧状态(如设置分区;经 goder-nav-state 事件上行) */
   @state() private navStates = new Map<string, unknown>();
   /** 会话导航的下钻子视图:项目文件树(null = 会话列表) */
   @state() private filesView: { projectId: string; name: string; path: string } | null = null;
@@ -88,9 +88,9 @@ export class GrfAppShell extends GrfPanel {
         height: 100%;
         min-width: 0;
         min-height: 0;
-        background: var(--grf-bg);
-        color: var(--grf-text);
-        font-family: var(--grf-font);
+        background: var(--goder-bg);
+        color: var(--goder-text);
+        font-family: var(--goder-font);
         overflow: hidden;
         position: relative;
       }
@@ -123,8 +123,8 @@ export class GrfAppShell extends GrfPanel {
         padding: 8px 12px;
         box-sizing: border-box;
         user-select: none;
-        background: var(--grf-bg-raise);
-        border-bottom: 1px solid var(--grf-border-soft);
+        background: var(--goder-bg-raise);
+        border-bottom: 1px solid var(--goder-border-soft);
       }
       .side-top.lights {
         padding-left: 80px;
@@ -135,7 +135,7 @@ export class GrfAppShell extends GrfPanel {
       .side-top .toggler button {
         background: transparent;
         border: none;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         padding: 3px 7px;
         cursor: pointer;
         border-radius: 5px;
@@ -143,13 +143,13 @@ export class GrfAppShell extends GrfPanel {
         align-items: center;
       }
       .side-top .toggler button:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       /* 激活态:与聊天头部 .tg.on 同款,不显示强调色,仅淡背景 */
       .side-top .toggler button.on {
-        color: var(--grf-text);
-        background: var(--grf-bg-active);
+        color: var(--goder-text);
+        background: var(--goder-bg-active);
       }
       .side-top .toggler svg {
         width: 13px;
@@ -174,7 +174,7 @@ export class GrfAppShell extends GrfPanel {
         background: transparent;
       }
       .gutter-v:hover::after {
-        background: var(--grf-border-hover);
+        background: var(--goder-border-hover);
       }
       /* 主体工作面板:左侧贴住左栏(无边距),右侧 5px 边距衬托黑色圆角
        * 卡片;顶部贴住窗口上沿、底部拉通到窗口底 —— 卡片头部与左栏顶行
@@ -201,7 +201,7 @@ export class GrfAppShell extends GrfPanel {
         flex-direction: column;
         min-width: 0;
         min-height: 0;
-        background: var(--grf-card);
+        background: var(--goder-card);
         border-radius: 12px 12px 0 0;
         overflow: hidden;
       }
@@ -248,12 +248,12 @@ export class GrfAppShell extends GrfPanel {
         background: transparent;
         border: none;
         border-radius: 6px;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         cursor: pointer;
       }
       .winctl button:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .winctl button.close:hover {
         background: #e81123;
@@ -271,11 +271,11 @@ export class GrfAppShell extends GrfPanel {
     this.parseLayout();
     if (this.nav) this.activeNavId = this.nav;
     else this.activeNavId = this.firstNavId();
-    this.tdrag = makeTitleDrag('button, grf-update-chip');
+    this.tdrag = makeTitleDrag('button, goder-update-chip');
     // registry 变更(三方增删条目)即时反映到装配
     this.regUnsub = registry.subscribe(() => this.requestUpdate());
     // 嵌入态启动模型守卫(宿主经 embed.configure 的 modelGuard 开启;桌面/
-    // 纯 web 由各自入口 GrfDesktop 守卫,不重复):gh 侧没有任何可用模型
+    // 纯 web 由各自入口 GoderDesktop 守卫,不重复):gh 侧没有任何可用模型
     // 时自动进入设置的模型分区引导完成配置。configure 可能晚于本壳连接
     // (静态声明的壳元素在嵌入库加载瞬间升级),registry 通知兜底唤醒;
     // 守卫只生效一次,用户关掉设置页返回后不再强拉。宿主下发过 model 的
@@ -287,42 +287,42 @@ export class GrfAppShell extends GrfPanel {
       this.sideTopEls.clear();
       this.requestUpdate();
     });
-    // 导航切换:设置进入(session-list 齿轮)/ 返回 / 三方 grf-nav-activate
-    this.addEventListener('grf-open-settings', () => this.navTo('settings'));
-    this.addEventListener('grf-close-settings', () => this.navBack());
-    this.addEventListener('grf-nav-activate', (e: Event) => {
+    // 导航切换:设置进入(session-list 齿轮)/ 返回 / 三方 goder-nav-activate
+    this.addEventListener('goder-open-settings', () => this.navTo('settings'));
+    this.addEventListener('goder-close-settings', () => this.navBack());
+    this.addEventListener('goder-nav-activate', (e: Event) => {
       const id = (e as CustomEvent<string>).detail;
       if (typeof id === 'string') this.navTo(id);
     });
     // 导航视图上抛的壳侧状态(如设置分区)
-    this.addEventListener('grf-nav-state', (e: Event) => {
+    this.addEventListener('goder-nav-state', (e: Event) => {
       const { nav, state } = (e as CustomEvent<{ nav?: string; state: unknown }>).detail ?? {};
       const id = nav ?? this.activeNavId;
       this.navStates = new Map(this.navStates).set(id, state);
     });
     // 内置设置导航的分区切换事件(字符串载荷)映射为 nav state;经 UI
     // 事件总线先问集成方(接管则不变更)
-    this.addEventListener('grf-settings-section', (e: Event) => {
+    this.addEventListener('goder-settings-section', (e: Event) => {
       if (this.uiGate({ type: 'settings-section', section: (e as CustomEvent).detail })) return;
       this.navStates = new Map(this.navStates).set('settings', (e as CustomEvent).detail);
     });
     // 会话导航的下钻:项目文件树(session-list「查看文件」进入 / 返回退出)
-    this.addEventListener('grf-open-files', (e: Event) => {
+    this.addEventListener('goder-open-files', (e: Event) => {
       const view = (e as CustomEvent).detail;
       if (this.uiGate({ type: 'files-view', view })) return;
       this.navTo('sessions'); // navTo 会清空 filesView(下钻随导航切换退出),须先切再设
       this.filesView = view;
     });
-    this.addEventListener('grf-close-files', () => {
+    this.addEventListener('goder-close-files', () => {
       if (this.uiGate({ type: 'files-view', view: null })) return;
       this.filesView = null;
     });
     // 右栏确保展开(file-view html 眼睛开浏览器 tab 时;已开则无变化)
-    this.addEventListener('grf-show-sidebar', () => this.setSidebar(true));
+    this.addEventListener('goder-show-sidebar', () => this.setSidebar(true));
     // 左栏文件树点文件:右栏为该文件开一个独立 tab 预览(已开则激活)。
     // 宿主 fileOpen 钩子优先(embed.configure 的 fileOpen 落点):返回 true
     // = 嵌入方已接管(路由到自己的面板),不再打开内置「文件」tab。
-    this.addEventListener('grf-open-file', (e: Event) => {
+    this.addEventListener('goder-open-file', (e: Event) => {
       const f = (e as CustomEvent).detail as { path: string; name: string; rel?: string };
       this.hostOpenFile(f);
     });
@@ -422,7 +422,7 @@ export class GrfAppShell extends GrfPanel {
     this.filesView = null; // 下钻视图随导航切换退出
   }
 
-  /** 从当前导航返回(经 grf-nav-back 或内置返回键)。 */
+  /** 从当前导航返回(经 goder-nav-back 或内置返回键)。 */
   navBack(): void {
     const def = registry.nav.get(this.activeNavId);
     this.navTo(def?.exitTo ?? this.firstNavId());
@@ -536,7 +536,7 @@ export class GrfAppShell extends GrfPanel {
     this.openSideTab({ defId: 'browser' });
     if (!url) return;
     void this.updateComplete.then(() => {
-      const dock = this.renderRoot.querySelector('grf-side-dock');
+      const dock = this.renderRoot.querySelector('goder-side-dock');
       const b = dock?.panelEl('browser') as { open?(u: string): void } | undefined;
       b?.open?.(url);
     });
@@ -623,17 +623,17 @@ export class GrfAppShell extends GrfPanel {
                   <span class="toggler">
                     <button class="on" title="收起侧栏" @click=${() => this.setSessions(false)}>${unsafeHTML(icon.panelLeft)}</button>
                   </span>
-                  ${ctx.desktop && panelRegistered('grf-update-chip')
-                    ? html`<grf-update-chip></grf-update-chip>`
+                  ${ctx.desktop && panelRegistered('goder-update-chip')
+                    ? html`<goder-update-chip></goder-update-chip>`
                     : nothing}
                   ${getSideTop(this.scope)?.trailing ? html`${this.sideTopEl('trailing')}` : nothing}
                 </div>
                 ${this.filesView && this.activeNavId === 'sessions'
-                  ? html`<grf-file-list
+                  ? html`<goder-file-list
                       scope=${this.scope}
                       root=${this.filesView.path}
                       projName=${this.filesView.name}
-                    ></grf-file-list>`
+                    ></goder-file-list>`
                   : (navDef?.view(ctx, navState) ?? nothing)}
               </div>
               <div class="gutter-v" style="left:${this.leftWidth}px" @pointerdown=${this.onGutterStart}></div>
@@ -642,20 +642,20 @@ export class GrfAppShell extends GrfPanel {
         <div class="center">
           <div
             class="workcard"
-            @grf-toggle-bottom=${() => this.setBottom(!this.showBottom)}
-            @grf-toggle-sidebar=${() => this.setSidebar(!this.showSidebar)}
-            @grf-toggle-sessions=${() => this.setSessions(!this.showSessions)}
-            @grf-side-tab-open=${(e: Event) => this.openSideTab((e as CustomEvent<SideTabInstance>).detail)}
-            @grf-side-tab-close=${(e: Event) => this.closeSideTab((e as CustomEvent<string>).detail)}
-            @grf-side-tab-activate=${(e: Event) => this.activateSideTab((e as CustomEvent<string>).detail)}
-            @grf-open-browser-url=${(e: Event) => this.openBrowserTab((e as CustomEvent<{ url: string }>).detail.url)}
+            @goder-toggle-bottom=${() => this.setBottom(!this.showBottom)}
+            @goder-toggle-sidebar=${() => this.setSidebar(!this.showSidebar)}
+            @goder-toggle-sessions=${() => this.setSessions(!this.showSessions)}
+            @goder-side-tab-open=${(e: Event) => this.openSideTab((e as CustomEvent<SideTabInstance>).detail)}
+            @goder-side-tab-close=${(e: Event) => this.closeSideTab((e as CustomEvent<string>).detail)}
+            @goder-side-tab-activate=${(e: Event) => this.activateSideTab((e as CustomEvent<string>).detail)}
+            @goder-open-browser-url=${(e: Event) => this.openBrowserTab((e as CustomEvent<{ url: string }>).detail.url)}
           >
             <div class="cols">
               <div class="col-main">
                 ${navDef?.center
                   ? (navDef.center(ctx, navState) as ReturnType<typeof html>)
                   : hasChat
-                    ? html`<grf-chat
+                    ? html`<goder-chat
                         scope=${this.scope}
                         flat
                         .bottomToggle=${hasConsole}
@@ -667,19 +667,19 @@ export class GrfAppShell extends GrfPanel {
                         .leftOn=${this.showSessions}
                         .leftLights=${this.nativeLights}
                         .winControls=${this.nativeWinControls}
-                      ></grf-chat>`
+                      ></goder-chat>`
                     : nothing}
                 ${hasConsole
-                  ? html`<grf-bottom-dock scope=${this.scope} .on=${this.showBottom}></grf-bottom-dock>`
+                  ? html`<goder-bottom-dock scope=${this.scope} .on=${this.showBottom}></goder-bottom-dock>`
                   : nothing}
               </div>
               ${hasSidebar
-                ? html`<grf-side-dock
+                ? html`<goder-side-dock
                     scope=${this.scope}
                     .on=${this.showSidebar}
                     .tabs=${this.sideTabs}
                     .activeTab=${this.activeSideTab}
-                  ></grf-side-dock>`
+                  ></goder-side-dock>`
                 : nothing}
             </div>
           </div>
@@ -704,6 +704,6 @@ export class GrfAppShell extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-app-shell': GrfAppShell;
+    'goder-app-shell': GoderAppShell;
   }
 }

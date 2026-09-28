@@ -1,44 +1,60 @@
 // embed.ts — 三方 web 集成入口(嵌入库唯一入口)。
 // 用法 A(声明式):
-//   <grf-app-shell panels="chat,sidebar"></grf-app-shell>
-//   或独立面板:<grf-session-list> / <grf-chat> / <grf-session-detail> / <grf-console>
+//   <goder-app-shell panels="chat,sidebar"></goder-app-shell>
+//   或独立面板:<goder-session-list> / <goder-chat> / <goder-session-detail> / <goder-console>
 // 用法 B(JS 配置 + UI 定制):
-//   import { configure, registry } from 'grf-harness-ui';
-//   configure('myscope', { baseUrl: '/grf-api' });          // 网关模式无需 token
+//   import { configure, registry } from 'goder-ui';
+//   configure('myscope', { baseUrl: '/goder-api' });          // 网关模式无需 token
 //   registry.side.hide('console');                          // 裁剪右栏条目
 //   registry.nav.add({ id: 'help', label: '帮助', view: (ctx) => … }); // 自定义导航
 //   registry.chat.addRenderer({ id: 'mytool', toolName: 'mcp__mine__q', render: … }); // 定制消息
 // 同一 scope 的面板共享数据;不同 scope 互不干扰。
-// 版本:GRF_UI_VERSION 常量(与构建产物同源),升级前可做特性协商。
-export { GrfAppShell } from '../shell/app-shell';
+// 版本:GODER_UI_VERSION 常量(与构建产物同源),升级前可做特性协商。
+export { GoderAppShell } from '../shell/app-shell';
 export type { PanelName } from '../shell/app-shell';
-export { GrfChat } from '../panels/chat/chat-panel';
-export { GrfSessionList } from '../panels/sessions/session-list';
-export { GrfSessionDetail } from '../panels/inspector/session-detail';
-export { GrfConsole } from '../panels/console/console';
-export { GrfReview } from '../panels/inspector/review';
-export { GrfBrowser } from '../panels/inspector/browser';
-export { GrfSettingsNav } from '../panels/settings/settings-nav';
-export { GrfSettingsPage } from '../panels/settings/settings-page';
-export { GrfComposer } from '../panels/chat/composer';
-export { GrfToolCard } from '../panels/chat/tool-card';
-export { GrfAskForm } from '../panels/chat/ask-form';
-export { GrfApprovalCard } from '../panels/chat/approval-card';
+export { GoderChat } from '../panels/chat/chat-panel';
+export { GoderSessionList } from '../panels/sessions/session-list';
+export { GoderSessionDetail } from '../panels/inspector/session-detail';
+export { GoderConsole } from '../panels/console/console';
+export { GoderReview } from '../panels/inspector/review';
+export { GoderBrowser } from '../panels/inspector/browser';
+export { GoderSettingsNav } from '../panels/settings/settings-nav';
+export { GoderSettingsPage } from '../panels/settings/settings-page';
+export { GoderComposer } from '../panels/chat/composer';
+export { GoderToolCard } from '../panels/chat/tool-card';
+export { GoderAskForm } from '../panels/chat/ask-form';
+export { GoderApprovalCard } from '../panels/chat/approval-card';
 
 export { configureScope, getScope, acquireScope, releaseScope, UNGROUPED, savedConn, setSessionDefaults, setUngroupedSessions, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt, setModelNameResolver } from '../core/store/scope';
-export type { GrfScope, ConnectionConfig, AuthConfig } from '../core/store/scope';
+export type { GoderScope, ConnectionConfig, AuthConfig } from '../core/store/scope';
 export type { SendPayload, SendInterceptor, ApprovalRequest, ApprovalDecision, ApprovalHook } from '../core/store/host-config';
 import type { AuthConfig } from '../core/store/scope';
 import type { GrfSessionConfig } from '../core/api/types';
 import type { SendInterceptor, ApprovalHook } from '../core/store/host-config';
 export { settingsStore, ACCENTS } from '../core/settings/settings-store';
 export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settings-store';
-export { GrfClient, GrfApiError } from '../core/api/client';
+export { GoderClient, GoderApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
 // 键值存储注入(嵌入方整体替换 core 的本地持久化落点)
 export { setKeyValueStorage, keyValueStorage, MemoryStorage } from '../core/store/storage';
 export type { KeyValueStorage } from '../core/store/storage';
+// 项目索引持久化注入(桌面态换文件持久化用;默认 localStorage)
+export { setPersistence } from '../core/store/persistence';
+export type { Persistence } from '../core/store/persistence';
+// 测试装具:传输层注入 + 可编程 gh server 假后端(AI 自动化测试数据面,
+// 用法见 docs/integration-testing.md;不注入则一切走真实网络,生产零影响)
+export { setApiFetch, getApiFetch } from '../core/api/fetch';
+export { createScriptedApi, ScriptedApi } from '../core/api/scripted-api';
+export type {
+  RecordedRequest,
+  SendMatcher,
+  ScriptFrame,
+  FailureSpec,
+  SeedConversation,
+  ScenarioName,
+  ScriptedApiState,
+} from '../core/api/scripted-api';
 // 恢复策略注入(流断重试判定/上限/退避)
 export { setRetryPolicy, resetRetryPolicy, getRetryPolicy, defaultRetryPolicy } from '../core/store/retry-policy';
 export type { RetryPolicy } from '../core/store/retry-policy';
@@ -111,8 +127,8 @@ import '../panels/settings/settings-nav';
 import '../panels/settings/settings-page';
 
 /** 嵌入库版本(vite define 注入,源 package.json;未注入时 'dev')。 */
-declare const __GRF_UI_VERSION__: string | undefined;
-export const GRF_UI_VERSION: string = typeof __GRF_UI_VERSION__ === 'string' ? __GRF_UI_VERSION__ : 'dev';
+declare const __GODER_UI_VERSION__: string | undefined;
+export const GODER_UI_VERSION: string = typeof __GODER_UI_VERSION__ === 'string' ? __GODER_UI_VERSION__ : 'dev';
 
 // 嵌入库默认装配通用内置条目(桌面专属条目不进嵌入产物)
 registerBuiltinCommon();

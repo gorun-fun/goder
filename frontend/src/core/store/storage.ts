@@ -30,7 +30,7 @@ const memory = new MemoryStorage();
 function defaultStorage(): KeyValueStorage {
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.getItem('__grf_probe__');
+      localStorage.getItem('__goder_probe__');
       return localStorage;
     }
   } catch {

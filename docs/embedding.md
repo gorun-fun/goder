@@ -8,26 +8,26 @@
 ## 1. 引入
 
 ```html
-<script type="module" src="/path/to/grf-ui.js"></script>
+<script type="module" src="/path/to/goder.js"></script>
 ```
 
-`grf-ui.js` 是自包含 ESM(shadow DOM 样式隔离,不污染宿主样式,也不受
-宿主样式影响 —— 除 `--grf-*` 变量外)。import 即注册全部通用面板与
+`goder.js` 是自包含 ESM(shadow DOM 样式隔离,不污染宿主样式,也不受
+宿主样式影响 —— 除 `--goder-*` 变量外)。import 即注册全部通用面板与
 内置条目。
 
 ## 2. 连接配置
 
 ```js
-import { configure } from '/path/to/grf-ui.js';
+import { configure } from '/path/to/goder.js';
 configure('myscope', {
-  baseUrl: '/grf-api',   // gh server 根地址(不带 /v1);推荐同源网关
+  baseUrl: '/goder-api',   // gh server 根地址(不带 /v1);推荐同源网关
   token: '…',            // 可选:直连 gh server 时的 Bearer 令牌;
                          // 多用户网关模式由服务端注入,留空
   model: 'deepseek/deepseek-chat', // 可选:默认模型;必须 provider/model
                          // 全名(裸名会被按供应商表补全,补不出视同未选、
                          // 走服务端默认 —— gh 只认全名,裸名静默忽略)
   auth: {                // 可选:多用户网关的未登录(401)处置
-    loginUrl: '/grf-api/auth/login', // 跳转登录入口
+    loginUrl: '/goder-api/auth/login', // 跳转登录入口
     // 或 onUnauthorized: (scope) => { … }  // 宿主自定义(设置后不再自动跳转)
   },
   policySelector: false, // 可选:false 隐藏 composer 策略选择器(嵌入方
@@ -97,10 +97,10 @@ configure('myscope', {
 优先级:JS `configure` > 元素属性 > localStorage 记忆值。声明式属性:
 
 ```html
-<grf-chat scope="myscope" server="/grf-api"></grf-chat>
+<goder-chat scope="myscope" server="/goder-api"></goder-chat>
 ```
 
-用户也可在 `<grf-session-list>` 底部的连接区里手动配置(存 localStorage)。
+用户也可在 `<goder-session-list>` 底部的连接区里手动配置(存 localStorage)。
 
 **鉴权模型(重要)**:同源网关模式下,浏览器只需要网关的登录会话
 (cookie 自动携带);每个用户的 gh 令牌由网关在转发时注入,**不下发浏览器**。
@@ -110,25 +110,25 @@ configure('myscope', {
 
 | 元素 | 说明 | 常用属性 |
 |------|------|----------|
-| `<grf-session-list>` | 项目级会话列表:项目分组/新建/重命名/归档;条目蓝点 = 有未查看的完成回合 | `no-connection` 隐藏底部连接配置 |
-| `<grf-chat>` | 聊天:消息流 + 工具卡 + ask 表单 + 审批卡 + 输入框;右栏为 tab 化(条目见 registry.side) | `no-header` `no-composer` |
-| `<grf-session-detail>` | 右栏"详情"面板本体:概览/用量/工具时间线/Todo/元信息 | — |
-| `<grf-review>` | git 审查:分支/领先落后/文件分组 + 行内 diff(依赖桌面能力,纯 web 态显示占位) | `.cwd` |
-| `<grf-browser>` | 内嵌浏览器:地址栏 + iframe,上次访问地址按 scope 记忆 | — |
-| `<grf-console>` | 事件流日志(全部 SSE 事件 + 系统消息) | `filter="all\|events\|problems"` |
-| `<grf-app-shell>` | 上述整套布局(左导航 + 黑色圆角工作卡,可折叠/拖拽分区) | `panels="sessions,chat,sidebar,console"` `layout="sidebar=false"` `nav="sessions"` |
+| `<goder-session-list>` | 项目级会话列表:项目分组/新建/重命名/归档;条目蓝点 = 有未查看的完成回合 | `no-connection` 隐藏底部连接配置 |
+| `<goder-chat>` | 聊天:消息流 + 工具卡 + ask 表单 + 审批卡 + 输入框;右栏为 tab 化(条目见 registry.side) | `no-header` `no-composer` |
+| `<goder-session-detail>` | 右栏"详情"面板本体:概览/用量/工具时间线/Todo/元信息 | — |
+| `<goder-review>` | git 审查:分支/领先落后/文件分组 + 行内 diff(依赖桌面能力,纯 web 态显示占位) | `.cwd` |
+| `<goder-browser>` | 内嵌浏览器:地址栏 + iframe,上次访问地址按 scope 记忆 | — |
+| `<goder-console>` | 事件流日志(全部 SSE 事件 + 系统消息) | `filter="all\|events\|problems"` |
+| `<goder-app-shell>` | 上述整套布局(左导航 + 黑色圆角工作卡,可折叠/拖拽分区) | `panels="sessions,chat,sidebar,console"` `layout="sidebar=false"` `nav="sessions"` |
 
 所有面板公有属性:`scope`(数据域,默认 `default`)、`server`、`token`。
-右栏/底栏 dock 为独立元素(`<grf-side-dock>`/`<grf-bottom-dock>`,由
-`<grf-app-shell>` 装配;宿主自组布局时也可单独使用):`panels` 不含
+右栏/底栏 dock 为独立元素(`<goder-side-dock>`/`<goder-bottom-dock>`,由
+`<goder-app-shell>` 装配;宿主自组布局时也可单独使用):`panels` 不含
 `chat` 时右栏/底栏照常可用(「主区不是对话、侧栏有工具面板」的形态)。
 
 ```js
-import { GRF_UI_VERSION } from '/path/to/grf-ui.js';
-GRF_UI_VERSION; // '0.1.0' —— 产物同源版本常量,升级前可做特性协商
+import { GODER_UI_VERSION } from '/path/to/goder.js';
+GODER_UI_VERSION; // '0.1.0' —— 产物同源版本常量,升级前可做特性协商
 ```
 
-`dist-embed/types/` 下有完整 TypeScript 类型产物(`grf-ui.js` +
+`dist-embed/types/` 下有完整 TypeScript 类型产物(`goder.js` +
 `entries/embed.d.ts` 等依赖闭包),TS 项目按相对路径引用即可获得全部
 `configure` 选项与钩子签名。
 
@@ -154,7 +154,7 @@ registry.side.show('console');   // 恢复
 ### 新增自定义条目
 
 ```js
-import { registry, html } from '/grf-ui.js';
+import { registry, html } from '/goder.js';
 
 // 左栏导航:一个视图 + 可选的中央工作区覆写(缺省 = 聊天)
 registry.nav.add({
@@ -212,7 +212,7 @@ registry.settings.add({
 
 - `render` 返回模板随渲染重建;返回 **HTMLElement 跨分区切换保活**(适合
   有状态控件),页面在 shadow DOM 内、宿主样式进不去 —— 内容用内联样式,
-  颜色可复用会继承穿透的 `--grf-*` 变量
+  颜色可复用会继承穿透的 `--goder-*` 变量
 - `ctx` 为 `PanelContext`(设置视图无会话上下文:`sessionId` 为空、
   `shell` 为 undefined;`desktop` 可用来做形态降级)
 - **覆写内置分区**:同 id 重复 `add` 即整体替换(如 `id: 'appearance'`
@@ -222,13 +222,13 @@ registry.settings.add({
 - `visible(ctx)` 按上下文动态显隐
 
 **PanelContext**(渲染函数入参):`scope`(数据域名)、`store`(该 scope 的
-共享数据域:会话/事件流/连接状态,见类型 `GrfScope`)、`sessionId`(当前
+共享数据域:会话/事件流/连接状态,见类型 `GoderScope`)、`sessionId`(当前
 会话)、`desktop`(是否 wails 桌面态)、`shell`(app-shell 内装配时的布局
 状态:左栏展开/桌面红绿灯/切换回调;独立嵌入为 undefined)。
 
-**切换导航**:`<grf-app-shell>` 提供 `navTo(id)` 方法与 `activeNav` 属性,
-也接受冒泡事件 `grf-nav-activate`(detail = 导航 id)。导航视图可经
-`grf-nav-state`(detail = `{ nav?, state }`)向 shell 上抛状态(内置设置
+**切换导航**:`<goder-app-shell>` 提供 `navTo(id)` 方法与 `activeNav` 属性,
+也接受冒泡事件 `goder-nav-activate`(detail = 导航 id)。导航视图可经
+`goder-nav-state`(detail = `{ nav?, state }`)向 shell 上抛状态(内置设置
 分区即此机制)。
 
 ### 条目的 scope 归属(scopes 字段)
@@ -247,7 +247,7 @@ registry.side.add({ id: 'game', label: '游戏', icon: svg, scopes: ['play'], re
 长什么样」):
 
 ```js
-import { registry, html } from '/path/to/grf-ui.js';
+import { registry, html } from '/path/to/goder.js';
 
 // ① 自家工具的专属卡片:按工具名(字符串或正则)接管 tool 条目渲染
 registry.chat.addRenderer({
@@ -279,12 +279,12 @@ registry 是全局单例:同页所有 scope 实例共享条目定义;数据按 s
 
 ### 身份区注入(左栏底部用户 chip)
 
-`<grf-session-list>` / `<grf-settings-nav>` 底部的身份区统一由
-`<grf-user-chip>` 渲染。自带用户体系(SSO 等)的嵌入方经
+`<goder-session-list>` / `<goder-settings-nav>` 底部的身份区统一由
+`<goder-user-chip>` 渲染。自带用户体系(SSO 等)的嵌入方经
 `configure(scope, { user })` 注入展示名;给出 `panel` 后 chip 可点击,
 在 chip 上方弹出宿主自绘的用户信息面板(资料 / 退出登录等放这里),
 点击面板外部或 Esc 关闭。面板元素在 chip 的 shadow DOM 内渲染,宿主
-样式进不去 —— 面板内容用内联样式,颜色可复用会继承穿透的 `--grf-*`
+样式进不去 —— 面板内容用内联样式,颜色可复用会继承穿透的 `--goder-*`
 变量;返回的 HTMLElement 跨开关保活。`user.panel` 的入参与右栏 tab 同
 为 `PanelContext`(无会话上下文,`sessionId` 为空)。`user.chevron:false`
 去掉 chip 尾部小箭头(默认 true);`user.hit:'content'` 把可点/悬停区域
@@ -306,75 +306,75 @@ DOM 内渲染(宿主样式进不去,样式须内联),跨重渲保活,配置变�
 网页形态经 gh server 的 `/v1/agent/*` 配置 API 读写(需较新版本 gh;
 API Key/MCP Token 掩码——不下发明文,空值=保留)。多用户网关默认按
 用户注入 `GRF_HOME`(`<data>/users/<uid>/grf-home`),配置随登录用户
-完全隔离;`GRF_USER_HOME=0` 关闭,`GRF_SETTINGS_SEED` 可指定用户首启
+完全隔离;`GODER_USER_HOME=0` 关闭,`GODER_SETTINGS_SEED` 可指定用户首启
 播种的初始 settings.json(一次性快照,之后独立)。gh server 过旧或未
 启用隔离时这些分区回落为引导文案;平台不开放管理入口时仍可经
 `configure(scope, { settings: { agentGroup: false } })` 整组隐藏。
 新增自定义分区、覆写/隐藏内置分区见上文「自定义设置分区
 (registry.settings)」。
 
-## 5. 服务端接入:grf-web-serve 网关
+## 5. 服务端接入:goder-web-serve 网关
 
 浏览器不能直连 gh server(无 CORS 头)。两种接法:
 
-1. **同源网关(推荐)**:部署 `cmd/grf-web-serve`(或把同样的逻辑放进你
-   的后端/网关):静态托管前端产物 + `/grf-api` 反代。
+1. **同源网关(推荐)**:部署 `cmd/goder-web-serve`(或把同样的逻辑放进你
+   的后端/网关):静态托管前端产物 + `/goder-api` 反代。
 2. 给 gh server 加 CORS(不推荐,SSE 也要带头,且令牌暴露给浏览器)。
 
-`grf-web-serve` 的核心能力是**多用户隔离:一个用户一个 gh server 进程**
-(独立端口池 17400-18400、独立数据目录 `<GRF_DATA>/users/<uid>/server-data`),
-用户令牌由网关注入。身份模式经 `GRF_IDENTITY` 选择:
+`goder-web-serve` 的核心能力是**多用户隔离:一个用户一个 gh server 进程**
+(独立端口池 17400-18400、独立数据目录 `<GODER_DATA>/users/<uid>/server-data`),
+用户令牌由网关注入。身份模式经 `GODER_IDENTITY` 选择:
 
 ### single(默认,本地联调)
 
-所有人共用一个进程(uid=`local`);配 `GRF_UPSTREAM` 时改为直连外部
+所有人共用一个进程(uid=`local`);配 `GODER_UPSTREAM` 时改为直连外部
 gh server(不托管进程,浏览器携带 token —— 兼容最简部署)。
 
 ```sh
-GRF_DATA=./grf-web-data ADDR=127.0.0.1:7700 go run ./cmd/grf-web-serve
+GODER_DATA=./goder-web-data ADDR=127.0.0.1:7700 go run ./cmd/goder-web-serve
 ```
 
 ### header —— 被三方应用集成(如 game-web)
 
-你的应用完成自己的登录(SSO),由**你的后端**把 `/grf-api` 反代到本网关,
+你的应用完成自己的登录(SSO),由**你的后端**把 `/goder-api` 反代到本网关,
 并注入可信用户头。本网关按头解析用户、路由到该用户专属的 gh 进程。
 
 ```
 浏览器 ──cookie──▶ 三方应用后端(game-web)
-                      │ 反代 /grf-api + 注入 X-GRF-UID: <用户id>
+                      │ 反代 /goder-api + 注入 X-GRF-UID: <用户id>
                       ▼
-                 grf-web-serve(GRF_IDENTITY=header)
+                 goder-web-serve(GODER_IDENTITY=header)
                       │ uid → 独立 gh server(端口池 + 独立数据目录)
                       ▼
                  gh server ×N
 ```
 
 ```sh
-GRF_IDENTITY=header GRF_UID_HEADER=X-GRF-UID ADDR=127.0.0.1:7702 \
-  GRF_DATA=/srv/grf-web GRF_IDLE_TTL=30m go run ./cmd/grf-web-serve
+GODER_IDENTITY=header GODER_UID_HEADER=X-GRF-UID ADDR=127.0.0.1:7702 \
+  GODER_DATA=/srv/goder-web GODER_IDLE_TTL=30m go run ./cmd/goder-web-serve
 ```
 
-自检端点:`GET /grf-api/whoami` 返回当前解析到的用户与后端进程地址;
-`GET /grf-api/healthz` 网关探活;`GET /grf-api/healthz/ready` 就绪探针
+自检端点:`GET /goder-api/whoami` 返回当前解析到的用户与后端进程地址;
+`GET /goder-api/healthz` 网关探活;`GET /goder-api/healthz/ready` 就绪探针
 (gh 二进制可解析;进程按用户懒启动)。
 
-**运维面(可选,`GRF_ADMIN_TOKEN` 开启)**:`GET /grf-api/admin/statuses`
+**运维面(可选,`GODER_ADMIN_TOKEN` 开启)**:`GET /goder-api/admin/statuses`
 返回全部用户进程状态(headless 监控/三方后端的编程入口);
-`POST /grf-api/admin/start?uid=<用户>` 幂等拉起该用户的进程(已在跑则
-原样返回;崩溃冷却中返回 503);`POST /grf-api/admin/stop?uid=<用户>`
-回收指定用户的进程;`POST /grf-api/admin/restart?uid=<用户>` 停止后
+`POST /goder-api/admin/start?uid=<用户>` 幂等拉起该用户的进程(已在跑则
+原样返回;崩溃冷却中返回 503);`POST /goder-api/admin/stop?uid=<用户>`
+回收指定用户的进程;`POST /goder-api/admin/restart?uid=<用户>` 停止后
 拉起(配置变更/进程僵死时用;会换端口,数据目录不变)。鉴权:
-`Authorization: Bearer <GRF_ADMIN_TOKEN>`。
+`Authorization: Bearer <GODER_ADMIN_TOKEN>`。
 
-**webhook(可选,`GRF_WEBHOOK_URL` 开启)**:用户进程生命周期事件
+**webhook(可选,`GODER_WEBHOOK_URL` 开启)**:用户进程生命周期事件
 (`proc.started`/`proc.stopped`/`proc.crashed`)POST 回调给三方后端
 (body 携带 `type/uid/addr?/reason?/ts`;投递尽力而为)。会话完成等
 应用级事件仍走浏览器 SSE 消费。
 
-**其他网关环境变量**:`GRF_CORS_ORIGINS`(逗号分隔 Origin 白名单,
-精确放行 + 允许凭据,优先于 `GRF_CORS` 的通配模式)、`GRF_ACCESS_LOG=1`
-(结构化请求日志)、`GRF_SESSIONS_FILE`(sso 会话文件持久化,重启免
-重登)、`GRF_WEBHOOK_URL`、`GRF_ADMIN_TOKEN`。网关错误已类型化:容量
+**其他网关环境变量**:`GODER_CORS_ORIGINS`(逗号分隔 Origin 白名单,
+精确放行 + 允许凭据,优先于 `GODER_CORS` 的通配模式)、`GODER_ACCESS_LOG=1`
+(结构化请求日志)、`GODER_SESSIONS_FILE`(sso 会话文件持久化,重启免
+重登)、`GODER_WEBHOOK_URL`、`GODER_ADMIN_TOKEN`。网关错误已类型化:容量
 类(用户上限/端口耗尽)429,进程未就绪/启动失败/冷却 503,其余 502。
 
 **安全约束**:header 模式信任请求头,必须保证网关端口只接受来自你后端的
@@ -383,21 +383,21 @@ GRF_IDENTITY=header GRF_UID_HEADER=X-GRF-UID ADDR=127.0.0.1:7702 \
 ### sso —— 独立部署的完整方案
 
 网关自己做 Casdoor OAuth2 授权码登录(参考 game-web 的流程,独立实现、
-无数据库依赖):`/grf-api/auth/login | callback | logout | me`,本地签发
-不透明随机会话(HttpOnly cookie,默认内存表;`GRF_SESSIONS_FILE` 启用
+无数据库依赖):`/goder-api/auth/login | callback | logout | me`,本地签发
+不透明随机会话(HttpOnly cookie,默认内存表;`GODER_SESSIONS_FILE` 启用
 文件持久化,重启免重登,单实例定位)。开发后门 `AUTH_DEV_EMAIL` 仅供
 本地联调。
 
 ```sh
-GRF_IDENTITY=sso \
+GODER_IDENTITY=sso \
   SSO_ENDPOINT=https://sso.example.com \
   SSO_CLIENT_ID=… SSO_CLIENT_SECRET=… \
-  SSO_REDIRECT_URL=https://app.example.com/grf-api/auth/callback \
-  COOKIE_SECURE=1 ADDR=:7700 go run ./cmd/grf-web-serve
+  SSO_REDIRECT_URL=https://app.example.com/goder-api/auth/callback \
+  COOKIE_SECURE=1 ADDR=:7700 go run ./cmd/goder-web-serve
 ```
 
-前端配置未登录跳转:`configure('scope', { baseUrl: '/grf-api',
-auth: { loginUrl: '/grf-api/auth/login' } })`。
+前端配置未登录跳转:`configure('scope', { baseUrl: '/goder-api',
+auth: { loginUrl: '/goder-api/auth/login' } })`。
 
 ### 职责边界(本项目 vs 三方)
 
@@ -415,8 +415,8 @@ auth: { loginUrl: '/grf-api/auth/login' } })`。
 不同 scope 各自独立(各自的连接配置、项目索引、会话)。
 
 ```html
-<grf-session-list scope="ops"></grf-session-list>
-<grf-chat scope="ops"></grf-chat>
+<goder-session-list scope="ops"></goder-session-list>
+<goder-chat scope="ops"></goder-chat>
 ```
 
 scope 的生命周期由面板自动管理:面板挂载时持引用,全部面板断开后
@@ -433,24 +433,26 @@ token)在重建时保留,不受影响。
 
 | 事件 | detail |
 |------|--------|
-| `grf:session-selected` | `{ sessionId }` |
-| `grf:session-archived` | `{ sessionId }` |
+| `goder:session-selected` | `{ sessionId }` |
+| `goder:session-archived` | `{ sessionId }` |
+| `goder:round-completed` | `{ sessionId, ok }` —— 回合终态(成功/失败/中断一律派发,`ok`=正常完成);等流式收口的标准等待点 |
+| `goder:conn-state` | `{ scope, state }` —— 连接态变化(`checking/ok/error/unknown`) |
 
 ```js
-window.addEventListener('grf:session-selected', (e) => {
+window.addEventListener('goder:session-selected', (e) => {
   console.log('选中会话', e.detail.sessionId);
 });
 ```
 
 ## 8. 主题
 
-面板读取 `--grf-*` CSS 变量,在页面 `:root` 覆写:
+面板读取 `--goder-*` CSS 变量,在页面 `:root` 覆写:
 
 ```css
 :root {
-  --grf-bg: #101014;         /* 背景 */
-  --grf-accent: #e05d27;     /* 主色 */
-  --grf-font-size: 14px;     /* 字号 */
+  --goder-bg: #101014;         /* 背景 */
+  --goder-accent: #e05d27;     /* 主色 */
+  --goder-font-size: 14px;     /* 字号 */
   /* 完整清单见 frontend/src/ui/theme.ts 的 theme 块 */
 }
 ```
@@ -468,6 +470,9 @@ window.addEventListener('grf:session-selected', (e) => {
 - **断流自愈**:SSE 中断时客户端按服务器终态对账恢复(看门狗兜底),
   不需要宿主处理
 - **持久化**:项目索引与会话分组存 localStorage(键
-  `grf-ui:<scope>:index`);连接配置存 `grf-ui:<scope>:conn`。宿主可
+  `goder:<scope>:index`);连接配置存 `goder:<scope>:conn`。宿主可
   自行清理这些键做"重置"
-- 本仓库演示页 `frontend/embed-demo.html` 含 registry 裁剪/新增完整示例
+- 本仓库演示页 `frontend/embed-demo.html` 含 registry 裁剪/新增完整示例;
+  测试装具页 `dist-embed/test-harness.html` + `setApiFetch`/
+  `createScriptedApi` 支持 AI 自动化测试零网络驱动全部 UI 流,见
+  `docs/integration-testing.md`

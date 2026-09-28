@@ -1,22 +1,22 @@
-// side-dock.ts — <grf-side-dock>:右栏 dock(tab 行 + 内容元素池)。
+// side-dock.ts — <goder-side-dock>:右栏 dock(tab 行 + 内容元素池)。
 // 从 chat-panel 剥离的通用容器:dock 属于壳层布局、与聊天内容无关,
 // 剥离后「无聊天但保留右栏」的装配(panels="sessions,sidebar")成立。
 // 池化语义与剥离前一致:render 返回 HTMLElement 的条目按 (tab id, 会话)
 // 池化保活(跨 tab 开关与会话切换不销毁,如终端 PTY),shared 条目为
 // scope 级单例(切会话不动,如嵌入方的项目级面板);条目被 hide 后其
 // tab 不再渲染。tab 状态(tabs/active/on)由 app-shell 受控下发,变更经
-// grf-side-tab-open/close/activate 冒泡上抛(UI 事件总线在壳层闸门)。
+// goder-side-tab-open/close/activate 冒泡上抛(UI 事件总线在壳层闸门)。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { PropertyValues } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme } from '../ui/panel';
+import { GoderPanel, theme } from '../ui/panel';
 import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
 import { registry, sideTabId, type PanelContext, type SideTabDef, type SideTabInstance } from '../registry/registry';
 
-@customElement('grf-side-dock')
-export class GrfSideDock extends GrfPanel {
+@customElement('goder-side-dock')
+export class GoderSideDock extends GoderPanel {
   /** 展开态(收起时隐藏,内部 tab 会话保活) */
   @property({ type: Boolean }) on = false;
   /** 已打开的 tab 实例(有序;受控,由 app-shell 维护) */
@@ -53,9 +53,9 @@ export class GrfSideDock extends GrfPanel {
         flex: 0 1 auto;
         max-width: 65%;
         background: transparent;
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
       }
       .gutter-side.off,
       aside.side.off {
@@ -78,10 +78,10 @@ export class GrfSideDock extends GrfPanel {
         content: '';
         position: absolute;
         inset: 0 1.5px;
-        background: var(--grf-border-soft);
+        background: var(--goder-border-soft);
       }
       .gutter-side:hover::after {
-        background: var(--grf-border-hover);
+        background: var(--goder-border-hover);
       }
       /* 拖拽中:禁用右栏内嵌元素的指针事件(尤其浏览器 iframe) */
       :host(.dragging) {
@@ -102,7 +102,7 @@ export class GrfSideDock extends GrfPanel {
         align-items: center;
         gap: 2px;
         padding: 5px 6px 0;
-        border-bottom: 1px solid var(--grf-border);
+        border-bottom: 1px solid var(--goder-border);
         user-select: none;
         min-height: 32px;
         /* 文件 tab(相对路径标题)可能很多/很长:tab 行横向滚动 */
@@ -120,20 +120,20 @@ export class GrfSideDock extends GrfPanel {
         align-items: center;
         gap: 5px;
         padding: 4px 8px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
         border-bottom: 2px solid transparent;
         cursor: pointer;
         border-radius: 4px 4px 0 0;
       }
       .stab:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text);
+        background: var(--goder-bg-hover);
       }
       /* 激活 tab:白字白下划线,不用强调色 */
       .stab.on {
-        color: var(--grf-text);
-        border-bottom-color: var(--grf-text);
+        color: var(--goder-text);
+        border-bottom-color: var(--goder-text);
       }
       .stab svg {
         width: 12px;
@@ -145,7 +145,7 @@ export class GrfSideDock extends GrfPanel {
         border: none;
         background: transparent;
         padding: 0 0 0 2px;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         cursor: pointer;
       }
       .stab .x svg {
@@ -156,10 +156,10 @@ export class GrfSideDock extends GrfPanel {
         display: inline-flex;
       }
       .stab .x:hover {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
       .stab.add {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         border-bottom-color: transparent;
       }
       .side-menu {
@@ -167,10 +167,10 @@ export class GrfSideDock extends GrfPanel {
         top: 100%;
         left: 0;
         z-index: 30;
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        box-shadow: var(--grf-shadow);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        box-shadow: var(--goder-shadow);
         padding: 4px;
         min-width: 160px;
         display: flex;
@@ -182,15 +182,15 @@ export class GrfSideDock extends GrfPanel {
         align-items: center;
         gap: 8px;
         padding: 6px 8px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
-        border-radius: var(--grf-radius-sm);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
         user-select: none;
       }
       .side-menu .mi:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .side-menu .mi svg {
         width: 12px;
@@ -199,7 +199,7 @@ export class GrfSideDock extends GrfPanel {
       }
       .side-menu .mitag {
         margin-left: auto;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         font-size: 10px;
       }
       /* 右栏空态:居中类型入口 */
@@ -213,8 +213,8 @@ export class GrfSideDock extends GrfPanel {
         padding: 20px;
       }
       .side-empty .hint {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       .side-empty .entries {
         display: grid;
@@ -225,19 +225,19 @@ export class GrfSideDock extends GrfPanel {
         align-items: center;
         gap: 9px;
         padding: 8px 14px;
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-sm);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-sm);
         cursor: pointer;
         min-width: 176px;
         justify-content: flex-start;
       }
       .side-empty .entry:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
-        border-color: var(--grf-border-hover);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
+        border-color: var(--goder-border-hover);
       }
       .side-empty .entry svg {
         width: 14px;
@@ -267,10 +267,10 @@ export class GrfSideDock extends GrfPanel {
         min-width: 0;
       }
       /* 内嵌面板融入底色 */
-      .pane > grf-session-detail,
-      .pane > grf-review,
-      .pane > grf-browser,
-      .pane > grf-console {
+      .pane > goder-session-detail,
+      .pane > goder-review,
+      .pane > goder-browser,
+      .pane > goder-console {
         background: transparent;
         border-left: none;
       }
@@ -492,7 +492,7 @@ export class GrfSideDock extends GrfPanel {
           <div class="entries">
             ${openable.map(
               (d) => html`
-                <button class="entry" title=${this.t('打开{label}', { label: d.label })} @click=${() => this.fire('grf-side-tab-open', { defId: d.id } satisfies SideTabInstance)}>
+                <button class="entry" title=${this.t('打开{label}', { label: d.label })} @click=${() => this.fire('goder-side-tab-open', { defId: d.id } satisfies SideTabInstance)}>
                   ${unsafeHTML(d.icon)}
                   <span>${d.label}</span>
                 </button>
@@ -510,7 +510,7 @@ export class GrfSideDock extends GrfPanel {
             const tid = sideTabId(t);
             const label = this.tabLabel(t, defs);
             return html`
-              <span class="stab ${this.activeTab === tid ? 'on' : ''}" title=${label} @click=${() => this.fire('grf-side-tab-activate', tid)}>
+              <span class="stab ${this.activeTab === tid ? 'on' : ''}" title=${label} @click=${() => this.fire('goder-side-tab-activate', tid)}>
                 ${unsafeHTML(def.icon)}
                 <span class="stab-t">${label}</span>
                 <button
@@ -518,7 +518,7 @@ export class GrfSideDock extends GrfPanel {
                   title=${this.t('关闭{label}', { label })}
                   @click=${(e: Event) => {
                     e.stopPropagation();
-                    this.fire('grf-side-tab-close', tid);
+                    this.fire('goder-side-tab-close', tid);
                   }}
                 >
                   ${unsafeHTML(icon.close)}
@@ -537,7 +537,7 @@ export class GrfSideDock extends GrfPanel {
                       class="mi"
                       @click=${() => {
                         this.menuOpen = false;
-                        this.fire('grf-side-tab-open', { defId: d.id } satisfies SideTabInstance);
+                        this.fire('goder-side-tab-open', { defId: d.id } satisfies SideTabInstance);
                       }}
                     >
                       ${unsafeHTML(d.icon)}
@@ -556,6 +556,6 @@ export class GrfSideDock extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-side-dock': GrfSideDock;
+    'goder-side-dock': GoderSideDock;
   }
 }

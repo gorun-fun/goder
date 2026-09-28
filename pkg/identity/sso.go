@@ -1,7 +1,7 @@
 // sso.go — 内置 Casdoor OAuth2 授权码登录(独立部署方案)。流程参考
 // game-web:登录跳 Casdoor,回调换 access_token 取用户信息,本地签发
 // 不透明随机会话令牌经 HttpOnly cookie 传递。无数据库依赖:默认内存
-// 会话表,持久化实现见 file_sessions.go(GRF_SESSIONS_FILE 接线;单实例
+// 会话表,持久化实现见 file_sessions.go(GODER_SESSIONS_FILE 接线;单实例
 // 定位,分布式需自换 SessionStore)。
 package identity
 
@@ -19,12 +19,12 @@ import (
 	"time"
 )
 
-// SSOConfig Casdoor 登录配置(环境变量含义见 cmd/grf-web-serve)。
+// SSOConfig Casdoor 登录配置(环境变量含义见 cmd/goder-web-serve)。
 type SSOConfig struct {
 	Endpoint     string // Casdoor 根地址,如 https://sso.example.com
 	ClientID     string
 	ClientSecret string
-	RedirectURL  string // 回调地址,如 https://app.example.com/grf-api/auth/callback
+	RedirectURL  string // 回调地址,如 https://app.example.com/goder-api/auth/callback
 	Organization string // Casdoor 组织(展示/文档用,userinfo 不依赖)
 	// DevEmail 非空 = 开发后门:/auth/login 不跳 SSO 直接为该邮箱签发会话。
 	// 仅供本地联调,生产必须留空。
@@ -39,8 +39,8 @@ type SSOConfig struct {
 
 // 会话 cookie 名(state 防跨站请求伪冒)。
 const (
-	sessionCookie = "grf_session"
-	stateCookie   = "grf_sso_state"
+	sessionCookie = "goder_session"
+	stateCookie   = "goder_sso_state"
 )
 
 // Session 一条本地会话。

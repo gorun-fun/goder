@@ -30,7 +30,7 @@ export function registerBuiltinCommon(): void {
     label: '会话',
     icon: icon.chat,
     order: 10,
-    view: (ctx) => html`<grf-session-list scope=${ctx.scope}></grf-session-list>`,
+    view: (ctx) => html`<goder-session-list scope=${ctx.scope}></goder-session-list>`,
   });
 
   registry.nav.add({
@@ -39,23 +39,23 @@ export function registerBuiltinCommon(): void {
     icon: icon.settings,
     order: 90,
     exitTo: 'sessions',
-    // 设置分区状态由 settings-nav 冒泡 grf-nav-state 上来,shell 下发回
+    // 设置分区状态由 settings-nav 冒泡 goder-nav-state 上来,shell 下发回
     // view(当前分区高亮)与 center(设置工作面板)
     view: (ctx, state) =>
-      html`<grf-settings-nav
+      html`<goder-settings-nav
         scope=${ctx.scope}
         .section=${(state as SettingsSection) ?? 'appearance'}
-      ></grf-settings-nav>`,
+      ></goder-settings-nav>`,
     center: (ctx, state) =>
-      html`<grf-settings-page
+      html`<goder-settings-page
         scope=${ctx.scope}
         .section=${(state as SettingsSection) ?? 'appearance'}
         .leftToggle=${ctx.shell?.leftOn === false}
         .leftOn=${ctx.shell?.leftOn ?? true}
         .leftLights=${ctx.shell?.desktopLights ?? false}
         .winControls=${ctx.shell?.desktopWinControls ?? false}
-        @grf-toggle-sessions=${() => ctx.shell?.toggleLeft()}
-      ></grf-settings-page>`,
+        @goder-toggle-sessions=${() => ctx.shell?.toggleLeft()}
+      ></goder-settings-page>`,
   });
 
   // ---------- 右栏 tab ----------
@@ -66,19 +66,19 @@ export function registerBuiltinCommon(): void {
     label: '浏览器',
     icon: icon.globe,
     width: 560,
-    render: (ctx) => html`<grf-browser scope=${ctx.scope}></grf-browser>`,
+    render: (ctx) => html`<goder-browser scope=${ctx.scope}></goder-browser>`,
   });
   registry.side.add({
     id: 'detail',
     label: '详情',
     icon: icon.info,
-    render: (ctx) => html`<grf-session-detail scope=${ctx.scope}></grf-session-detail>`,
+    render: (ctx) => html`<goder-session-detail scope=${ctx.scope}></goder-session-detail>`,
   });
   registry.side.add({
     id: 'console',
     label: '事件台',
     icon: icon.activity,
-    render: (ctx) => html`<grf-console scope=${ctx.scope}></grf-console>`,
+    render: (ctx) => html`<goder-console scope=${ctx.scope}></goder-console>`,
   });
 
   // ---------- 设置分区 ----------
@@ -88,26 +88,26 @@ export function registerBuiltinCommon(): void {
   // 覆写内置分区页面)、hide/show 裁剪,与导航/右栏/底栏同一套 API。
   registry.settings.add({
     id: 'appearance', label: '外观', icon: icon.palette, group: '基础设置', order: 10,
-    render: builtinSettingsRender('grf-settings-appearance'),
+    render: builtinSettingsRender('goder-settings-appearance'),
   });
   registry.settings.add({
     id: 'models', label: '模型', icon: icon.brain, group: '基础设置', order: 20, wide: true,
-    render: builtinSettingsRender('grf-settings-models'),
+    render: builtinSettingsRender('goder-settings-models'),
   });
   registry.settings.add({
     id: 'harness', label: 'Harness', icon: icon.settings, group: '智能体', order: 30,
-    render: builtinSettingsRender('grf-settings-harness'),
+    render: builtinSettingsRender('goder-settings-harness'),
   });
   registry.settings.add({
     id: 'plugins', label: '插件', icon: icon.zap, group: '智能体', order: 40,
-    render: builtinSettingsRender('grf-settings-plugins'),
+    render: builtinSettingsRender('goder-settings-plugins'),
   });
   registry.settings.add({
     id: 'mcp', label: 'MCP', icon: icon.db, group: '智能体', order: 50,
-    render: builtinSettingsRender('grf-settings-mcp'),
+    render: builtinSettingsRender('goder-settings-mcp'),
   });
   registry.settings.add({
     id: 'skills', label: '技能', icon: icon.wrench, group: '智能体', order: 60,
-    render: builtinSettingsRender('grf-settings-skills'),
+    render: builtinSettingsRender('goder-settings-skills'),
   });
 }

@@ -1,5 +1,5 @@
 // localserv.go — 本地真实 HTTP 服务器(跨平台核心)。Windows 生产桌面态
-// 与 test-serve 无头测试态共用:静态资产 + /grf-api 反代 + wails HTTP
+// 与 test-serve 无头测试态共用:静态资产 + /goder-api 反代 + wails HTTP
 // transport(/wails/runtime 服务调用与事件)同源供应,页面从该服务器
 // 加载。监听一律仅 127.0.0.1(回环即安全边界;生产背景见
 // localserv_windows.go,测试形态背景见 testserve.go)。

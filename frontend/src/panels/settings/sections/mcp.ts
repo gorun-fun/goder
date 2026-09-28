@@ -10,8 +10,8 @@ import { inWails } from '../../../host/bridge';
 import { icon } from '../../../util/icons';
 import type { PluginDTO } from '../../../host/bridge';
 
-@customElement('grf-settings-mcp')
-export class GrfSettingsMcp extends SettingsSectionPanel {
+@customElement('goder-settings-mcp')
+export class GoderSettingsMcp extends SettingsSectionPanel {
   static styles = [...sectionSharedCss];
 
   connectedCallback(): void {

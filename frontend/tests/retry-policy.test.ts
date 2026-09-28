@@ -1,7 +1,7 @@
 // retry-policy.test.ts — 流恢复策略与 API 错误(重试判定的输入)。
 import { describe, it, expect } from 'vitest';
 import { defaultRetryPolicy, setRetryPolicy, resetRetryPolicy } from '../src/core/store/retry-policy';
-import { GrfApiError } from '../src/core/api/client';
+import { GoderApiError } from '../src/core/api/client';
 
 // ---------- 恢复策略 ----------
 
@@ -25,16 +25,16 @@ describe('RetryPolicy', () => {
   });
 });
 
-// ---------- GrfApiError(重试判定的输入) ----------
+// ---------- GoderApiError(重试判定的输入) ----------
 
-describe('GrfApiError', () => {
+describe('GoderApiError', () => {
   it('携带 status/code', () => {
-    const e = new GrfApiError(401, 'unauthorized', 'x');
+    const e = new GoderApiError(401, 'unauthorized', 'x');
     expect(e.status).toBe(401);
     expect(e.code).toBe('unauthorized');
     expect(e.isUnauthorized()).toBe(true);
     expect(defaultRetryPolicy.isRetryableError(e)).toBe(false);
-    const s = new GrfApiError(0, 'stream_interrupted', 'y');
+    const s = new GoderApiError(0, 'stream_interrupted', 'y');
     expect(defaultRetryPolicy.isRetryableError(s)).toBe(true);
   });
 });

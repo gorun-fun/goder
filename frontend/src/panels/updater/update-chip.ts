@@ -1,4 +1,4 @@
-// update-chip.ts — <grf-update-chip>:左栏顶行的「更新」按钮(有可用更新
+// update-chip.ts — <goder-update-chip>:左栏顶行的「更新」按钮(有可用更新
 // 时出现)与更新对话框(展示更新内容 → 确认 → 自动下载并重启)。
 // 检查节奏:桌面态首个实例挂载即启动 —— 打开即查、每小时复查;状态放
 // 模块级单例,左栏收起导致元素卸载不中断轮询。
@@ -53,8 +53,8 @@ function subscribe(fn: () => void): () => void {
 /**
  * 左栏「更新」按钮 + 更新对话框(桌面专属)。
  */
-@customElement('grf-update-chip')
-export class GrfUpdateChip extends LitElement {
+@customElement('goder-update-chip')
+export class GoderUpdateChip extends LitElement {
   @state() private info: UpdateInfoDTO | null = null;
   @state() private open = false;
   /** 应用中进度(null = 尚未开始应用) */
@@ -77,24 +77,24 @@ export class GrfUpdateChip extends LitElement {
         display: inline-flex;
         align-items: center;
         gap: 5px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-accent-text);
-        background: var(--grf-accent-soft);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-accent-text);
+        background: var(--goder-accent-soft);
         border: 1px solid transparent;
         border-radius: 999px;
         padding: 2px 9px;
         line-height: 1.5;
       }
       .chip:hover:not(:disabled) {
-        background: var(--grf-accent-soft);
-        border-color: var(--grf-accent);
+        background: var(--goder-accent-soft);
+        border-color: var(--goder-accent);
         filter: brightness(1.2);
       }
       .chip .dot {
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: var(--grf-accent);
+        background: var(--goder-accent);
         flex: none;
       }
       .overlay {
@@ -112,15 +112,15 @@ export class GrfUpdateChip extends LitElement {
         display: flex;
         flex-direction: column;
         gap: 12px;
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        box-shadow: var(--grf-shadow);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        box-shadow: var(--goder-shadow);
         padding: 16px 18px;
       }
       .dlg h3 {
         margin: 0;
-        font-size: var(--grf-font-size);
+        font-size: var(--goder-font-size);
         font-weight: 600;
       }
       .comps {
@@ -138,22 +138,22 @@ export class GrfUpdateChip extends LitElement {
         flex: none;
       }
       .comp .ver {
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text-dim);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text-dim);
         word-break: break-all;
       }
       .comp .arrow {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .comp .note {
         margin-top: 6px;
         word-break: break-word;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-sm);
-        background: var(--grf-bg);
-        border: 1px solid var(--grf-border-soft);
-        border-radius: var(--grf-radius-sm);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-sm);
+        background: var(--goder-bg);
+        border: 1px solid var(--goder-border-soft);
+        border-radius: var(--goder-radius-sm);
         padding: 8px 10px;
         max-height: 170px;
         overflow: auto;
@@ -177,27 +177,27 @@ export class GrfUpdateChip extends LitElement {
       }
       .comp .note h1.md-h,
       .comp .note h2.md-h {
-        font-size: var(--grf-font-size);
+        font-size: var(--goder-font-size);
       }
       .comp .note h3.md-h {
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
       }
       .comp .note h4.md-h,
       .comp .note h5.md-h,
       .comp .note h6.md-h {
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
       }
       .comp .note code {
-        font-family: var(--grf-mono);
+        font-family: var(--goder-mono);
         font-size: 0.9em;
-        background: var(--grf-bg-hover);
+        background: var(--goder-bg-hover);
         border-radius: 4px;
         padding: 1px 4px;
       }
       .comp .note pre.md-code {
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border-soft);
-        border-radius: var(--grf-radius-sm);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border-soft);
+        border-radius: var(--goder-radius-sm);
         padding: 6px 8px;
         overflow: auto;
         margin: 0 0 6px;
@@ -205,7 +205,7 @@ export class GrfUpdateChip extends LitElement {
       .comp .note pre.md-code code {
         background: none;
         padding: 0;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.5;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
@@ -219,17 +219,17 @@ export class GrfUpdateChip extends LitElement {
         margin: 1px 0;
       }
       .comp .note a {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .comp .note blockquote.md-quote {
         margin: 0 0 6px;
         padding: 2px 10px;
-        border-left: 3px solid var(--grf-border);
-        color: var(--grf-text-dim);
+        border-left: 3px solid var(--goder-border);
+        color: var(--goder-text-dim);
       }
       .comp .note hr.md-hr {
         border: none;
-        border-top: 1px solid var(--grf-border);
+        border-top: 1px solid var(--goder-border);
         margin: 8px 0;
       }
       .comp .note table {
@@ -238,27 +238,27 @@ export class GrfUpdateChip extends LitElement {
         max-width: 100%;
         border-collapse: collapse;
         margin: 0 0 6px;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
       }
       .comp .note th,
       .comp .note td {
-        border: 1px solid var(--grf-border-soft);
+        border: 1px solid var(--goder-border-soft);
         padding: 3px 7px;
         text-align: left;
         vertical-align: top;
       }
       .comp .note th {
-        background: var(--grf-bg-hover);
+        background: var(--goder-bg-hover);
         font-weight: 650;
         white-space: nowrap;
       }
       .hint {
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
       }
       .err {
-        color: var(--grf-error);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-error);
+        font-size: var(--goder-font-size-sm);
         word-break: break-all;
       }
       .progress {
@@ -269,19 +269,19 @@ export class GrfUpdateChip extends LitElement {
       .progress .line {
         display: flex;
         justify-content: space-between;
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text-dim);
       }
       .progress .bar {
         height: 4px;
         border-radius: 2px;
-        background: var(--grf-bg-active);
+        background: var(--goder-bg-active);
         overflow: hidden;
       }
       .progress .bar i {
         display: block;
         height: 100%;
-        background: var(--grf-accent);
+        background: var(--goder-accent);
         transition: width 0.2s;
       }
       .actions {
@@ -451,6 +451,6 @@ export class GrfUpdateChip extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-update-chip': GrfUpdateChip;
+    'goder-update-chip': GoderUpdateChip;
   }
 }

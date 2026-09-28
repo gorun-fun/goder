@@ -1,25 +1,25 @@
-// settings-page.ts — <grf-settings-page>:设置视图的主体工作面板(黑色
-// 圆角大卡,与 <grf-chat> 同视觉;头部空白区同为窗口拖拽/双击缩放区)。
+// settings-page.ts — <goder-settings-page>:设置视图的主体工作面板(黑色
+// 圆角大卡,与 <goder-chat> 同视觉;头部空白区同为窗口拖拽/双击缩放区)。
 // 只承担壳层:分区标题/已保存提示/滚动画布(wide 分区加宽)与分区
 // render 的装配保活(HTMLElement 池)。分区页面本体一律经
 // registry.settings 的 render 供给 —— 内置六分区是 sections/ 目录的
 // 分区组件(builtin-common 注册时池化),三方自定义分区同通道;同 id
 // 重复 add 可覆写内置分区页面。改动即时生效并自动保存(分区组件提交
-// 后上抛 grf-saved,头部闪「已保存」);桌面态配置落 config.json,外观
+// 后上抛 goder-saved,头部闪「已保存」);桌面态配置落 config.json,外观
 // 镜像 localStorage;左栏导航由 app-shell 提供。
 import { css, html, nothing } from 'lit';
 import type { TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { inWails } from '../../host/bridge';
 import { registry, type PanelContext, type SettingsSectionDef } from '../../registry/registry';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
 import type { SettingsSection } from './settings-nav';
 
-@customElement('grf-settings-page')
-export class GrfSettingsPage extends GrfPanel {
+@customElement('goder-settings-page')
+export class GoderSettingsPage extends GoderPanel {
   /** 当前分区(宿主下发,与左栏导航联动) */
   @property({ type: String }) section: SettingsSection = 'appearance';
   /** 左栏收起时头部左上角显示左边栏开关(展开时开关在左栏顶行) */
@@ -32,7 +32,7 @@ export class GrfSettingsPage extends GrfPanel {
    * (最小化/最大化/关闭)留位 */
   @property({ type: Boolean, attribute: 'win-controls' }) winControls = false;
 
-  /** 自动保存成功的瞬时提示(分区组件上抛 grf-saved 驱动) */
+  /** 自动保存成功的瞬时提示(分区组件上抛 goder-saved 驱动) */
   @state() private savedFlash = false;
   private savedTimer?: ReturnType<typeof setTimeout>;
   /** 分区注册表订阅(三方 add/hide/remove 时重渲;池中失效条目一并清掉) */
@@ -54,12 +54,12 @@ export class GrfSettingsPage extends GrfPanel {
         min-width: 0;
         height: 100%;
         /* 黑色圆角主面板,与聊天卡一致;底部拉通到窗口底 */
-        background: var(--grf-card);
+        background: var(--goder-card);
         border-radius: 12px 12px 0 0;
         overflow: hidden;
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
       }
       header {
         flex: none;
@@ -70,7 +70,7 @@ export class GrfSettingsPage extends GrfPanel {
         height: 40px;
         padding: 0 14px;
         box-sizing: border-box;
-        border-bottom: 1px solid var(--grf-border);
+        border-bottom: 1px solid var(--goder-border);
         user-select: none;
         font-weight: 650;
       }
@@ -85,25 +85,25 @@ export class GrfSettingsPage extends GrfPanel {
       header .tg {
         background: transparent;
         border: none;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         padding: 3px 5px;
         cursor: pointer;
         border-radius: 5px;
       }
       header .tg:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text);
+        background: var(--goder-bg-hover);
       }
       header svg {
         width: 14px;
         height: 14px;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       header .saved {
         margin-left: auto;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         font-weight: 400;
-        color: var(--grf-success);
+        color: var(--goder-success);
         opacity: 0;
         transition: opacity 0.2s;
       }
@@ -128,8 +128,8 @@ export class GrfSettingsPage extends GrfPanel {
         max-width: 880px;
       }
       .hint {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         line-height: 1.7;
       }
     `,
@@ -138,9 +138,9 @@ export class GrfSettingsPage extends GrfPanel {
   connectedCallback(): void {
     super.connectedCallback();
     this.tdrag = makeTitleDrag('button');
-    // 分区组件保存成功后上抛 grf-saved → 头部闪提示(composed 事件,
+    // 分区组件保存成功后上抛 goder-saved → 头部闪提示(composed 事件,
     // 从分区组件的 shadow DOM 冒出)
-    this.addEventListener('grf-saved', () => this.flashSaved());
+    this.addEventListener('goder-saved', () => this.flashSaved());
     this.offRegistry = registry.settings.subscribe(() => {
       for (const [id, entry] of this.customPool) {
         if (registry.settings.get(id) !== entry.def) this.customPool.delete(id);
@@ -178,7 +178,7 @@ export class GrfSettingsPage extends GrfPanel {
         @dblclick=${(e: MouseEvent) => this.tdrag?.onDbl(e)}
       >
         ${this.leftToggle && !this.leftOn
-          ? html`<button class="tg" title="展开会话列表" @click=${() => this.fire('grf-toggle-sessions')}>${unsafeHTML(icon.panelLeft)}</button>`
+          ? html`<button class="tg" title="展开会话列表" @click=${() => this.fire('goder-toggle-sessions')}>${unsafeHTML(icon.panelLeft)}</button>`
           : nothing}
         ${unsafeHTML(ic)}
         <span>${title}</span>
@@ -217,6 +217,6 @@ export class GrfSettingsPage extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-settings-page': GrfSettingsPage;
+    'goder-settings-page': GoderSettingsPage;
   }
 }

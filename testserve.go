@@ -10,17 +10,17 @@
 //     gh 冷启动、goder-console 安装照常执行);macOS 以 Accessory 策略
 //     运行、不占 Dock;
 //   - 处理链:令牌门槛 → /wails/runtime(wails HTTP transport:服务调用)
-//     → /grf-api 反代 + /grf-api/token + 前端静态资产(RootHandler);
+//     → /goder-api 反代 + /goder-api/token + 前端静态资产(RootHandler);
 //   - 事件回传:wails 的事件下发是"Go 侧对每个窗口 ExecJS",无头形态
 //     没有窗口、事件无处可去 —— testTransport(下)实现 WailsEventListener,
 //     wails 在 New() 时自动注册为全局事件监听器,把所有自定义事件
-//     (grf:term-* / grf:console-ui / grf:update-progress)经
+//     (goder:term-* / goder:console-ui / goder:update-progress)经
 //     /test-serve/events SSE 回传;前端 bridge.ts 的 detectDesktopHost
 //     订阅后喂回 window._wails.dispatchWailsEvent(与 wails 官方 server
 //     模式的 custom.js WebSocket 中继同一机制,事件名/负载格式同源);
 //   - 仅监听 127.0.0.1;URL 携带一次性随机令牌(?t=),首次访问种
 //     HttpOnly cookie,后续同源 fetch/SSE/EventSource 自动携带;
-//   - /grf-host-probe 标记端点(免令牌,204):前端据此识别 test-serve
+//   - /goder-host-probe 标记端点(免令牌,204):前端据此识别 test-serve
 //     宿主并启动事件中继(bridge.ts detectDesktopHost);
 //   - /test-serve/guide(需令牌):内嵌的 docs/testing.md 测试指导全文
 //     (响应头带版本/平台元数据),测试文档随二进制分发、无需单独传递;
@@ -124,9 +124,9 @@ func runTestServe(args []string) error {
 	log.Printf("test-serve 就绪(仅 127.0.0.1,退出: Ctrl+C):")
 	log.Printf("  打开:       %s?t=%s", base, token)
 	// Linux 裸 /etc/hosts 环境可能不解析 *.localhost,提供 127.0.0.1 直连
-	// 形式(前端经 /grf-host-probe 探针识别,行为一致)。
+	// 形式(前端经 /goder-host-probe 探针识别,行为一致)。
 	log.Printf("  直连形式:   %s?t=%s", strings.Replace(base, "goder.localhost", "127.0.0.1", 1), token)
-	log.Printf("  探活:       HEAD %sgrf-host-probe → 204", base)
+	log.Printf("  探活:       HEAD %sgoder-host-probe → 204", base)
 	log.Printf("  测试指导:   GET %stest-serve/guide?t=%s", base, token)
 	log.Printf("  优雅退出:   POST %stest-serve/quit?t=%s", base, token)
 
@@ -231,7 +231,7 @@ func (t *testTransport) serveEvents(w http.ResponseWriter, r *http.Request) {
 func testServeHandler(tt *testTransport, token string, quit func(), next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/grf-host-probe":
+		case "/goder-host-probe":
 			// 前端宿主探测标记端点(bridge.ts detectDesktopHost):
 			// 免令牌、零副作用,只回报"这是 goder test-serve 宿主"。
 			w.Header().Set("Cache-Control", "no-store")

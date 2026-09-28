@@ -1,4 +1,4 @@
-// session-list.ts — <grf-session-list>:左栏项目级会话列表。
+// session-list.ts — <goder-session-list>:左栏项目级会话列表。
 // 桌面态顶部多一个「自动化」类别:操作员分组(kind:'operator' 项目,
 // home 下同名目录作工作区,bot 图标),与项目分组同构(可折叠/悬停
 // 新建会话/两段式删除);「项目」小节头随之移入滚动区(sticky)。
@@ -8,14 +8,14 @@
 // 状态点与项目文件夹图标同列居中、标题与项目名左对齐;
 // 会话显示距今相对时间,悬停时时间隐去、露出删除(两段式行内确认,见
 // onDeleteClick);新建项目走原生目录选择(桌面)或内联输入(web)。底部
-// 为身份 chip(grf-user-chip,支持宿主注入)+ 设置入口(进入设置页)。
+// 为身份 chip(goder-user-chip,支持宿主注入)+ 设置入口(进入设置页)。
 // 会话行状态指示:运行中 = 旋转小圆环;等待用户查看(回合完成未读/
 // 等待输入)= 蓝点;默认空闲不显示。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { repeat } from 'lit/directives/repeat.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtRelative } from '../../util/fmt';
 import { UNGROUPED, ungroupedAllowed } from '../../core/store/scope';
@@ -24,8 +24,8 @@ import type { ProjectRecord } from '../../core/store/persistence';
 import { inWails, pickFolder } from '../../host/bridge';
 import './user-chip';
 
-@customElement('grf-session-list')
-export class GrfSessionList extends GrfPanel {
+@customElement('goder-session-list')
+export class GoderSessionList extends GoderPanel {
   /** 隐藏底部连接区(嵌入态由宿主全局配置时) */
   @property({ type: Boolean, attribute: 'no-connection' }) noConnection = false;
 
@@ -55,10 +55,10 @@ export class GrfSessionList extends GrfPanel {
         flex-direction: column;
         height: 100%;
         min-height: 0;
-        background: var(--grf-bg-raise);
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        background: var(--goder-bg-raise);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
       }
       .head {
         flex: none;
@@ -66,12 +66,12 @@ export class GrfSessionList extends GrfPanel {
         display: flex;
         align-items: center;
         gap: 6px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         user-select: none;
       }
       .head .t {
         font-weight: 650;
-        font-size: var(--grf-font-size);
+        font-size: var(--goder-font-size);
         flex: 1;
       }
       .list {
@@ -90,31 +90,31 @@ export class GrfSessionList extends GrfPanel {
         display: flex;
         align-items: center;
         gap: 6px;
-        background: var(--grf-bg-raise);
-        border-bottom: 1px solid var(--grf-border-soft);
+        background: var(--goder-bg-raise);
+        border-bottom: 1px solid var(--goder-border-soft);
         user-select: none;
         font-weight: 650;
-        font-size: var(--grf-font-size);
+        font-size: var(--goder-font-size);
       }
       .sec-head .t {
         flex: 1;
       }
       .hint-empty {
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
         padding: 10px 10px;
         line-height: 1.5;
       }
       /* 操作员分组行:bot 图标常显(折叠以透明度区分),悬停着色 */
       .proj-head.op-group .fic {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         opacity: 0.9;
       }
       .proj-head.op-group:not(.open) .fic {
         opacity: 0.55;
       }
       .proj-head.op-group:hover .fic {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
         opacity: 1;
       }
       .proj {
@@ -125,26 +125,26 @@ export class GrfSessionList extends GrfPanel {
         align-items: center;
         gap: 5px;
         padding: 7px 7px;
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
         user-select: none;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-xs);
         font-weight: 650;
         letter-spacing: 0.3px;
       }
       .proj-head:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .proj-head .fic {
         width: 14px;
         height: 14px;
         flex: none;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .proj-head:hover .fic {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .proj-head .name {
         flex: 1;
@@ -165,21 +165,21 @@ export class GrfSessionList extends GrfPanel {
         padding: 2px 4px;
         border: none;
         background: transparent;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .op button:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-active);
+        color: var(--goder-text);
+        background: var(--goder-bg-active);
       }
       /* 项目删除待确认态:垃圾桶换为红色「确认」文字(与会话删除同语义) */
       .op button.armed {
-        color: var(--grf-error);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-error);
+        font-size: var(--goder-font-size-xs);
         font-weight: 650;
         line-height: 1;
       }
       .op button.armed:hover {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
       .op svg {
         width: 12px;
@@ -195,19 +195,19 @@ export class GrfSessionList extends GrfPanel {
         align-items: center;
         gap: 5px;
         padding: 7px 7px;
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-sm);
         min-width: 0;
       }
       .sess:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .sess.active {
-        background: var(--grf-accent-soft);
-        color: var(--grf-text);
+        background: var(--goder-accent-soft);
+        color: var(--goder-text);
       }
       .sess .t {
         flex: 1;
@@ -230,7 +230,7 @@ export class GrfSessionList extends GrfPanel {
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: var(--grf-accent);
+        background: var(--goder-accent);
         flex: none;
       }
       /* 运行中:旋转小圆环(SVG 弧线,border 画弧在小尺寸下弧长随角度抖动,
@@ -248,8 +248,8 @@ export class GrfSessionList extends GrfPanel {
       }
       .sess .at {
         flex: none;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       /* 悬停:时间隐去,原位露出删除按钮(占位互换,不跳动) */
       .sess .at,
@@ -266,25 +266,25 @@ export class GrfSessionList extends GrfPanel {
         padding: 2px 4px;
         border: none;
         background: transparent;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .sess .del svg {
         width: 12px;
         height: 12px;
       }
       .sess .del:hover {
-        color: var(--grf-error);
-        background: var(--grf-bg-active);
+        color: var(--goder-error);
+        background: var(--goder-bg-active);
       }
       /* 待确认态:垃圾桶换为红色「确认」文字,再次点击才真正删除 */
       .sess .del.armed {
-        color: var(--grf-error);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-error);
+        font-size: var(--goder-font-size-xs);
         font-weight: 650;
         line-height: 1;
       }
       .sess .del.armed:hover {
-        background: var(--grf-bg-active);
+        background: var(--goder-bg-active);
       }
       .sess:hover .at {
         display: none;
@@ -293,12 +293,12 @@ export class GrfSessionList extends GrfPanel {
         display: inline-flex;
       }
       .edit-in {
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         padding: 3px 6px;
       }
       .footbar {
         flex: none;
-        border-top: 1px solid var(--grf-border-soft);
+        border-top: 1px solid var(--goder-border-soft);
         padding: 8px 12px;
         display: flex;
         align-items: center;
@@ -310,14 +310,14 @@ export class GrfSessionList extends GrfPanel {
         padding: 3px 5px;
         border: none;
         background: transparent;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         cursor: pointer;
         border-radius: 5px;
         display: inline-flex;
       }
       .footbar .gear:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text);
+        background: var(--goder-bg-hover);
       }
       .footbar .gear svg {
         width: 14px;
@@ -402,8 +402,8 @@ export class GrfSessionList extends GrfPanel {
         ? nothing
         : html`
             <div class="footbar">
-              <grf-user-chip scope=${this.scope}></grf-user-chip>
-              <button class="gear" title="设置" @click=${() => this.fire('grf-open-settings')}>${unsafeHTML(icon.settings)}</button>
+              <goder-user-chip scope=${this.scope}></goder-user-chip>
+              <button class="gear" title="设置" @click=${() => this.fire('goder-open-settings')}>${unsafeHTML(icon.settings)}</button>
             </div>
           `}
     `;
@@ -448,7 +448,7 @@ export class GrfSessionList extends GrfPanel {
       <div class="proj">
         <div
           class="proj-head ${collapsed ? '' : 'open'} ${operator ? 'op-group' : ''}"
-          style=${activeProj ? 'color:var(--grf-text)' : ''}
+          style=${activeProj ? 'color:var(--goder-text)' : ''}
           title=${tip}
           @click=${() => s.toggleProjectCollapsed(pid)}
         >
@@ -462,7 +462,7 @@ export class GrfSessionList extends GrfPanel {
             ${path && inWails()
               ? html`<button
                   title="查看文件:${path}"
-                  @click=${() => this.fire('grf-open-files', { projectId: pid, name, path })}
+                  @click=${() => this.fire('goder-open-files', { projectId: pid, name, path })}
                 >
                   ${unsafeHTML(icon.folder)}
                 </button>`
@@ -524,13 +524,13 @@ export class GrfSessionList extends GrfPanel {
         <span class="ic">
           ${running
             ? html`<svg class="spin" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="var(--grf-border-hover)" stroke-width="2" />
+                <circle cx="8" cy="8" r="6" fill="none" stroke="var(--goder-border-hover)" stroke-width="2" />
                 <circle
                   cx="8"
                   cy="8"
                   r="6"
                   fill="none"
-                  stroke="var(--grf-accent)"
+                  stroke="var(--goder-accent)"
                   stroke-width="2"
                   stroke-linecap="round"
                   stroke-dasharray="16 38"
@@ -666,6 +666,6 @@ export class GrfSessionList extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-session-list': GrfSessionList;
+    'goder-session-list': GoderSessionList;
   }
 }

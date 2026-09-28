@@ -1,20 +1,20 @@
-// file-list.ts — <grf-file-list>:左栏项目文件树(桌面态,session-list
+// file-list.ts — <goder-file-list>:左栏项目文件树(桌面态,session-list
 // 项目行的「查看文件」进入)。顶部为整行可点的「返回工作区」条目(冒泡
-// grf-close-files 回到会话列表);其下以缩进树展示项目目录:目录行点击
+// goder-close-files 回到会话列表);其下以缩进树展示项目目录:目录行点击
 // 原地展开/折叠(子级懒加载并缓存),不做逐级进入;文件行点击在右栏
-// 打开(grf-open-file,见 app-shell → 右栏「文件」tab)。隐藏条目(.git
+// 打开(goder-open-file,见 app-shell → 右栏「文件」tab)。隐藏条目(.git
 // 等)由 Desktop.ListDir 滤除。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import type { PropertyValues, TemplateResult } from 'lit';
 import { icon } from '../../util/icons';
 import { fmtRelative } from '../../util/fmt';
 import { listDir, type FileEntryDTO } from '../../host/bridge';
 
-@customElement('grf-file-list')
-export class GrfFileList extends GrfPanel {
+@customElement('goder-file-list')
+export class GoderFileList extends GoderPanel {
   /** 项目根目录绝对路径 */
   @property({ type: String }) root = '';
   /** 项目名(树标题行) */
@@ -60,7 +60,7 @@ export class GrfFileList extends GrfPanel {
 
   render() {
     return html`
-      <div class="back" title="返回工作区" @click=${() => this.fire('grf-close-files')}>
+      <div class="back" title="返回工作区" @click=${() => this.fire('goder-close-files')}>
         ${unsafeHTML(icon.arrowLeft)}
         <span>返回工作区</span>
       </div>
@@ -112,7 +112,7 @@ export class GrfFileList extends GrfPanel {
         style="padding-left:${7 + depth * 13}px"
         title=${full}
         @click=${() =>
-          this.fire('grf-open-file', {
+          this.fire('goder-open-file', {
             path: full,
             name: e.name,
             // 项目内相对路径(右栏 tab 与标题展示用)
@@ -136,10 +136,10 @@ export class GrfFileList extends GrfPanel {
         flex-direction: column;
         height: 100%;
         min-height: 0;
-        background: var(--grf-bg-raise);
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        background: var(--goder-bg-raise);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
       }
       /* 整行可点的返回条目 */
       .back {
@@ -148,16 +148,16 @@ export class GrfFileList extends GrfPanel {
         align-items: center;
         gap: 6px;
         padding: 9px 12px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         font-weight: 650;
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text-dim);
         cursor: pointer;
         user-select: none;
       }
       .back:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .back svg {
         width: 13px;
@@ -171,8 +171,8 @@ export class GrfFileList extends GrfPanel {
         padding: 6px 6px 12px;
       }
       .proj {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         font-weight: 650;
         letter-spacing: 0.3px;
         padding: 4px 7px 6px;
@@ -186,9 +186,9 @@ export class GrfFileList extends GrfPanel {
         align-items: center;
         gap: 4px;
         padding: 5px 7px;
-        border-radius: var(--grf-radius-sm);
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-sm);
+        border-radius: var(--goder-radius-sm);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-sm);
         min-width: 0;
         cursor: default;
       }
@@ -200,7 +200,7 @@ export class GrfFileList extends GrfPanel {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .chev svg {
         width: 10px;
@@ -217,7 +217,7 @@ export class GrfFileList extends GrfPanel {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .row .ic svg {
         width: 13px;
@@ -232,33 +232,33 @@ export class GrfFileList extends GrfPanel {
       }
       .row .at {
         flex: none;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       .row.load {
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
         cursor: default;
       }
       .row.dir {
         cursor: pointer;
       }
       .row.dir:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .row.dir:hover .ic {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .row.file {
         cursor: pointer;
       }
       .row.file:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .row.file:hover .ic {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
     `,
   ];
@@ -266,6 +266,6 @@ export class GrfFileList extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-file-list': GrfFileList;
+    'goder-file-list': GoderFileList;
   }
 }

@@ -27,7 +27,7 @@ type Upstream struct {
 
 // ProxyOptions 反代处理器参数。
 type ProxyOptions struct {
-	// Prefix 被剥离的路径前缀(如 /grf-api)。
+	// Prefix 被剥离的路径前缀(如 /goder-api)。
 	Prefix string
 	// Resolve 每请求解析上游;返回错误时以 502 响应。
 	Resolve func(r *http.Request) (Upstream, error)

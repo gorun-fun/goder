@@ -21,8 +21,8 @@ goder 是同一份前端跑多形态的应用。**测试优先级:test-serve(自
 |---|---|---|---|
 | **test-serve**(无头测试态) | `goder test-serve` | 浏览器自动化(playwright 等),**AI 主战场** | 除「原生窗口/webview 专属」外的全部桌面能力:终端面板、配置持久化、gh 托管、文件浏览、git 审查、设置全分区、聊天全流程、自动化操作员 |
 | 桌面 App | 发布版 .app / .exe | 手动 + computer-use 类工具 | 窗口装饰/拖拽缩放、右栏**原生**浏览器面板、原生对话框(目录选择)、自动更新、托盘退出 |
-| web 网关 | `grf-web-serve`(静态 + `/grf-api`) | 浏览器自动化 | 纯 web 行为:localStorage 持久化、agent API 代理路径、多用户网关 |
-| 嵌入库 | `frontend/dist-embed/grf-ui.js` 宿主页 | 浏览器自动化 | 嵌入方 API:registry 装配、换肤、事件总线、共享右栏面板 |
+| web 网关 | `goder-web-serve`(静态 + `/goder-api`) | 浏览器自动化 | 纯 web 行为:localStorage 持久化、agent API 代理路径、多用户网关 |
+| 嵌入库 | `frontend/dist-embed/goder.js` 宿主页 | 浏览器自动化 | 嵌入方 API:registry 装配、换肤、事件总线、共享右栏面板 |
 
 ### 1.1 test-serve 形态说明(重要)
 
@@ -35,14 +35,14 @@ $ goder test-serve --port 7460
 test-serve 就绪(仅 127.0.0.1,退出: Ctrl+C):
   打开:       http://goder.localhost:7460/?t=<随机令牌>
   直连形式:   http://127.0.0.1:7460/?t=<随机令牌>
-  探活:       HEAD http://goder.localhost:7460/grf-host-probe → 204
+  探活:       HEAD http://goder.localhost:7460/goder-host-probe → 204
   优雅退出:   POST http://goder.localhost:7460/test-serve/quit?t=<令牌>
 ```
 
 - **必须用带 `?t=` 令牌的完整 URL 访问**(首次访问种 HttpOnly cookie,
   后续同源请求自动携带;无令牌一律 403)。Linux 上 `*.localhost` 不解析
   时用 127.0.0.1 直连形式,行为一致。
-- 探活等待就绪:`HEAD /grf-host-probe` 返回 204 即可开始。
+- 探活等待就绪:`HEAD /goder-host-probe` 返回 204 即可开始。
 - 收尾用 quit 端点优雅退出(勿直接 kill -9,让 gh 子进程走正常回收)。
 - **保真度差异**(相对桌面 App,详见 §5 平台差异矩阵):
   - 资产加载走本地 HTTP 服务器(与 Windows 生产态同一条路径;
@@ -71,8 +71,8 @@ test-serve 就绪(仅 127.0.0.1,退出: Ctrl+C):
   `evaluate` 读页面状态(如 xterm buffer、store 字段);视觉断言用截图
   (规范见 §2.1)。goder 前端为 Lit + shadow DOM:元素查找需穿透 shadow
   root(`el.shadowRoot.querySelector`),registry 驱动的面板在
-  `grf-app-shell` 内。
-- **终端面板输出断言**:`grf-terminal` 元素持有 `term` 实例,读
+  `goder-app-shell` 内。
+- **终端面板输出断言**:`goder-terminal` 元素持有 `term` 实例,读
   `term.buffer.active.getLine(i).translateToString(true)` 比读 DOM 可靠。
 - **每轮测试前**:重启 test-serve(新令牌、干净进程);需要数据隔离时
   用测试用户账户或先备份 `~/Library/Application Support/goder/`(macOS)
@@ -130,7 +130,7 @@ CSS 边角)仍按 §5.5 在各平台桌面 App 抽查。
 
 - ★ **页面加载**:带令牌 URL 打开后 10s 内出现完整界面:左栏(会话/
   项目列表)、中部聊天区(消息输入框)、顶栏;无白屏、无报错浮层。
-- ★ **gh 冷启动**:`/grf-api/token` 返回 `{"mode":"managed","running":true,...}`;
+- ★ **gh 冷启动**:`/goder-api/token` 返回 `{"mode":"managed","running":true,...}`;
   顶栏模型选择器出现已配置模型;上下文占用指示有值。
 - **无模型守卫**:模型未配置时(空 settings.json),加载后自动跳转
   设置→模型分区引导。
@@ -199,12 +199,12 @@ CSS 边角)仍按 §5.5 在各平台桌面 App 抽查。
 - **MCP**:远程 MCP 条目增删改(url/token/超时);保存后 settings.json
   的 plugins 键结构正确。
 - **技能**:列表(~/.grf/skills)、启用/禁用(SKILL.md ↔ .disabled)、
-  新建/编辑/删除、从 URL 安装;内置技能 grf-auto 存在且不可删/编辑。
+  新建/编辑/删除、从 URL 安装;内置技能 goder-auto 存在且不可删/编辑。
 - **设置导航**:分区导航与分组(基础设置/智能体)正确;返回会话入口。
 
 ### 3.6 桌面托管与更新(test-serve 可测前者)
 
-- **gh 生命周期**:设置→Harness 停止后 `/grf-api` 断连(聊天报连接
+- **gh 生命周期**:设置→Harness 停止后 `/goder-api` 断连(聊天报连接
   错误而非卡死);启动后恢复;test-serve 重启后收养既有 gh 实例
   (pid 不变)。
 - **更新检查**:设置/左栏更新入口触发检查 → 显示 goder 与 gh 两组件的
@@ -216,12 +216,12 @@ CSS 边角)仍按 §5.5 在各平台桌面 App 抽查。
 - **操作员类别**:左栏「自动化」类别仅桌面态显示;「添加操作员」在
   主目录建同名工作区目录。
 - **操作员会话**:新建操作员会话 → 首条消息自动注入 system_prompt
-  (含 grf-auto 技能全文)→ 对话正常。
-- **任务沉淀**:会话中输出 `<grf-task>` 块 → 聊天区渲染任务卡 →
+  (含 goder-auto 技能全文)→ 对话正常。
+- **任务沉淀**:会话中输出 `<goder-task>` 块 → 聊天区渲染任务卡 →
   保存进 `index.automation`(刷新后仍在;migrateIndex 不清空)。
 - **执行入口**:状态弹层(status-pop)出现自动化任务入口 → 点击
   在该操作员下新建 run 变体会话。
-- **技能沉淀**:run 会话成功跑通后输出 `<grf-skill>` 块 → 渲染技能
+- **技能沉淀**:run 会话成功跑通后输出 `<goder-skill>` 块 → 渲染技能
   保存卡 → 保存落 `~/.grf/skills/<名>/SKILL.md`(test-serve 可测;
   web 态卡片禁用保存)。
 
@@ -233,7 +233,7 @@ CSS 边角)仍按 §5.5 在各平台桌面 App 抽查。
 - `goder_terminal_*`:新建/输入/增量读缓冲,与手动终端行为一致。
 - `goder_browser_*`:导航/快照 ref 机制/点击输入/console 与网络捕获/
   截图(快照合成事件无 isTrusted,依赖可信事件的页面行为差异属预期)。
-- `goder_ui_*`:界面操作经 `grf:console-ui` 事件下发,shell 映射执行
+- `goder_ui_*`:界面操作经 `goder:console-ui` 事件下发,shell 映射执行
   (如切会话/开面板);`goder_ui_state` 能读到界面状态 JSON。
 
 ### 3.9 视觉一致性专项(UI 表现 × 功能一致)
@@ -286,31 +286,35 @@ CSS 边角)仍按 §5.5 在各平台桌面 App 抽查。
 
 - 宿主页无样式泄漏:宿主 CSS 不影响面板、面板样式不泄漏到宿主
   (双向隔离各验一例)。
-- 换肤:改 `--grf-*` 变量前后截图对比,所有面板跟随变化。
+- 换肤:改 `--goder-*` 变量前后截图对比,所有面板跟随变化。
 
 ## 4. web 与嵌入形态专项
 
-### 4.1 web 网关(grf-web-serve)
+### 4.1 web 网关(goder-web-serve)
 
 - `./build.sh web` 起服务后:登录(按身份模式)、项目索引存
   **localStorage**(刷新保留;与桌面文件持久化互不干扰)。
-- `/grf-api` 代理链路:会话/消息/模型配置(agent API 路径,密钥明文
+- `/goder-api` 代理链路:会话/消息/模型配置(agent API 路径,密钥明文
   不下发,`hasKey` 语义正确)。
 - **多用户隔离**(header/sso 模式):两用户各自独立 gh 进程
-  (GRF_DATA/users/<uid>/),数据互不可见;端口池懒启动、空闲回收。
+  (GODER_DATA/users/<uid>/),数据互不可见;端口池懒启动、空闲回收。
 - 桌面专属入口全部隐藏且无报错(终端/审查/文件预览/自动化类别/更新)。
 
 ### 4.2 嵌入库
 
-- 宿主页加载 `frontend/dist-embed/grf-ui.js`(ESM、零外部依赖):
+- 宿主页加载 `frontend/dist-embed/goder.js`(ESM、零外部依赖):
   页面正常渲染、shadow DOM 样式自隔离(宿主 CSS 不影响面板)。
-- **换肤**:仅经 `--grf-*` CSS 变量生效。
+- **换肤**:仅经 `--goder-*` CSS 变量生效。
 - **registry API**:hide/show/add/remove 四区条目均生效;自定义导航/
   右栏/底栏/设置分区可注册;`shared` 右栏面板跨会话共享。
 - **事件总线**:`uiEvents`(壳层页面变更可接管/放行)、`newProject`
   (嵌入方接管新建项目)、`setProjectPath`(对账校正项目路径)。
 - **默认提示词**:项目 defaults 的 `system_prompt` 与 `default_skill`
   经 `grf:session` 透传注入。
+- **测试装具**:`dist-embed/test-harness.html`(fake 模式)打开即测:
+  12 个场景按钮、10 个扩展点开关、`window.goderKit` 快照/脚本/请求;
+  `goder:round-completed`/`goder:conn-state` 事件可等待断言。接入方视角
+  的完整指导见 `docs/integration-testing.md`。
 - 细节与职责边界表见 `docs/embedding.md` 第 5 节。
 
 ## 5. 平台差异矩阵(差异化测试)
@@ -322,7 +326,7 @@ CSS 边角)仍按 §5.5 在各平台桌面 App 抽查。
 | # | 差异点 | macOS | Windows | Linux | 测试方式 |
 |---|---|---|---|---|---|
 | 1 | **资产加载路径** | wails 资产服务(`wails:` scheme,支持流式) | 本地 HTTP 服务器(`goder.localhost`,绕过 WebView2 响应缓冲) | 同 macOS(WebKitGTK) | 桌面 App:发消息观察**流式逐段渲染**(非回合结束一次性出全文);test-serve 形态三平台同走本地 HTTP 路径 |
-| 2 | **右栏浏览器面板** | 自建 WKWebView 子视图;eval 走 callAsyncJavaScript 回调 | WebView2 窗口重父级子窗;eval 走 fetch 回报 `/grf-eval-report` | 不支持 → iframe 回退 | 桌面 App:导航、console 捕获、网络捕获、截图各过一遍;eval 信封格式两边对拍(改格式必须两边同步,见 `internal/browser/eval.go` 头注释) |
+| 2 | **右栏浏览器面板** | 自建 WKWebView 子视图;eval 走 callAsyncJavaScript 回调 | WebView2 窗口重父级子窗;eval 走 fetch 回报 `/goder-eval-report` | 不支持 → iframe 回退 | 桌面 App:导航、console 捕获、网络捕获、截图各过一遍;eval 信封格式两边对拍(改格式必须两边同步,见 `internal/browser/eval.go` 头注释) |
 | 3 | **窗口装饰** | 隐藏标题栏留红绿灯 | 无边框 + 前端自绘 `.winctl` | 无边框 + 自绘 | 桌面 App:最小化/最大化/关闭、拖拽、双击缩放、边缘缩放 |
 | 4 | **终端 PTY** | forkpty | ConPTY | forkpty | test-serve 三平台各跑 §3.4 终端用例(建 PTY/回显/退出/多会话) |
 | 5 | **WebView 引擎** | WKWebView(JavaScriptCore) | WebView2(V8/Blink) | WebKitGTK | 引擎级回归:聊天 SSE 流式、markdown 渲染、shadow DOM 布局;发现引擎差异缺陷标 P2+ |
@@ -333,7 +337,7 @@ Windows 下 `*.localhost` 内建解析;Linux 若不解析用 127.0.0.1 直连形
 
 ## 6. 双形态不变量(结构性检查)
 
-- **嵌入产物零外部依赖**:`frontend/dist-embed/grf-ui.js` 不含
+- **嵌入产物零外部依赖**:`frontend/dist-embed/goder.js` 不含
   `@wailsio/runtime` import、无外部 CDN 引用。
 - **桌面专属模块不进嵌入产物**:terminal/review/file-view 不出现在
   dist-embed。

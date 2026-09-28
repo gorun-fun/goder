@@ -1,4 +1,4 @@
-// status-pop.ts — <grf-status-pop>:聊天列右上角状态浮窗。
+// status-pop.ts — <goder-status-pop>:聊天列右上角状态浮窗。
 // 自动化任务库(置顶,点击任务即在所属操作员下新建执行会话)、当前项目
 // git 概览与模型 todo 任务 —— 有内容才显示对应区块,都没有则整框不渲染;
 // 默认收起为单行,用户手动展开/收起的状态跨会话持久化(localStorage);
@@ -8,13 +8,13 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import type { GitStatusDTO } from '../../host/bridge';
 import type { AutomationTask } from '../../core/store/persistence';
 
-@customElement('grf-status-pop')
-export class GrfStatusPop extends GrfPanel {
+@customElement('goder-status-pop')
+export class GoderStatusPop extends GoderPanel {
   /** 当前项目 git 状态(null = 未取到/不适用) */
   @property({ type: Object }) git: GitStatusDTO | null = null;
   /** 聊天列过窄:强制单行,避免盖住对话内容 */
@@ -65,10 +65,10 @@ export class GrfStatusPop extends GrfPanel {
         max-width: calc(100% - 20px);
         max-height: min(440px, 72%);
         overflow-y: auto;
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        box-shadow: var(--grf-shadow);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        box-shadow: var(--goder-shadow);
         display: flex;
         flex-direction: column;
       }
@@ -78,15 +78,15 @@ export class GrfStatusPop extends GrfPanel {
         cursor: pointer;
       }
       .status-pop.collapsed:hover {
-        border-color: var(--grf-border-hover);
+        border-color: var(--goder-border-hover);
       }
       .sp-line {
         display: flex;
         align-items: center;
         gap: 10px;
         padding: 5px 6px 5px 12px;
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text-dim);
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
@@ -95,14 +95,14 @@ export class GrfStatusPop extends GrfPanel {
         padding: 3px 6px;
         border: none;
         background: transparent;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         cursor: pointer;
         border-radius: 5px;
         display: inline-flex;
       }
       .sp-fold:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text);
+        background: var(--goder-bg-hover);
       }
       .sp-fold svg {
         width: 13px;
@@ -119,22 +119,22 @@ export class GrfStatusPop extends GrfPanel {
         font-variant-numeric: tabular-nums;
       }
       .sp-diff .add {
-        color: var(--grf-success);
+        color: var(--goder-success);
       }
       .sp-diff .del {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
       .sp-sec {
         flex: none;
         padding: 9px 12px 7px;
       }
       .sp-sec + .sp-sec {
-        border-top: 1px solid var(--grf-border-soft);
+        border-top: 1px solid var(--goder-border-soft);
       }
       .sp-sec h4 {
         margin: 0 0 8px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         font-weight: 650;
         letter-spacing: 0.4px;
         text-transform: uppercase;
@@ -148,7 +148,7 @@ export class GrfStatusPop extends GrfPanel {
         flex: none;
       }
       .sp-sec .sp-cnt {
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         font-variant-numeric: tabular-nums;
       }
       /* 缩放按钮顶到区块标题行最右 */
@@ -159,35 +159,35 @@ export class GrfStatusPop extends GrfPanel {
         display: grid;
         grid-template-columns: auto 1fr;
         gap: 7px 12px;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
       }
       .sp-kv .k {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         white-space: nowrap;
       }
       .sp-kv .v {
-        color: var(--grf-text);
+        color: var(--goder-text);
         text-align: right;
         font-variant-numeric: tabular-nums;
         overflow-wrap: anywhere;
       }
       /* 目标行:阶段着色(working=蓝 / complete=绿 / blocked=红 / paused=灰) */
       .sp-goal {
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text);
         line-height: 1.55;
         overflow-wrap: anywhere;
         padding: 2px 0;
       }
       .sp-goal.complete {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         text-decoration: line-through;
       }
       .sp-goal.blocked {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
       .sp-goal.paused {
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
       }
       /* todo 行:圆点着色区分状态(completed=绿 / in_progress=蓝 / 其余空心) */
       .sp-todo {
@@ -195,9 +195,9 @@ export class GrfStatusPop extends GrfPanel {
         gap: 7px;
         align-items: baseline;
         padding: 4px 0;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         line-height: 1.5;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
       }
       .sp-todo .sp-dot {
         flex: none;
@@ -205,23 +205,23 @@ export class GrfStatusPop extends GrfPanel {
         height: 7px;
         margin-top: 4px;
         border-radius: 50%;
-        border: 1.5px solid var(--grf-text-faint);
+        border: 1.5px solid var(--goder-text-faint);
         box-sizing: border-box;
       }
       .sp-todo.completed .sp-dot {
-        background: var(--grf-success);
-        border-color: var(--grf-success);
+        background: var(--goder-success);
+        border-color: var(--goder-success);
       }
       .sp-todo.completed .tx {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         text-decoration: line-through;
       }
       .sp-todo.in_progress .sp-dot {
-        background: var(--grf-accent);
-        border-color: var(--grf-accent);
+        background: var(--goder-accent);
+        border-color: var(--goder-accent);
       }
       .sp-todo.in_progress .tx {
-        color: var(--grf-text);
+        color: var(--goder-text);
       }
       /* 自动化任务行:整行可点执行;运行中转圈、图标着色;悬停时操作员
        * 名隐去、原位露出删除按钮(与会话行同款占位互换) */
@@ -230,22 +230,22 @@ export class GrfStatusPop extends GrfPanel {
         align-items: center;
         gap: 8px;
         padding: 5px 6px 5px 2px;
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-sm);
         line-height: 1.4;
       }
       .sp-task:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .sp-task.running {
-        color: var(--grf-text);
+        color: var(--goder-text);
       }
       .sp-task.dead {
         cursor: default;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .sp-task .sp-tic {
         flex: none;
@@ -254,10 +254,10 @@ export class GrfStatusPop extends GrfPanel {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .sp-task:hover .sp-tic {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .sp-task .sp-tic svg {
         width: 13px;
@@ -286,8 +286,8 @@ export class GrfStatusPop extends GrfPanel {
         flex: none;
       }
       .sp-task .sp-towner {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         text-align: right;
         white-space: nowrap;
         overflow: hidden;
@@ -299,19 +299,19 @@ export class GrfStatusPop extends GrfPanel {
         padding: 2px 4px;
         border: none;
         background: transparent;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .sp-task .sp-tdel svg {
         width: 12px;
         height: 12px;
       }
       .sp-task .sp-tdel:hover {
-        color: var(--grf-error);
-        background: var(--grf-bg-active);
+        color: var(--goder-error);
+        background: var(--goder-bg-active);
       }
       .sp-task .sp-tdel.armed {
-        color: var(--grf-error);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-error);
+        font-size: var(--goder-font-size-xs);
         font-weight: 650;
         line-height: 1;
       }
@@ -458,13 +458,13 @@ export class GrfStatusPop extends GrfPanel {
         <span class="sp-tic">
           ${running
             ? html`<svg class="spin" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="var(--grf-border-hover)" stroke-width="2" />
+                <circle cx="8" cy="8" r="6" fill="none" stroke="var(--goder-border-hover)" stroke-width="2" />
                 <circle
                   cx="8"
                   cy="8"
                   r="6"
                   fill="none"
-                  stroke="var(--grf-accent)"
+                  stroke="var(--goder-accent)"
                   stroke-width="2"
                   stroke-linecap="round"
                   stroke-dasharray="16 38"
@@ -528,12 +528,12 @@ export class GrfStatusPop extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-status-pop': GrfStatusPop;
+    'goder-status-pop': GoderStatusPop;
   }
 }
 
 /** 浮窗展开状态的 localStorage 持久化(纯 UI 偏好,不入项目索引) */
-const OPEN_KEY = 'grf-ui:status-pop:open';
+const OPEN_KEY = 'goder:status-pop:open';
 function loadOpen(): boolean {
   try {
     return localStorage.getItem(OPEN_KEY) === '1';

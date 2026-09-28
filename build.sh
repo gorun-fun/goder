@@ -2,8 +2,8 @@
 # build.sh — goder 构建脚本。
 #   ./build.sh            构建前端 + wails 桌面二进制(./goder)
 #   ./build.sh app        组装 goder.app(macOS .app 包)
-#   ./build.sh embed      仅构建三方嵌入库(frontend/dist-embed/grf-ui.js)
-#   ./build.sh web        构建 + 启动纯 web 形态(grf-web-serve,联调用)
+#   ./build.sh embed      仅构建三方嵌入库(frontend/dist-embed/goder.js)
+#   ./build.sh web        构建 + 启动纯 web 形态(goder-web-serve,联调用)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -13,14 +13,16 @@ echo "==> 前端构建(app + embed 库)"
 
 case "${1:-}" in
   embed)
-    echo "==> 嵌入库产物: frontend/dist-embed/grf-ui.js"
+    # 测试装具页随嵌入产物分发(纯静态,只依赖同目录 goder.js)
+    cp frontend/test-harness.html frontend/dist-embed/test-harness.html
+    echo "==> 嵌入库产物: frontend/dist-embed/goder.js + test-harness.html"
     exit 0
     ;;
   web)
-    echo "==> 启动纯 web 形态(静态 + /grf-api 代理)"
-    GRF_UPSTREAM="${GRF_UPSTREAM:-http://127.0.0.1:7400}" \
+    echo "==> 启动纯 web 形态(静态 + /goder-api 代理)"
+    GODER_UPSTREAM="${GODER_UPSTREAM:-http://127.0.0.1:7400}" \
     ADDR="${ADDR:-127.0.0.1:7700}" \
-    go run ./cmd/grf-web-serve
+    go run ./cmd/goder-web-serve
     exit 0
     ;;
 esac
@@ -98,10 +100,10 @@ if [ "${1:-}" = "app" ]; then
   # Info.plist(规则与自动推算见 scripts/version.sh,CI 同源)
   echo "==> 版本: $VERSION"
   sed -e "s/0\.1\.0/${VERSION}/g" build/darwin/Info.plist > "$APP/Contents/Info.plist"
-  # 签名:优先 GRF_SIGN_IDENTITY(或本机 login 钥匙串里的 "Goder Dev" 自签
+  # 签名:优先 GODER_SIGN_IDENTITY(或本机 login 钥匙串里的 "Goder Dev" 自签
   # 证书),最后回退 adhoc。adhoc 的 TCC 授权按 cdhash 记账,每次重编都会
   # 重新弹「屏幕录制/辅助功能」权限;固定证书签名则跨构建保持授权稳定。
-  SIGN_ID="${GRF_SIGN_IDENTITY:-}"
+  SIGN_ID="${GODER_SIGN_IDENTITY:-}"
   if [ -z "$SIGN_ID" ] && security find-identity -v -p codesigning 2>/dev/null \
       | grep -q '"Goder Dev"'; then
     SIGN_ID="Goder Dev"

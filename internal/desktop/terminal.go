@@ -1,6 +1,6 @@
 // terminal.go — TerminalManager 服务:内嵌交互终端(三平台公共层)。
-// 前端 grf-terminal 面板经 desktop.TerminalManager.* 调用;PTY 输出经 wails
-// 事件 grf:term-data:<id>(base64)推回前端,退出推 grf:term-exit:<id>。
+// 前端 goder-terminal 面板经 desktop.TerminalManager.* 调用;PTY 输出经 wails
+// 事件 goder:term-data:<id>(base64)推回前端,退出推 goder:term-exit:<id>。
 // 会话表、事件推送与生命周期回收都在这里;PTY 本体按平台实现(满足
 // termPty 接口):类 Unix 用 creack/pty(pty_unix.go),Windows 用 ConPTY
 // (pty_windows.go)。app 退出时回收全部会话。
@@ -157,14 +157,14 @@ func (t *TerminalManager) StartTerm(cwd string, cols int, rows int) (TermSession
 				}
 				for off := 0; off < n; off += 4096 {
 					end := min(off+4096, n)
-					application.Get().Event.Emit("grf:term-data:"+id, base64.StdEncoding.EncodeToString(buf[off:end]))
+					application.Get().Event.Emit("goder:term-data:"+id, base64.StdEncoding.EncodeToString(buf[off:end]))
 				}
 			}
 			if readErr != nil {
 				break
 			}
 		}
-		application.Get().Event.Emit("grf:term-exit:"+id, wait())
+		application.Get().Event.Emit("goder:term-exit:"+id, wait())
 		t.mu.Lock()
 		if s, ok := t.sessions[id]; ok {
 			s.exited = true

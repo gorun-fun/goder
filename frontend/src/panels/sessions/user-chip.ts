@@ -1,4 +1,4 @@
-// user-chip.ts — <grf-user-chip>:左栏底部身份 chip(session-list 与
+// user-chip.ts — <goder-user-chip>:左栏底部身份 chip(session-list 与
 // settings-nav 共用)。展示名优先级:configure 注入的 user.name > 桌面
 // 系统用户名 > 「本地用户」。注入了 user.panel 时 chip 可点击,在 chip
 // 上方弹出宿主自绘的用户面板(返回的 HTMLElement 跨开关保活;点击面板
@@ -6,13 +6,13 @@
 import { css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme } from '../../ui/panel';
+import { GoderPanel, theme } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { desktopUserName, inWails } from '../../host/bridge';
 import { getUser, onUserChange, type PanelContext } from '../../registry/registry';
 
-@customElement('grf-user-chip')
-export class GrfUserChip extends GrfPanel {
+@customElement('goder-user-chip')
+export class GoderUserChip extends GoderPanel {
   /** 桌面系统用户名(纯 web 态为空) */
   @state() private sysName = '';
   /** 用户面板展开态 */
@@ -30,8 +30,8 @@ export class GrfUserChip extends GrfPanel {
         position: relative;
         display: flex;
         align-items: center;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
         user-select: none;
       }
       .chip {
@@ -63,7 +63,7 @@ export class GrfUserChip extends GrfPanel {
         width: 13px;
         height: 13px;
         flex: none;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
       .inner .name {
         min-width: 0;
@@ -76,12 +76,12 @@ export class GrfUserChip extends GrfPanel {
         cursor: pointer;
         padding: 4px 6px;
         margin-left: -6px;
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
       }
       .inner.click:hover,
       .inner.click.on {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .inner .arr {
         margin-left: auto;
@@ -101,10 +101,10 @@ export class GrfUserChip extends GrfPanel {
         width: max-content;
         max-width: min(420px, 90vw);
         bottom: calc(100% + 8px);
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        box-shadow: var(--grf-shadow);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        box-shadow: var(--goder-shadow);
         padding: 10px;
         max-height: 60vh;
         overflow-y: auto;
@@ -190,6 +190,6 @@ export class GrfUserChip extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-user-chip': GrfUserChip;
+    'goder-user-chip': GoderUserChip;
   }
 }

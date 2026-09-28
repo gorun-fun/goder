@@ -20,8 +20,8 @@ function isBuiltinPlugin(name: string): boolean {
   return name === 'grf-browser' || name === 'grf-computer' || name === 'goder-console';
 }
 
-@customElement('grf-settings-plugins')
-export class GrfSettingsPlugins extends SettingsSectionPanel {
+@customElement('goder-settings-plugins')
+export class GoderSettingsPlugins extends SettingsSectionPanel {
   static styles = [...sectionSharedCss];
 
   connectedCallback(): void {
@@ -42,8 +42,8 @@ export class GrfSettingsPlugins extends SettingsSectionPanel {
     const installed = Array.from(new Set([...pc.discovered.map((f) => f.replace(/\.exe$/, '')), ...local]));
     installed.sort();
     const ro = !pc.writable;
-    // 服务器上可安装的 = 远端文件减去已安装(宽松匹配 grf- 前缀/.exe 后缀)
-    const norm = (s: string) => s.toLowerCase().replace(/\.exe$/, '').replace(/^grf-/, 'grf-');
+    // 服务器上可安装的 = 远端文件减去已安装(宽松匹配 goder- 前缀/.exe 后缀)
+    const norm = (s: string) => s.toLowerCase().replace(/\.exe$/, '').replace(/^goder-/, 'goder-');
     const installedNorm = new Set(installed.map(norm));
     const available = (settingsStore.remotePlugins?.files ?? []).filter((f) => !installedNorm.has(norm(f)));
     return html`
@@ -95,7 +95,7 @@ export class GrfSettingsPlugins extends SettingsSectionPanel {
                   ${available.map(
                     (f) => html`
                       <div class="tile">
-                        <div class="tname">${pluginLabel(f.replace(/\.exe$/, '').replace(/^grf-/, 'grf-'))}</div>
+                        <div class="tname">${pluginLabel(f.replace(/\.exe$/, '').replace(/^goder-/, 'goder-'))}</div>
                         <div class="tsub">${f}</div>
                         <div class="tacts">
                           <button class="ghost" ?disabled=${this.busyAgent} @click=${() => void this.installPlugin(f)}>

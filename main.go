@@ -1,7 +1,7 @@
 // goder — grf-harness(gh)的 ZCode 风格图形界面。
 // 桌面形态:wails v3;同一前端亦产出可嵌入三方 web 的 web components。
 // wails 服务薄壳(AppConfig/ServerManager/Desktop/ModelConfig/
-// TerminalManager/Updater)与 /grf-api 反代在 internal/desktop。
+// TerminalManager/Updater)与 /goder-api 反代在 internal/desktop。
 package main
 
 import (
@@ -89,7 +89,7 @@ func main() {
 	}
 	// Windows:wails 资产管道整体缓冲响应、SSE 无流式(见
 	// localserv_windows.go);改从本地真实 HTTP 服务器加载,静态资产与
-	// /grf-api 同源。本地服务器同时挂 transport 的 /wails/runtime IPC
+	// /goder-api 同源。本地服务器同时挂 transport 的 /wails/runtime IPC
 	// 端点(见上)。失败则回退 wails 资产服务(流式缺失但可用)。
 	if baseURL := startLocalServer(transport.Handler()(rootHandler)); baseURL != "" {
 		winOpts.URL = baseURL
@@ -98,7 +98,7 @@ func main() {
 	mainWin := app.Window.NewWithOptions(winOpts)
 
 	// 托管模式冷启动自拉起,gh 随主窗体一起启动(所有平台同一时点):
-	// 前端连接信息(/grf-api/token)零依赖即就绪,不必等 wails 调用通道;
+	// 前端连接信息(/goder-api/token)零依赖即就绪,不必等 wails 调用通道;
 	// 幂等(已运行则收养)。
 	go coldStart(sm)
 

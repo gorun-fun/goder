@@ -11,7 +11,7 @@
 // 数据域(见 PanelContext);条目可用 scopes 字段限定只对哪些 scope 可见,
 // 让同页多个嵌入实例各装配各的面板集合。
 import type { TemplateResult } from 'lit';
-import type { GrfScope } from '../core/store/scope';
+import type { GoderScope } from '../core/store/scope';
 import type { ChatItem } from '../core/model/chat-model';
 
 /** 宿主壳(shell)下发给条目渲染的布局状态(仅 app-shell 内装配时存在;
@@ -33,7 +33,7 @@ export interface PanelContext {
   /** 数据域名(面板 scope 属性) */
   scope: string;
   /** 该 scope 的共享数据域(会话/事件流/连接状态) */
-  store: GrfScope;
+  store: GoderScope;
   /** 当前选中会话(草稿 id 或真实 sid;未选为 undefined) */
   sessionId?: string;
   /** 是否桌面态(wails webview):终端/本地 git 等能力仅桌面可用 */
@@ -51,14 +51,14 @@ export interface NavViewDef {
   icon?: string;
   /** 排序权重,小在前;缺省按注册顺序追加在末尾 */
   order?: number;
-  /** 左栏内容;state 为该导航的壳侧状态(经 grf-nav-state 事件上行,如
+  /** 左栏内容;state 为该导航的壳侧状态(经 goder-nav-state 事件上行,如
    * 设置分区),同一份会回灌 center */
   view: (ctx: PanelContext, state?: unknown) => TemplateResult | HTMLElement;
   /** 主体工作区(中央卡片)内容;缺省 = 聊天面板 */
   center?: (ctx: PanelContext, state: unknown) => TemplateResult | HTMLElement;
   /** 是否展示该条目(内置条目用它做形态降级,如桌面专属) */
   visible?: (ctx: PanelContext) => boolean;
-  /** 从该视图返回时回到哪个导航(grf-nav-back 事件的落点);缺省 = 首个可见条目 */
+  /** 从该视图返回时回到哪个导航(goder-nav-back 事件的落点);缺省 = 首个可见条目 */
   exitTo?: string;
   /** 只在这些 scope 名下可见(缺省 = 所有 scope);同页多嵌入实例各装配
    * 各的面板集合时用,与 visible(ctx) 守卫正交 */
@@ -287,7 +287,7 @@ function matchTool(pattern: string | RegExp, name: string): boolean {
 }
 
 /** UI 注册表(全局单例)。 */
-class GrfRegistry {
+class GoderRegistry {
   /** 左栏导航视图 */
   readonly nav = new Zone<NavViewDef>();
   /** 右栏 tab */
@@ -305,7 +305,7 @@ class GrfRegistry {
   }
 }
 
-export const registry = new GrfRegistry();
+export const registry = new GoderRegistry();
 
 // ---------- 聊天内容层渲染扩展(消息流定制的入口) ----------
 // 壳层装配(四区 Zone)解决「放哪、放什么面板」;这里解决「消息本身长
@@ -337,7 +337,7 @@ export interface ItemViewActions {
 /** 自定义渲染器的上下文。 */
 export interface ItemRenderContext {
   scope: string;
-  store: GrfScope;
+  store: GoderScope;
   sessionId?: string;
   /** 整个会话的消息表(向前找截图等上下文用) */
   items: ChatItem[];
@@ -539,7 +539,7 @@ const modelGuards = new Set<string>();
 const modelGuardListeners = new Set<Listener>();
 
 /** 开/关某 scope 的启动模型守卫。变更即通知(app-shell 守卫的唤醒源:
- * configure 可能晚于壳元素连接 —— 静态声明的 <grf-app-shell> 在嵌入库
+ * configure 可能晚于壳元素连接 —— 静态声明的 <goder-app-shell> 在嵌入库
  * 加载瞬间升级连接,而 embed.configure 在其之后才执行)。 */
 export function setModelGuard(scope: string, on: boolean): void {
   if (on) modelGuards.add(scope);

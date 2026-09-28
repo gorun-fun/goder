@@ -10,8 +10,8 @@ import { inWails } from '../../../host/bridge';
 import type { ProviderDTO } from '../../../host/bridge';
 import { icon } from '../../../util/icons';
 
-@customElement('grf-settings-models')
-export class GrfSettingsModels extends SettingsSectionPanel {
+@customElement('goder-settings-models')
+export class GoderSettingsModels extends SettingsSectionPanel {
   /** 当前选中的供应商名(右侧展示其详情) */
   private selProv: string | null = null;
 
@@ -40,9 +40,9 @@ export class GrfSettingsModels extends SettingsSectionPanel {
         align-items: start;
       }
       .prov-list {
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        background: var(--grf-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        background: var(--goder-bg-raise);
         padding: 5px;
         display: grid;
         gap: 2px;
@@ -56,19 +56,19 @@ export class GrfSettingsModels extends SettingsSectionPanel {
         align-items: center;
         gap: 6px;
         padding: 5px 8px;
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
         user-select: none;
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text-dim);
       }
       .prov-item:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .prov-item.on {
-        background: var(--grf-accent-soft);
-        color: var(--grf-accent-text);
+        background: var(--goder-accent-soft);
+        color: var(--goder-accent-text);
       }
       .prov-item .pname {
         flex: 1;
@@ -79,8 +79,8 @@ export class GrfSettingsModels extends SettingsSectionPanel {
       }
       .prov-item .cnt {
         flex: none;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       .prov-item.on .cnt {
         color: inherit;
@@ -94,7 +94,7 @@ export class GrfSettingsModels extends SettingsSectionPanel {
         opacity: 0.45;
       }
       .prov-list .prov-item.over {
-        box-shadow: inset 0 2px 0 var(--grf-accent);
+        box-shadow: inset 0 2px 0 var(--goder-accent);
       }
       .add-prov {
         justify-content: flex-start;
@@ -118,13 +118,13 @@ export class GrfSettingsModels extends SettingsSectionPanel {
         overflow-y: auto;
       }
       .prov-head .meta.warn {
-        color: var(--grf-warn);
+        color: var(--goder-warn);
       }
       .prov-body textarea {
         min-height: 58px;
         resize: vertical;
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-sm);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-sm);
       }
     `,
   ];
@@ -397,7 +397,7 @@ export class GrfSettingsModels extends SettingsSectionPanel {
     this.detecting = false;
     this.detectMsg = n < 0 ? '检测失败:请检查 Base URL 与 API Key 后重试' : `检测到 ${n} 个模型,已合并进列表`;
     this.requestUpdate();
-    this.fire('grf-saved');
+    this.fire('goder-saved');
   }
 
   /** 新增一个占位供应商并选中(名称可直接改)。 */

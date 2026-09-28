@@ -1,12 +1,12 @@
-// console.ts — <grf-console>:底栏事件台。SSE 事件流与系统消息的行式
+// console.ts — <goder-console>:底栏事件台。SSE 事件流与系统消息的行式
 // 日志(级别着色、自动滚动、暂停/清空)。相当于 ZCode 的输出面板。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { fmtClock } from '../../util/fmt';
 
-@customElement('grf-console')
-export class GrfConsole extends GrfPanel {
+@customElement('goder-console')
+export class GoderConsole extends GoderPanel {
   /** 过滤:仅显示 warn/error;全部;仅事件 */
   @property({ type: String }) filter: 'all' | 'problems' | 'events' = 'all';
 
@@ -22,10 +22,10 @@ export class GrfConsole extends GrfPanel {
         height: 100%;
         min-height: 0;
         background: #131419;
-        border-top: 1px solid var(--grf-border-soft);
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        border-top: 1px solid var(--goder-border-soft);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
       }
       .head {
         flex: none;
@@ -33,14 +33,14 @@ export class GrfConsole extends GrfPanel {
         align-items: center;
         gap: 6px;
         padding: 4px 10px;
-        border-bottom: 1px solid var(--grf-border);
-        background: var(--grf-bg-raise);
-        font-family: var(--grf-font);
+        border-bottom: 1px solid var(--goder-border);
+        background: var(--goder-bg-raise);
+        font-family: var(--goder-font);
       }
       .head .t {
         font-weight: 650;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-xs);
         letter-spacing: 0.4px;
         margin-right: 6px;
       }
@@ -52,23 +52,23 @@ export class GrfConsole extends GrfPanel {
         padding: 2px 8px;
         border-radius: 4px;
         cursor: pointer;
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
       }
       .f:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .f.on {
-        background: var(--grf-bg-active);
-        color: var(--grf-text);
+        background: var(--goder-bg-active);
+        color: var(--goder-text);
       }
       .spacer {
         flex: 1;
       }
       .head button {
         padding: 2px 7px;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
       }
       .body {
         flex: 1;
@@ -88,7 +88,7 @@ export class GrfConsole extends GrfPanel {
         background: rgba(255, 255, 255, 0.025);
       }
       .ts {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         flex: none;
         user-select: none;
       }
@@ -98,16 +98,16 @@ export class GrfConsole extends GrfPanel {
         text-align: right;
         user-select: none;
       }
-      .lv.event { color: var(--grf-accent-text); }
-      .lv.info { color: var(--grf-text-dim); }
-      .lv.warn { color: var(--grf-warn); }
-      .lv.error { color: var(--grf-error); }
-      .line.warn .tx { color: var(--grf-warn); }
-      .line.error .tx { color: var(--grf-error); }
+      .lv.event { color: var(--goder-accent-text); }
+      .lv.info { color: var(--goder-text-dim); }
+      .lv.warn { color: var(--goder-warn); }
+      .lv.error { color: var(--goder-error); }
+      .line.warn .tx { color: var(--goder-warn); }
+      .line.error .tx { color: var(--goder-error); }
       .empty {
         padding: 18px;
         text-align: center;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
       }
     `,
   ];
@@ -176,6 +176,6 @@ export class GrfConsole extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-console': GrfConsole;
+    'goder-console': GoderConsole;
   }
 }

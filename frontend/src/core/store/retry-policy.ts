@@ -2,7 +2,7 @@
 // 三层重试(工具调用瞬时 400 重试 → 连接层自愈 → 链尾失配自愈)的判定
 // 与参数收敛于此;默认值即历史内置行为,嵌入方可按自家网络环境注入
 // (如内网高可用链路放宽重试上限、离线场景加长退避)。
-import { GrfApiError } from '../api/client';
+import { GoderApiError } from '../api/client';
 
 export interface RetryPolicy {
   /** 流断连自动重试上限(事件流中断/静默超时/网络错误);默认 10 */
@@ -25,7 +25,7 @@ export const defaultRetryPolicy: RetryPolicy = {
   toolChoiceBackoffMs: 300,
   backoffMs: (attempt) => Math.min(800 * (attempt + 1), 4000),
   isRetryableError: (err) => {
-    if (err instanceof GrfApiError) {
+    if (err instanceof GoderApiError) {
       return err.code === 'stream_interrupted' || err.code === 'stream_idle_timeout' || err.status === 0;
     }
     return err instanceof TypeError; // fetch 网络失败(连接拒绝/断网/代理断)

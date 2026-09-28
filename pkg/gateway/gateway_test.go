@@ -36,7 +36,7 @@ func newTestGateway(t *testing.T, opts Options) (*Gateway, *httptest.Server) {
 
 func TestAdminAuth(t *testing.T) {
 	_, srv := newTestGateway(t, Options{AdminToken: "secret"})
-	resp, err := http.Get(srv.URL + "/grf-api/admin/statuses")
+	resp, err := http.Get(srv.URL + "/goder-api/admin/statuses")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestAdminAuth(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("无令牌应 401,得到 %d", resp.StatusCode)
 	}
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/grf-api/admin/statuses", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/goder-api/admin/statuses", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestAdminAuth(t *testing.T) {
 
 func TestAdminStatusesUnmanaged(t *testing.T) {
 	_, srv := newTestGateway(t, Options{AdminToken: "secret"})
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/grf-api/admin/statuses", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/goder-api/admin/statuses", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -88,16 +88,16 @@ func TestAdminStartValidation(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	if code := do(http.MethodGet, "/grf-api/admin/start?uid=u1"); code != http.StatusMethodNotAllowed {
+	if code := do(http.MethodGet, "/goder-api/admin/start?uid=u1"); code != http.StatusMethodNotAllowed {
 		t.Fatalf("start GET 应 405,得到 %d", code)
 	}
-	if code := do(http.MethodPost, "/grf-api/admin/start"); code != http.StatusBadRequest {
+	if code := do(http.MethodPost, "/goder-api/admin/start"); code != http.StatusBadRequest {
 		t.Fatalf("start 缺 uid 应 400,得到 %d", code)
 	}
-	if code := do(http.MethodPost, "/grf-api/admin/restart"); code != http.StatusBadRequest {
+	if code := do(http.MethodPost, "/goder-api/admin/restart"); code != http.StatusBadRequest {
 		t.Fatalf("restart 缺 uid 应 400,得到 %d", code)
 	}
-	if code := do(http.MethodPost, "/grf-api/admin/start?uid=u1"); code != http.StatusConflict {
+	if code := do(http.MethodPost, "/goder-api/admin/start?uid=u1"); code != http.StatusConflict {
 		t.Fatalf("start 无 Manager 应 409,得到 %d", code)
 	}
 }
@@ -112,7 +112,7 @@ func TestAdminRestartWithBadBinary(t *testing.T) {
 	})
 	_, srv := newTestGateway(t, Options{AdminToken: "secret", Manager: m})
 
-	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/grf-api/admin/restart?uid=u1", nil)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/goder-api/admin/restart?uid=u1", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -125,14 +125,14 @@ func TestAdminRestartWithBadBinary(t *testing.T) {
 }
 
 func TestUnauthorizedResponse(t *testing.T) {
-	// header resolver 缺头必拒 → 401;LoginURL 为空时不带 Grf-Login 头
+	// header resolver 缺头必拒 → 401;LoginURL 为空时不带 Goder-Login 头
 	_, srv := newTestGateway(t, Options{
 		Resolver: identity.NewHeader(identity.HeaderConfig{}),
 		Manager: ghserver.NewManager(ghserver.ManagerConfig{
 			GhBin: "/definitely-not-gh", DataRoot: t.TempDir(),
 		}),
 	})
-	resp, err := http.Get(srv.URL + "/grf-api/v1/conversations")
+	resp, err := http.Get(srv.URL + "/goder-api/v1/conversations")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +140,8 @@ func TestUnauthorizedResponse(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("缺头应 401,得到 %d", resp.StatusCode)
 	}
-	if resp.Header.Get("Grf-Login") != "" {
-		t.Fatal("无登录流程不应带 Grf-Login 头")
+	if resp.Header.Get("Goder-Login") != "" {
+		t.Fatal("无登录流程不应带 Goder-Login 头")
 	}
 }
 
@@ -150,7 +150,7 @@ func TestWhoami(t *testing.T) {
 		Resolver: &stubResolver{User: identity.User{UID: "u1", Name: "n"}},
 		Manager:  nil,
 	})
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/grf-api/whoami", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/goder-api/whoami", nil)
 	req.Header.Set("X-GRF-UID", "u1")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -164,14 +164,14 @@ func TestWhoami(t *testing.T) {
 
 func TestHealthzAndReady(t *testing.T) {
 	_, srv := newTestGateway(t, Options{})
-	if resp, err := http.Get(srv.URL + "/grf-api/healthz"); err != nil || resp.StatusCode != http.StatusOK {
+	if resp, err := http.Get(srv.URL + "/goder-api/healthz"); err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("healthz: %v %v", err, resp)
 	} else {
 		resp.Body.Close()
 	}
 	// 固定上游模式恒就绪
 	_, srv2 := newTestGateway(t, Options{FixedUpstream: &url.URL{Scheme: "http", Host: "127.0.0.1:1"}})
-	if resp, err := http.Get(srv2.URL + "/grf-api/healthz/ready"); err != nil || resp.StatusCode != http.StatusOK {
+	if resp, err := http.Get(srv2.URL + "/goder-api/healthz/ready"); err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("固定上游 ready 应 200: %v", err)
 	} else {
 		resp.Body.Close()
@@ -189,7 +189,7 @@ func TestCORSWhitelist(t *testing.T) {
 		FixedUpstream: target,
 	})
 
-	hit, _ := http.NewRequest(http.MethodGet, srv.URL+"/grf-api/v1/x", nil)
+	hit, _ := http.NewRequest(http.MethodGet, srv.URL+"/goder-api/v1/x", nil)
 	hit.Header.Set("Origin", "https://app.example.com")
 	resp, err := http.DefaultClient.Do(hit)
 	if err != nil {
@@ -203,7 +203,7 @@ func TestCORSWhitelist(t *testing.T) {
 		t.Fatal("白名单模式应允许凭据")
 	}
 
-	miss, _ := http.NewRequest(http.MethodGet, srv.URL+"/grf-api/v1/x", nil)
+	miss, _ := http.NewRequest(http.MethodGet, srv.URL+"/goder-api/v1/x", nil)
 	miss.Header.Set("Origin", "https://evil.example.net")
 	resp2, err := http.DefaultClient.Do(miss)
 	if err != nil {
@@ -225,7 +225,7 @@ func TestFixedUpstreamProxying(t *testing.T) {
 	target, _ := url.Parse(up.URL)
 	_, srv := newTestGateway(t, Options{FixedUpstream: target})
 
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/grf-api/v1/health", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/goder-api/v1/health", nil)
 	req.Header.Set("Authorization", "Bearer browser-token")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

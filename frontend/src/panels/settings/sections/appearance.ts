@@ -5,8 +5,8 @@ import { customElement } from 'lit/decorators.js';
 import { sectionSharedCss, SettingsSectionPanel } from './shared';
 import { settingsStore, ACCENTS, FONT_MIN, FONT_MAX, type ThemeMode } from '../../../core/settings/settings-store';
 
-@customElement('grf-settings-appearance')
-export class GrfSettingsAppearance extends SettingsSectionPanel {
+@customElement('goder-settings-appearance')
+export class GoderSettingsAppearance extends SettingsSectionPanel {
   static styles = [
     ...sectionSharedCss,
     css`
@@ -30,7 +30,7 @@ export class GrfSettingsAppearance extends SettingsSectionPanel {
         border-radius: 50%;
       }
       .swatch.on {
-        box-shadow: 0 0 0 2px var(--grf-card), 0 0 0 4px var(--grf-text-dim);
+        box-shadow: 0 0 0 2px var(--goder-card), 0 0 0 4px var(--goder-text-dim);
       }
       .swatch:hover {
         filter: brightness(1.15);
@@ -69,8 +69,8 @@ export class GrfSettingsAppearance extends SettingsSectionPanel {
         width: 84px;
       }
       .fontsize .unit {
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
     `,
   ];
@@ -141,7 +141,7 @@ export class GrfSettingsAppearance extends SettingsSectionPanel {
         </div>
         <div class="hint">基准字号(${FONT_MIN}–${FONT_MAX}px,步进 0.5);各级文字按比例随基准缩放。</div>
       </div>
-      <div class="hint">外观即时生效,并镜像保存到本地,重启后自动恢复。嵌入宿主仍可直接覆盖 --grf-* 变量换肤。</div>
+      <div class="hint">外观即时生效,并镜像保存到本地,重启后自动恢复。嵌入宿主仍可直接覆盖 --goder-* 变量换肤。</div>
     `;
   }
 

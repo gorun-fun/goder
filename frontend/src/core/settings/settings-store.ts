@@ -1,7 +1,7 @@
 // settings.ts — 应用级设置状态(页面唯一实例),供设置页与桌面入口共用:
 // - 常规:服务连接(托管 gh server / 远程),桌面态经 wails 桥持久化到
 //   ~/Library/Application Support/goder/config.json;
-// - 外观:主题 / 强调色 / 字号,写 documentElement 的 --grf-skin-* 挂钩
+// - 外观:主题 / 强调色 / 字号,写 documentElement 的 --goder-skin-* 挂钩
 //   (见 ui/theme.ts)穿透全部 shadow DOM 即时生效,并镜像到 localStorage,
 //   桌面与浏览器两种形态重启后都能即刻恢复;
 // - 模型:供应商配置读写(gh settings.json;默认模型是 gh 侧概念,goder
@@ -113,20 +113,20 @@ function resolveAccent(v: string): { accent: string; text: string; textOnLight: 
 
 /** 浅色主题 skin 挂钩取值(深色为默认值,无需覆写) */
 const LIGHT_SKIN: Record<string, string> = {
-  '--grf-skin-bg': '#f4f5f7',
-  '--grf-skin-bg-raise': '#ffffff',
-  '--grf-skin-bg-hover': '#eceef1',
-  '--grf-skin-bg-active': '#e3e6ea',
-  '--grf-skin-border': '#d5d8de',
-  '--grf-skin-border-soft': '#e4e6eb',
-  '--grf-skin-border-hover': '#bfc4cc',
-  '--grf-skin-text': '#26292f',
-  '--grf-skin-text-dim': '#5d636e',
-  '--grf-skin-text-faint': '#9096a0',
-  '--grf-skin-user-bubble': '#e8ecf2',
-  '--grf-skin-shadow': '0 8px 28px rgba(20, 24, 32, 0.12)',
-  '--grf-skin-card': '#ffffff',
-  '--grf-skin-scroll-thumb': '#c6cad2',
+  '--goder-skin-bg': '#f4f5f7',
+  '--goder-skin-bg-raise': '#ffffff',
+  '--goder-skin-bg-hover': '#eceef1',
+  '--goder-skin-bg-active': '#e3e6ea',
+  '--goder-skin-border': '#d5d8de',
+  '--goder-skin-border-soft': '#e4e6eb',
+  '--goder-skin-border-hover': '#bfc4cc',
+  '--goder-skin-text': '#26292f',
+  '--goder-skin-text-dim': '#5d636e',
+  '--goder-skin-text-faint': '#9096a0',
+  '--goder-skin-user-bubble': '#e8ecf2',
+  '--goder-skin-shadow': '0 8px 28px rgba(20, 24, 32, 0.12)',
+  '--goder-skin-card': '#ffffff',
+  '--goder-skin-scroll-thumb': '#c6cad2',
 };
 
 /** 字号:基准像素(sm = 基准 -1.5,xs = 基准 -2.5) */
@@ -141,14 +141,14 @@ export interface Appearance {
 }
 
 const DEFAULT_APPEARANCE: Appearance = { theme: 'dark', accent: 'blue', fontSize: 13.5 };
-const LS_KEY = 'grf-appearance-v1';
+const LS_KEY = 'goder-appearance-v1';
 
 // ---------- 供应商模型上下文窗口(探测缓存) ----------
 // OpenAI 兼容网关(token-hub / OpenRouter / SiliconFlow / vLLM 等)会在
 // GET /models 的模型对象上回报上下文窗口(context_length 等字段);
 // 这里缓存「provider → {url, 裸模型名 → token 数}」,url 指纹不符即失效。
 // localStorage 双形态通用,重启后免探测直接可用。
-const CTX_LS_KEY = 'grf-ctxlens-v1';
+const CTX_LS_KEY = 'goder-ctxlens-v1';
 
 interface ProviderCtx {
   url: string;
@@ -202,7 +202,7 @@ class SettingsStore {
   cfg: AppConfigDTO = {
     scope: 'app',
     serverMode: 'managed',
-    // web 形态默认同源网关(/grf-api);桌面态此字段仅在远程模式生效
+    // web 形态默认同源网关(/goder-api);桌面态此字段仅在远程模式生效
     remoteUrl: locationDefaultBase(),
     remoteToken: '',
     ghBinary: 'gh',
@@ -283,15 +283,15 @@ class SettingsStore {
     const onLight = a.theme === 'light';
     const accent = resolveAccent(a.accent);
     const isDefaultBlue = a.accent === 'blue';
-    setOrClear('--grf-skin-accent', isDefaultBlue ? null : accent.accent);
-    setOrClear('--grf-skin-accent-soft', isDefaultBlue ? null : accent.soft);
-    setOrClear('--grf-skin-accent-text', isDefaultBlue && !onLight ? null : onLight ? accent.textOnLight : accent.text);
+    setOrClear('--goder-skin-accent', isDefaultBlue ? null : accent.accent);
+    setOrClear('--goder-skin-accent-soft', isDefaultBlue ? null : accent.soft);
+    setOrClear('--goder-skin-accent-text', isDefaultBlue && !onLight ? null : onLight ? accent.textOnLight : accent.text);
     // 字号:13.5px 基准走默认值
     const [fs, fss, fsxs] = fontVars(a.fontSize);
     const std = a.fontSize === 13.5;
-    setOrClear('--grf-skin-font-size', std ? null : fs);
-    setOrClear('--grf-skin-font-size-sm', std ? null : fss);
-    setOrClear('--grf-skin-font-size-xs', std ? null : fsxs);
+    setOrClear('--goder-skin-font-size', std ? null : fs);
+    setOrClear('--goder-skin-font-size-sm', std ? null : fss);
+    setOrClear('--goder-skin-font-size-xs', std ? null : fsxs);
   }
 
   patchCfg(patch: Partial<AppConfigDTO>): void {
@@ -313,7 +313,7 @@ class SettingsStore {
       return;
     }
     configureScope(scope, {
-      baseUrl: `${location.origin}/grf-api`,
+      baseUrl: `${location.origin}/goder-api`,
       token: this.cfg.serverMode === 'managed' ? (this.srv?.token ?? '') : this.cfg.remoteToken,
       // 桌面态连接副本连带 token 落本地存储(本机 gh 短期令牌,冷启动直连用)
       persistToken: true,
@@ -780,7 +780,7 @@ class SettingsStore {
     if (this.srv?.running) this.srv = await serverStop();
     this.srv = await serverStart();
     if (this.srv?.running) {
-      configureScope(scope, { baseUrl: `${location.origin}/grf-api`, token: this.srv.token, persistToken: true });
+      configureScope(scope, { baseUrl: `${location.origin}/goder-api`, token: this.srv.token, persistToken: true });
     }
     this.bump();
   }

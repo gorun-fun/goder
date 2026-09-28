@@ -35,13 +35,13 @@ describe('scope 生命周期(引用计数 + 延迟回收)', () => {
 
   it('回收重建不丢宿主 configure 注入的内存配置(未持久化 token)', async () => {
     const name = `cfg-${Math.random().toString(36).slice(2)}`;
-    configureScope(name, { baseUrl: '/grf-api', token: 'host-secret' });
+    configureScope(name, { baseUrl: '/goder-api', token: 'host-secret' });
     const s1 = acquireScope(name);
     expect(s1.client.config.token).toBe('host-secret');
     releaseScope(name);
     await vi.advanceTimersByTimeAsync(31_000);
     const s2 = acquireScope(name);
-    expect(s2.client.config.baseUrl).toBe('/grf-api');
+    expect(s2.client.config.baseUrl).toBe('/goder-api');
     expect(s2.client.config.token).toBe('host-secret');
     releaseScope(name);
     await vi.advanceTimersByTimeAsync(31_000);

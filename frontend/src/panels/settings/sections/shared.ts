@@ -3,11 +3,11 @@
 // registry.settings 注册,builtin-common 的 render 返回池化的组件元素
 // (settings-page 的 HTMLElement 保活通道,跨分区切换不丢内部状态)。
 // 基类职责:订阅 settingsStore 驱动重渲、通用提交(保存后上抛
-// grf-saved 让设置页头部闪「已保存」)、网页形态回落文案、二次确认
+// goder-saved 让设置页头部闪「已保存」)、网页形态回落文案、二次确认
 // 删除布防、智能体操作忙碌态。
 import { css } from 'lit';
 import { state } from 'lit/decorators.js';
-import { GrfPanel, theme, controls } from '../../../ui/panel';
+import { GoderPanel, theme, controls } from '../../../ui/panel';
 import { settingsStore } from '../../../core/settings/settings-store';
 
 /** 分区组件共享样式:区块标题/表单/分段按钮/提示行 + 平铺卡片
@@ -21,9 +21,9 @@ export const sectionSharedCss = [
       display: grid;
       gap: 26px;
       align-content: start;
-      font-family: var(--grf-font);
-      font-size: var(--grf-font-size);
-      color: var(--grf-text);
+      font-family: var(--goder-font);
+      font-size: var(--goder-font-size);
+      color: var(--goder-text);
     }
     .sec {
       display: grid;
@@ -32,8 +32,8 @@ export const sectionSharedCss = [
     }
     .sec h4 {
       margin: 0;
-      font-size: var(--grf-font-size-xs);
-      color: var(--grf-text-faint);
+      font-size: var(--goder-font-size-xs);
+      color: var(--goder-text-faint);
       font-weight: 650;
       letter-spacing: 0.4px;
       text-transform: uppercase;
@@ -41,12 +41,12 @@ export const sectionSharedCss = [
     label {
       display: grid;
       gap: 5px;
-      font-size: var(--grf-font-size-xs);
-      color: var(--grf-text-dim);
+      font-size: var(--goder-font-size-xs);
+      color: var(--goder-text-dim);
     }
     .hint {
-      font-size: var(--grf-font-size-xs);
-      color: var(--grf-text-faint);
+      font-size: var(--goder-font-size-xs);
+      color: var(--goder-text-faint);
       line-height: 1.7;
     }
     .seg {
@@ -58,9 +58,9 @@ export const sectionSharedCss = [
       flex: 0 1 auto;
     }
     .seg button.on {
-      border-color: var(--grf-accent);
-      color: var(--grf-accent-text);
-      background: var(--grf-accent-soft);
+      border-color: var(--goder-accent);
+      color: var(--goder-accent-text);
+      background: var(--goder-accent-soft);
     }
     .actions {
       display: flex;
@@ -68,9 +68,9 @@ export const sectionSharedCss = [
       align-items: center;
     }
     code.tok {
-      font-family: var(--grf-mono);
+      font-family: var(--goder-mono);
       font-size: 10px;
-      background: var(--grf-bg);
+      background: var(--goder-bg);
       padding: 1px 5px;
       border-radius: 4px;
       user-select: all;
@@ -83,9 +83,9 @@ export const sectionSharedCss = [
     }
     .tile {
       position: relative;
-      border: 1px solid var(--grf-border);
-      border-radius: var(--grf-radius);
-      background: var(--grf-bg-raise);
+      border: 1px solid var(--goder-border);
+      border-radius: var(--goder-radius);
+      background: var(--goder-bg-raise);
       padding: 10px 12px;
       display: flex;
       flex-direction: column;
@@ -111,15 +111,15 @@ export const sectionSharedCss = [
     }
     .tile .tname {
       max-width: calc(100% - 64px);
-      font-size: var(--grf-font-size-sm);
+      font-size: var(--goder-font-size-sm);
       font-weight: 650;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .tile.on {
-      border-color: var(--grf-accent);
-      background: var(--grf-accent-soft);
+      border-color: var(--goder-accent);
+      background: var(--goder-accent-soft);
     }
     .tile.off {
       opacity: 0.55;
@@ -129,25 +129,25 @@ export const sectionSharedCss = [
       text-decoration-thickness: 1px;
     }
     .tile .tsub {
-      font-size: var(--grf-font-size-xs);
-      color: var(--grf-text-faint);
+      font-size: var(--goder-font-size-xs);
+      color: var(--goder-text-faint);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .tile .tag {
-      font-size: var(--grf-font-size-xs);
-      color: var(--grf-text-dim);
-      background: var(--grf-bg);
-      border: 1px solid var(--grf-border);
+      font-size: var(--goder-font-size-xs);
+      color: var(--goder-text-dim);
+      background: var(--goder-bg);
+      border: 1px solid var(--goder-border);
       border-radius: 999px;
       padding: 1px 7px;
     }
     /* 卡片式详情(models 的供应商卡片 / mcp 的端点卡片) */
     .prov {
-      border: 1px solid var(--grf-border);
-      border-radius: var(--grf-radius);
-      background: var(--grf-bg-raise);
+      border: 1px solid var(--goder-border);
+      border-radius: var(--goder-radius);
+      background: var(--goder-bg-raise);
       margin-bottom: 8px;
       overflow: hidden;
     }
@@ -160,32 +160,32 @@ export const sectionSharedCss = [
       user-select: none;
     }
     .prov-head:hover {
-      background: var(--grf-bg-hover);
+      background: var(--goder-bg-hover);
     }
     .prov-head .pname {
       font-weight: 650;
-      font-size: var(--grf-font-size-sm);
+      font-size: var(--goder-font-size-sm);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .prov-head .tag {
       flex: none;
-      font-size: var(--grf-font-size-xs);
-      color: var(--grf-text-dim);
-      background: var(--grf-bg);
-      border: 1px solid var(--grf-border);
+      font-size: var(--goder-font-size-xs);
+      color: var(--goder-text-dim);
+      background: var(--goder-bg);
+      border: 1px solid var(--goder-border);
       border-radius: 999px;
       padding: 1px 7px;
     }
     .prov-head .meta {
       margin-left: auto;
       flex: none;
-      font-size: var(--grf-font-size-xs);
-      color: var(--grf-text-faint);
+      font-size: var(--goder-font-size-xs);
+      color: var(--goder-text-faint);
     }
     .prov-body {
-      border-top: 1px solid var(--grf-border-soft);
+      border-top: 1px solid var(--goder-border-soft);
       padding: 10px;
       display: grid;
       gap: 10px;
@@ -206,37 +206,37 @@ export const sectionSharedCss = [
       align-items: center;
       gap: 6px;
       padding: 3px 6px;
-      border-radius: var(--grf-radius-sm);
+      border-radius: var(--goder-radius-sm);
       border: 1px solid transparent;
-      font-size: var(--grf-font-size-sm);
-      color: var(--grf-text-dim);
+      font-size: var(--goder-font-size-sm);
+      color: var(--goder-text-dim);
     }
     .mrow:hover {
-      background: var(--grf-bg-hover);
+      background: var(--goder-bg-hover);
     }
     .mrow .minput {
       flex: 1;
       min-width: 0;
-      font-family: var(--grf-mono);
-      font-size: var(--grf-font-size-sm);
+      font-family: var(--goder-mono);
+      font-size: var(--goder-font-size-sm);
       padding: 3px 8px;
     }
     .mrow .mdel {
       flex: none;
       padding: 2px 7px;
-      font-size: var(--grf-font-size-sm);
+      font-size: var(--goder-font-size-sm);
     }
     .mrow .mhint {
       flex: none;
-      font-size: var(--grf-font-size-xs);
-      color: var(--grf-text-faint);
+      font-size: var(--goder-font-size-xs);
+      color: var(--goder-text-faint);
       user-select: none;
     }
   `,
 ];
 
 /** 内置设置分区组件基类(抽象,不注册自定义元素)。 */
-export class SettingsSectionPanel extends GrfPanel {
+export class SettingsSectionPanel extends GoderPanel {
   private storeUnsub?: () => void;
 
   connectedCallback(): void {
@@ -252,10 +252,10 @@ export class SettingsSectionPanel extends GrfPanel {
     super.disconnectedCallback();
   }
 
-  /** 通用提交:改配置 → 保存落盘 → 上抛 grf-saved(设置页头部闪提示)。 */
+  /** 通用提交:改配置 → 保存落盘 → 上抛 goder-saved(设置页头部闪提示)。 */
   protected commit(patch: Parameters<typeof settingsStore.patchCfg>[0]): void {
     settingsStore.patchCfg(patch);
-    void settingsStore.saveCfg(this.scope).then(() => this.fire('grf-saved'));
+    void settingsStore.saveCfg(this.scope).then(() => this.fire('goder-saved'));
   }
 
   /** 网页形态配置区回落文案:gh 过旧不支持 vs 读取中/失败。 */
@@ -292,7 +292,7 @@ export class SettingsSectionPanel extends GrfPanel {
   @state() protected agentMsg = '';
 
   protected setAgentMsg(ok: boolean, msg: string): void {
-    if (ok) this.fire('grf-saved');
+    if (ok) this.fire('goder-saved');
     this.agentMsg = msg;
     this.requestUpdate();
   }

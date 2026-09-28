@@ -197,7 +197,7 @@ export interface GrfSessionConfig {
   system_prompt?: string;
   /** 默认技能名:技能目录(workspace/.grf/skills 两级)中存在该名字时,
    * 其 SKILL.md 全文注入系统提示词,无需模型调 skill 工具;空 = 不注入
-   * 任何默认技能(gh 侧已取消 grf-usage 回落)。经项目 defaults 开放给
+   * 任何默认技能(gh 侧已取消 goder-usage 回落)。经项目 defaults 开放给
    * 嵌入方(如 grf-play 配 grf-start 总纲)。 */
   default_skill?: string;
   max_steps?: number;

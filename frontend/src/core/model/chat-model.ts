@@ -136,7 +136,7 @@ export function newRuntime(): SessionRuntime {
 // gh 的会话级 LLM 统计(总输入/总输出)是内存态,gh server 随 App 重启
 // 归零,统计框会退化成「—」。这里按 response 定格累加并按 sid 持久化到
 // localStorage,重开后兜底显示(展示时与 gh 累计取大,防重开跳小)。
-const USAGE_KEY = 'grf-ui:usage-totals';
+const USAGE_KEY = 'goder:usage-totals';
 /** 会话条目上限(超出丢最旧,防无限膨胀) */
 const USAGE_MAX = 500;
 
@@ -206,7 +206,7 @@ export function forgetUsage(sid: string): void {
 // 会话历史(线格式 llm.Message)不含时间戳,重开 App 后耗时无法从服务端
 // 恢复。工具结束时就把 startedAt/endedAt 按 sid+callId 记进 localStorage,
 // 历史恢复时回填到工具卡。
-const TOOL_DUR_KEY = 'grf-ui:tool-durs';
+const TOOL_DUR_KEY = 'goder:tool-durs';
 /** 条目上限(超出丢最旧,防无限膨胀) */
 const TOOL_DUR_MAX = 4000;
 
@@ -304,7 +304,7 @@ export function imagesOfOutput(text: string): string[] {
 // 为裂图,可接受)。
 export function shotUrlsOfFile(text: string): string[] {
   const re = /(\/[^\s（()'"`，。]+?\.(?:png|jpe?g|webp|gif))/gi;
-  return (text.match(re) ?? []).map((p) => `/grf-api/local-file?path=${encodeURIComponent(p)}`);
+  return (text.match(re) ?? []).map((p) => `/goder-api/local-file?path=${encodeURIComponent(p)}`);
 }
 // gh 带图工具结果的伪 user 消息("[tool result: <名>] …" + image_url part;
 // 捕获组 = 工具名)。识别这类消息用:不进用户气泡,只回填工具卡。

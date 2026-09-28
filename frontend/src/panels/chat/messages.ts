@@ -12,9 +12,9 @@ import { renderMarkdown } from '../../util/markdown';
 import { truncate, fmtDuration } from '../../util/fmt';
 import { icon } from '../../util/icons';
 import type { ChatItem } from '../../core/model/chat-model';
-import type { GrfScope } from '../../core/store/scope';
+import type { GoderScope } from '../../core/store/scope';
 import { registry, getMarkdownRenderer, type ItemViewActions } from '../../registry/registry';
-import { hasSkillBlock, hasTaskBlock, parseGrfSkillBlocks, parseGrfTaskBlocks, type TaskSegment } from '../../core/store/automation';
+import { hasSkillBlock, hasTaskBlock, parseGoderSkillBlocks, parseGoderTaskBlocks, type TaskSegment } from '../../core/store/automation';
 import './tool-card';
 import './ask-form';
 import './approval-card';
@@ -25,7 +25,7 @@ import './skill-card';
 export interface MessageViewProps extends ItemViewActions {
   /** 数据域名(自定义渲染器与 markdown 覆写按 scope 生效) */
   scope: string;
-  store: GrfScope;
+  store: GoderScope;
   sessionId?: string;
   /** 文案翻译(i18n;chat-panel 实现时绑定面板 scope) */
   t(key: string): string;
@@ -125,7 +125,7 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
           break;
         }
       }
-      return html`<grf-tool-card .item=${it} .ctxShot=${ctxShot} .ctxMeta=${ctxMeta}></grf-tool-card>`;
+      return html`<goder-tool-card .item=${it} .ctxShot=${ctxShot} .ctxMeta=${ctxMeta}></goder-tool-card>`;
     }
     case 'notice':
       return html`
@@ -137,9 +137,9 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
       // 待答提问的交互控件在底部输入框内(点击选项即提交);
       // 消息流只保留已应答/已取消的记录卡。
       if (it.state === 'pending') return nothing;
-      return html`<grf-ask-form .item=${it} @answer=${p.onAskAnswer} @dismiss=${p.onAskDismiss}></grf-ask-form>`;
+      return html`<goder-ask-form .item=${it} @answer=${p.onAskAnswer} @dismiss=${p.onAskDismiss}></goder-ask-form>`;
     case 'approval':
-      return html`<grf-approval-card .item=${it} @approve=${p.onApprove}></grf-approval-card>`;
+      return html`<goder-approval-card .item=${it} @approve=${p.onApprove}></goder-approval-card>`;
     case 'error':
       return html`<div class="err">${it.text}</div>`;
     case 'status':
@@ -158,39 +158,39 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
   }
 }
 
-/** assistant 正文:含 <grf-task>/<grf-skill> 协议块时拆段渲染 —— 普通
+/** assistant 正文:含 <goder-task>/<goder-skill> 协议块时拆段渲染 —— 普通
  * 段照常走 markdown(段内再拆技能块),完整闭合的任务/技能块渲染为
- * grf-task-card / grf-skill-card(流式未闭合块由解析层丢弃,闭合后成卡)。 */
+ * goder-task-card / goder-skill-card(流式未闭合块由解析层丢弃,闭合后成卡)。 */
 function renderAssistantBody(it: { text: string }, p: MessageViewProps): (TemplateResult | typeof nothing)[] {
   const segs: TaskSegment[] = hasTaskBlock(it.text)
-    ? parseGrfTaskBlocks(it.text)
+    ? parseGoderTaskBlocks(it.text)
     : [{ type: 'text', text: it.text }];
   return segs.flatMap((seg) => {
     if (seg.type === 'task') {
       return [
-        html`<grf-task-card
+        html`<goder-task-card
           .name=${seg.name}
           .instructions=${seg.instructions}
           .saved=${p.isTaskSaved(seg.name, seg.instructions)}
           @save=${(e: CustomEvent<{ name: string; instructions: string }>) =>
             p.onSaveTask(e.detail.name, e.detail.instructions)}
-        ></grf-task-card>`,
+        ></goder-task-card>`,
       ];
     }
     // 文本段内继续拆技能块(执行会话只出技能块,任务段与技能块不会混出)
     if (seg.type !== 'text') return [];
     const parts: TaskSegment[] = hasSkillBlock(seg.text)
-      ? parseGrfSkillBlocks(seg.text)
+      ? parseGoderSkillBlocks(seg.text)
       : [{ type: 'text', text: seg.text }];
     return parts.map((part) =>
       part.type === 'skill'
-        ? html`<grf-skill-card
+        ? html`<goder-skill-card
             .name=${part.name}
             .content=${part.content}
             .saved=${p.isSkillSaved(part.name)}
             @save=${(e: CustomEvent<{ name: string; content: string }>) =>
               p.onSaveSkill(e.detail.name, e.detail.content)}
-          ></grf-skill-card>`
+          ></goder-skill-card>`
         : part.type === 'text'
           ? html`${unsafeHTML(chatMarkdown(p.scope, part.text))}`
           : nothing,

@@ -1,13 +1,13 @@
-// chat-panel.ts — <grf-chat>:主体聊天面板(消息流 + composer + 头部)。
-// 右栏/底栏 dock 已剥离到壳层(<grf-side-dock>/<grf-bottom-dock>,
+// chat-panel.ts — <goder-chat>:主体聊天面板(消息流 + composer + 头部)。
+// 右栏/底栏 dock 已剥离到壳层(<goder-side-dock>/<goder-bottom-dock>,
 // shell/side-dock.ts、bottom-dock.ts):dock 是通用布局容器,与聊天内容
 // 无关,剥离后「无聊天但保留右栏」的装配(panels="sessions,sidebar")
-// 成立;三栏开关按钮的属性委托与 grf-toggle-* 事件不变(shell 受控)。
+// 成立;三栏开关按钮的属性委托与 goder-toggle-* 事件不变(shell 受控)。
 // 可独立嵌入(独立态默认无 dock);头部空白区为窗口拖拽区。
 import { css, html, nothing , type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { modelContextWindow } from '../../util/modelctx';
 import { icon } from '../../util/icons';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
@@ -23,8 +23,8 @@ import { renderItem, renderChatNav, cnavWave, cnavReset, type MessageViewProps }
  * 面板,视图切回、面板重连时恢复,用户配完模型回来输入不丢)。 */
 let guardDraft: { text: string; images?: string[] } | null = null;
 
-@customElement('grf-chat')
-export class GrfChat extends GrfPanel {
+@customElement('goder-chat')
+export class GoderChat extends GoderPanel {
   /** 隐藏头部(嵌入态由宿主自绘头部时) */
   @property({ type: Boolean, attribute: 'no-header' }) noHeader = false;
   /** 隐藏 composer(纯展示态) */
@@ -94,15 +94,15 @@ export class GrfChat extends GrfPanel {
         flex-direction: column;
         min-height: 0;
         min-width: 0;
-        /* 黑色圆角主面板(浅色主题经 --grf-card 覆写);底部拉通到窗口
+        /* 黑色圆角主面板(浅色主题经 --goder-card 覆写);底部拉通到窗口
          * 底,只保留上侧圆角。壳层装配(flat)时卡片视觉上移到壳层
          * workcard 容器,本面板透明融入。 */
-        background: var(--grf-card);
+        background: var(--goder-card);
         border-radius: 12px 12px 0 0;
         overflow: hidden;
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
         height: 100%;
         /* 状态浮窗(position:absolute)的定位基准:锚在聊天列右上 */
         position: relative;
@@ -119,7 +119,7 @@ export class GrfChat extends GrfPanel {
         height: 40px;
         padding: 0 14px;
         box-sizing: border-box;
-        border-bottom: 1px solid var(--grf-border);
+        border-bottom: 1px solid var(--goder-border);
         flex: none;
         min-width: 0;
         user-select: none;
@@ -135,7 +135,7 @@ export class GrfChat extends GrfPanel {
       }
       .title {
         font-weight: 600;
-        font-size: var(--grf-font-size);
+        font-size: var(--goder-font-size);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -144,19 +144,19 @@ export class GrfChat extends GrfPanel {
       }
       .chip {
         flex: none;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         padding: 2px 9px;
         border-radius: 99px;
-        border: 1px solid var(--grf-border);
-        color: var(--grf-text-dim);
+        border: 1px solid var(--goder-border);
+        color: var(--goder-text-dim);
         display: inline-flex;
         align-items: center;
         gap: 5px;
       }
       .chip.waiting {
-        color: var(--grf-warn);
-        border-color: var(--grf-warn);
-        background: var(--grf-warn-soft);
+        color: var(--goder-warn);
+        border-color: var(--goder-warn);
+        background: var(--goder-warn-soft);
       }
       .chip .dot {
         width: 6px;
@@ -184,8 +184,8 @@ export class GrfChat extends GrfPanel {
       }
       /* 激活态:不显示强调色,仅淡背景提示开/关 */
       .tg.on {
-        color: var(--grf-text);
-        background: var(--grf-bg-active);
+        color: var(--goder-text);
+        background: var(--goder-bg-active);
       }
       /* 消息区容器:定位基准,承载左侧导航小横线与运行圆环 */
       .msgs-wrap {
@@ -229,7 +229,7 @@ export class GrfChat extends GrfPanel {
         height: 2px;
         flex: none;
         border-radius: 1px;
-        background: var(--grf-border-hover);
+        background: var(--goder-border-hover);
         cursor: pointer;
         transition:
           width 0.12s ease,
@@ -244,10 +244,10 @@ export class GrfChat extends GrfPanel {
         right: -4px;
       }
       .cnav .tick.peak {
-        background: var(--grf-text);
+        background: var(--goder-text);
       }
       .cnav .tick:hover {
-        background: var(--grf-text-dim);
+        background: var(--goder-text-dim);
       }
       .cnav .tick .tip {
         display: none;
@@ -257,14 +257,14 @@ export class GrfChat extends GrfPanel {
         transform: translateY(-50%);
         width: 250px;
         box-sizing: border-box;
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        box-shadow: var(--grf-shadow);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        box-shadow: var(--goder-shadow);
         padding: 7px 10px;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.5;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         white-space: normal;
         pointer-events: none;
       }
@@ -272,7 +272,7 @@ export class GrfChat extends GrfPanel {
         display: block;
       }
       .cnav .tip .u {
-        color: var(--grf-text);
+        color: var(--goder-text);
         font-weight: 600;
         margin-bottom: 3px;
         display: -webkit-box;
@@ -292,8 +292,8 @@ export class GrfChat extends GrfPanel {
         width: 14px;
         height: 14px;
         border-radius: 50%;
-        border: 2px solid var(--grf-border-hover);
-        border-top-color: var(--grf-text-dim);
+        border: 2px solid var(--goder-border-hover);
+        border-top-color: var(--goder-text-dim);
         box-sizing: border-box;
         animation: run-spin 0.8s linear infinite;
         margin: 8px 0 4px;
@@ -315,7 +315,7 @@ export class GrfChat extends GrfPanel {
       .empty {
         padding: 60px 20px;
         text-align: center;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         display: grid;
         gap: 8px;
         justify-items: center;
@@ -328,12 +328,12 @@ export class GrfChat extends GrfPanel {
       .empty h3 {
         margin: 0;
         font-size: 15px;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         font-weight: 600;
       }
       .empty p {
         margin: 0;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         max-width: 420px;
         line-height: 1.7;
       }
@@ -345,8 +345,8 @@ export class GrfChat extends GrfPanel {
       }
       .msg-user .body {
         max-width: 80%;
-        background: var(--grf-user-bubble);
-        border: 1px solid var(--grf-border-soft);
+        background: var(--goder-user-bubble);
+        border: 1px solid var(--goder-border-soft);
         border-radius: 12px;
         padding: 9px 13px;
         white-space: pre-wrap;
@@ -367,15 +367,15 @@ export class GrfChat extends GrfPanel {
       .bop {
         border: none;
         background: transparent;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         padding: 3px;
         border-radius: 5px;
         cursor: pointer;
         display: inline-flex;
       }
       .bop:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text);
+        background: var(--goder-bg-hover);
       }
       .bop svg {
         width: 13px;
@@ -391,19 +391,19 @@ export class GrfChat extends GrfPanel {
         width: 100%;
         min-height: 72px;
         resize: vertical;
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
         line-height: 1.6;
-        color: var(--grf-text);
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border);
+        color: var(--goder-text);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border);
         border-radius: 12px;
         padding: 8px 11px;
         outline: none;
         box-sizing: border-box;
       }
       .edit-box textarea:focus {
-        border-color: var(--grf-accent);
+        border-color: var(--goder-accent);
       }
       .edit-ops {
         display: flex;
@@ -413,8 +413,8 @@ export class GrfChat extends GrfPanel {
       }
       .edit-ops .hint {
         margin-right: auto;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       .msg-user .imgs {
         display: flex;
@@ -426,8 +426,8 @@ export class GrfChat extends GrfPanel {
       .msg-user .imgs img {
         max-width: 180px;
         max-height: 140px;
-        border-radius: var(--grf-radius-sm);
-        border: 1px solid var(--grf-border);
+        border-radius: var(--goder-radius-sm);
+        border: 1px solid var(--goder-border);
       }
       .msg-assistant .md {
         line-height: 1.72;
@@ -450,22 +450,22 @@ export class GrfChat extends GrfPanel {
       }
       .md h1.md-h, .md h2.md-h {
         font-size: 16px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         padding-bottom: 4px;
       }
       .md h3.md-h { font-size: 14.5px; }
       .md h4.md-h, .md h5.md-h, .md h6.md-h { font-size: 13.5px; }
       .md code {
-        font-family: var(--grf-mono);
+        font-family: var(--goder-mono);
         font-size: 0.9em;
-        background: var(--grf-bg-hover);
+        background: var(--goder-bg-hover);
         border-radius: 4px;
         padding: 1px 5px;
       }
       .md pre.md-code {
         background: #131418;
-        border: 1px solid var(--grf-border-soft);
-        border-radius: var(--grf-radius-sm);
+        border: 1px solid var(--goder-border-soft);
+        border-radius: var(--goder-radius-sm);
         padding: 10px 12px;
         overflow: auto;
         margin: 0 0 8px;
@@ -473,7 +473,7 @@ export class GrfChat extends GrfPanel {
       .md pre.md-code code {
         background: none;
         padding: 0;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         line-height: 1.6;
         color: #c6cad2;
         white-space: pre-wrap;
@@ -487,17 +487,17 @@ export class GrfChat extends GrfPanel {
         margin: 2px 0;
       }
       .md a {
-        color: var(--grf-accent-text);
+        color: var(--goder-accent-text);
       }
       .md blockquote.md-quote {
         margin: 0 0 8px;
         padding: 2px 12px;
-        border-left: 3px solid var(--grf-border);
-        color: var(--grf-text-dim);
+        border-left: 3px solid var(--goder-border);
+        color: var(--goder-text-dim);
       }
       .md hr.md-hr {
         border: none;
-        border-top: 1px solid var(--grf-border);
+        border-top: 1px solid var(--goder-border);
         margin: 12px 0;
       }
       .md table.md-table {
@@ -509,14 +509,14 @@ export class GrfChat extends GrfPanel {
       }
       .md table.md-table th,
       .md table.md-table td {
-        border: 1px solid var(--grf-border);
+        border: 1px solid var(--goder-border);
         padding: 4px 10px;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         vertical-align: top;
         text-align: left;
       }
       .md table.md-table th {
-        background: var(--grf-bg-hover);
+        background: var(--goder-bg-hover);
         font-weight: 650;
         white-space: nowrap;
       }
@@ -524,17 +524,17 @@ export class GrfChat extends GrfPanel {
         display: inline-block;
         width: 7px;
         height: 15px;
-        background: var(--grf-accent);
+        background: var(--goder-accent);
         vertical-align: text-bottom;
         margin-left: 2px;
         animation: pulse 0.9s step-end infinite;
       }
       /* 思考块:无背景,仅左侧细线标识 */
       .reasoning {
-        border-left: 2px solid var(--grf-border);
+        border-left: 2px solid var(--goder-border);
         padding: 6px 11px;
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text-dim);
       }
       .reasoning .rhead {
         display: flex;
@@ -542,8 +542,8 @@ export class GrfChat extends GrfPanel {
         gap: 6px;
         cursor: pointer;
         user-select: none;
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-xs);
         font-weight: 600;
       }
       .reasoning .rhead svg {
@@ -554,7 +554,7 @@ export class GrfChat extends GrfPanel {
         width: 12px;
         height: 12px;
         flex: none;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         transition: transform 0.15s;
       }
       .reasoning .rhead .chev.open {
@@ -562,7 +562,7 @@ export class GrfChat extends GrfPanel {
       }
       .reasoning pre {
         margin: 6px 0 0;
-        font-family: var(--grf-font);
+        font-family: var(--goder-font);
         white-space: pre-wrap;
         word-break: break-word;
         max-height: 180px;
@@ -575,11 +575,11 @@ export class GrfChat extends GrfPanel {
         align-items: center;
         gap: 7px;
         cursor: pointer;
-        color: var(--grf-accent-text);
-        background: var(--grf-accent-soft);
-        border-radius: var(--grf-radius-sm);
+        color: var(--goder-accent-text);
+        background: var(--goder-accent-soft);
+        border-radius: var(--goder-radius-sm);
         padding: 4px 10px;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         white-space: nowrap;
       }
       .reasoning.live svg {
@@ -607,29 +607,29 @@ export class GrfChat extends GrfPanel {
         display: flex;
         align-items: baseline;
         gap: 8px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
         padding: 2px 2px;
       }
       .notice .k {
-        color: var(--grf-text-faint);
-        font-family: var(--grf-mono);
+        color: var(--goder-text-faint);
+        font-family: var(--goder-mono);
         flex: none;
       }
-      .notice.goal .k { color: var(--grf-success); }
-      .notice.plan .k { color: var(--grf-reasoning); }
+      .notice.goal .k { color: var(--goder-success); }
+      .notice.plan .k { color: var(--goder-reasoning); }
       .status {
         text-align: center;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
       }
       .err {
-        border: 1px solid var(--grf-error);
-        background: var(--grf-error-soft);
-        color: var(--grf-error);
-        border-radius: var(--grf-radius-sm);
+        border: 1px solid var(--goder-error);
+        background: var(--goder-error-soft);
+        color: var(--goder-error);
+        border-radius: var(--goder-radius-sm);
         padding: 8px 12px;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
@@ -638,7 +638,7 @@ export class GrfChat extends GrfPanel {
         max-height: 60%;
         overflow-y: auto;
         padding: 10px 18px 14px;
-        background: linear-gradient(to top, var(--grf-card) 65%, transparent);
+        background: linear-gradient(to top, var(--goder-card) 65%, transparent);
       }
       .composer-area .inner {
         max-width: 860px;
@@ -664,7 +664,7 @@ export class GrfChat extends GrfPanel {
         leftOn: this.leftOn,
         desktopLights: this.leftLights,
         desktopWinControls: this.winControls,
-        toggleLeft: () => this.fire('grf-toggle-sessions'),
+        toggleLeft: () => this.fire('goder-toggle-sessions'),
       },
     };
     return this._ctx;
@@ -691,7 +691,7 @@ export class GrfChat extends GrfPanel {
     // 聊天列宽度观察:窄于阈值自动把状态浮窗收成单行(不遮对话内容)
     this.colRo = new ResizeObserver((es) => {
       const w = es[0]?.contentRect.width ?? 0;
-      const narrow = w > 0 && w < GrfChat.NARROW_AT;
+      const narrow = w > 0 && w < GoderChat.NARROW_AT;
       if (narrow !== this.colNarrow) this.colNarrow = narrow;
     });
   }
@@ -812,7 +812,7 @@ export class GrfChat extends GrfPanel {
             >
               ${this.leftToggle && !this.leftOn
                 ? html`<span class="toggler">
-                    <button class="ghost tg" title="展开侧栏" @click=${() => this.fire('grf-toggle-sessions')}>${unsafeHTML(icon.panelLeft)}</button>
+                    <button class="ghost tg" title="展开侧栏" @click=${() => this.fire('goder-toggle-sessions')}>${unsafeHTML(icon.panelLeft)}</button>
                   </span>`
                 : nothing}
               <span class="title" title=${title}>${title || '未选择会话'}</span>
@@ -822,19 +822,19 @@ export class GrfChat extends GrfPanel {
                   ? html`<button
                       class="ghost tg ${this.bottomOn ? 'on' : ''}"
                       title=${bottomDefs[0].label}
-                      @click=${() => this.fire('grf-toggle-bottom')}
+                      @click=${() => this.fire('goder-toggle-bottom')}
                     >
                       ${unsafeHTML(bottomDefs[0].icon)}
                     </button>`
                   : nothing}
                 ${showSidebarToggle
-                  ? html`<button class="ghost tg ${this.sidebarOn ? 'on' : ''}" title="右栏面板" @click=${() => this.fire('grf-toggle-sidebar')}>${unsafeHTML(icon.panelRight)}</button>`
+                  ? html`<button class="ghost tg ${this.sidebarOn ? 'on' : ''}" title="右栏面板" @click=${() => this.fire('goder-toggle-sidebar')}>${unsafeHTML(icon.panelRight)}</button>`
                   : nothing}
               </span>
             </header>
           `}
       ${getStatusPop(this.scope)
-        ? html`<grf-status-pop scope=${this.scope} .git=${this.git} .narrow=${this.colNarrow}></grf-status-pop>`
+        ? html`<goder-status-pop scope=${this.scope} .git=${this.git} .narrow=${this.colNarrow}></goder-status-pop>`
         : nothing}
       <div class="msgs-wrap">
             <div class="msgs" @scroll=${this.onScroll}>
@@ -852,7 +852,7 @@ export class GrfChat extends GrfPanel {
             : html`
                 <div class="composer-area">
                   <div class="inner">
-                    <grf-composer
+                    <goder-composer
                       scope=${this.scope}
                       .running=${running}
                       .inputRequired=${waiting}
@@ -881,7 +881,7 @@ export class GrfChat extends GrfPanel {
                       @answer=${this.onAskAnswer}
                       @dismiss=${this.onAskDismiss}
                       @stop=${() => void s!.cancelActive()}
-                    ></grf-composer>
+                    ></goder-composer>
                   </div>
                 </div>
               `}
@@ -1009,21 +1009,21 @@ export class GrfChat extends GrfPanel {
       return false;
     }
     s?.log('warn', '尚未选择模型:请在输入框下方「模型」中选择后再发送');
-    const c = this.renderRoot.querySelector('grf-composer') as { openModelPicker?(): void } | null;
+    const c = this.renderRoot.querySelector('goder-composer') as { openModelPicker?(): void } | null;
     c?.openModelPicker?.();
     return false;
   }
 
   /** 把守卫草稿回填 composer(文本/图片),焦点回输入框。 */
   private restoreDraft(payload: { text: string; images?: string[] }): void {
-    const c = this.renderRoot.querySelector('grf-composer') as { setDraft?(t: string, i?: string[]): void } | null;
+    const c = this.renderRoot.querySelector('goder-composer') as { setDraft?(t: string, i?: string[]): void } | null;
     c?.setDraft?.(payload.text, payload.images);
   }
 
   /** 跳到设置的模型分区(先切到设置页再下发分区,两事件均由 app-shell 接)。 */
   private goModelSettings(): void {
-    this.fire('grf-open-settings');
-    this.fire('grf-settings-section', 'models');
+    this.fire('goder-open-settings');
+    this.fire('goder-settings-section', 'models');
   }
 
   // composer 策略选择:已有会话即时生效(服务端运行时变更);草稿则随首条消息
@@ -1118,6 +1118,6 @@ function skillDirName(name: string): string {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-chat': GrfChat;
+    'goder-chat': GoderChat;
   }
 }

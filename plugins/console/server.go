@@ -62,7 +62,7 @@ type rpcOut struct {
 	Error   *rpcErrorBody  `json:"error,omitempty"`
 }
 
-// Handler 组装 HTTP 处理器:/mcp(JSON-RPC)+ /grf-eval-report(Windows
+// Handler 组装 HTTP 处理器:/mcp(JSON-RPC)+ /goder-eval-report(Windows
 // 浏览器求值回报,见 internal/browser/eval.go)。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()

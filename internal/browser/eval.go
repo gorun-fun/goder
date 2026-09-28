@@ -27,7 +27,7 @@ var ErrUnsupported = errors.New("当前平台不支持面板浏览器控制")
 
 // EvalReportPath 求值回报端点路径(Windows 机制;挂在 goder-console
 // 的 loopback HTTP 服务上)。
-const EvalReportPath = "/grf-eval-report"
+const EvalReportPath = "/goder-eval-report"
 
 // evalWaitTimeout 单次原生求值/截图的等待上限(页面里的死循环表达式
 // 不至于挂死调用链)。
@@ -181,26 +181,26 @@ func CompleteEval(id string, payload string) {
 }
 
 // hooksJS 页面捕获脚本:console.* 与 error/unhandledrejection、fetch 与
-// XMLHttpRequest 的请求记录,缓存在页面 window.__grfLog/__grfNet(各
+// XMLHttpRequest 的请求记录,缓存在页面 window.__goderLog/__goderNet(各
 // 上限 500 条,丢最旧),由 goder_browser_console / network 工具读取并
-// 清空。幂等(__grfConsoleHooked 哨兵),darwin 经 WKUserScript 在
+// 清空。幂等(__goderConsoleHooked 哨兵),darwin 经 WKUserScript 在
 // document start 注入,Windows 每次求值前补装。
 const hooksJS = `(() => {
-	if (window.__grfConsoleHooked) return;
-	window.__grfConsoleHooked = true;
+	if (window.__goderConsoleHooked) return;
+	window.__goderConsoleHooked = true;
 	const CAP = 500;
 	const push = (arr, s) => { if (arr.length >= CAP) arr.shift(); arr.push(s); };
-	window.__grfLog = [];
-	window.__grfNet = [];
+	window.__goderLog = [];
+	window.__goderNet = [];
 	const ser = (v) => { try { return typeof v === 'string' ? v : JSON.stringify(v); } catch (e) { return String(v); } };
 	for (const lvl of ['log', 'info', 'warn', 'error', 'debug']) {
 		const orig = console[lvl] ? console[lvl].bind(console) : null;
-		console[lvl] = (...args) => { push(window.__grfLog, '[' + lvl + '] ' + args.map(ser).join(' ')); if (orig) orig(...args); };
+		console[lvl] = (...args) => { push(window.__goderLog, '[' + lvl + '] ' + args.map(ser).join(' ')); if (orig) orig(...args); };
 	}
 	window.addEventListener('error', (e) => {
-		push(window.__grfLog, '[pageerror] ' + (e.message || 'Script error') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
+		push(window.__goderLog, '[pageerror] ' + (e.message || 'Script error') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
 	});
-	window.addEventListener('unhandledrejection', (e) => { push(window.__grfLog, '[unhandledrejection] ' + ser(e.reason)); });
+	window.addEventListener('unhandledrejection', (e) => { push(window.__goderLog, '[unhandledrejection] ' + ser(e.reason)); });
 	const of = window.fetch;
 	if (of) {
 		window.fetch = function (input, init) {
@@ -208,10 +208,10 @@ const hooksJS = `(() => {
 			const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
 			const t0 = performance.now();
 			return of.apply(this, arguments).then((resp) => {
-				push(window.__grfNet, method + ' ' + url + ' -> ' + resp.status + ' (' + Math.round(performance.now() - t0) + 'ms' + (resp.headers && resp.headers.get ? ', ' + (resp.headers.get('content-type') || '') : '') + ')');
+				push(window.__goderNet, method + ' ' + url + ' -> ' + resp.status + ' (' + Math.round(performance.now() - t0) + 'ms' + (resp.headers && resp.headers.get ? ', ' + (resp.headers.get('content-type') || '') : '') + ')');
 				return resp;
 			}, (err) => {
-				push(window.__grfNet, method + ' ' + url + ' -> 失败: ' + ((err && err.message) || err));
+				push(window.__goderNet, method + ' ' + url + ' -> 失败: ' + ((err && err.message) || err));
 				throw err;
 			});
 		};
@@ -219,10 +219,10 @@ const hooksJS = `(() => {
 	const ox = window.XMLHttpRequest;
 	if (ox && ox.prototype) {
 		const open = ox.prototype.open, send = ox.prototype.send;
-		ox.prototype.open = function (m, u) { this.__grfM = m; this.__grfU = u; this.__grfT = performance.now(); return open.apply(this, arguments); };
+		ox.prototype.open = function (m, u) { this.__goderM = m; this.__goderU = u; this.__goderT = performance.now(); return open.apply(this, arguments); };
 		ox.prototype.send = function () {
 			this.addEventListener('loadend', () => {
-				push(window.__grfNet, String(this.__grfM || 'GET') + ' ' + String(this.__grfU || '') + ' -> ' + this.status + ' (' + Math.round(performance.now() - (this.__grfT || 0)) + 'ms)');
+				push(window.__goderNet, String(this.__goderM || 'GET') + ' ' + String(this.__goderU || '') + ' -> ' + this.status + ' (' + Math.round(performance.now() - (this.__goderT || 0)) + 'ms)');
 			});
 			return send.apply(this, arguments);
 		};

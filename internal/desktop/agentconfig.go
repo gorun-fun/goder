@@ -344,14 +344,14 @@ func (e *skillNameError) Error() string { return "非法技能名:" + e.name }
 
 // ---------- 内置技能(启动烙写,单一源文件) ----------
 
-//go:embed agentskills/grf-auto.md
-var grfAutoSkillMD string
+//go:embed agentskills/goder-auto.md
+var goderAutoSkillMD string
 
-// builtinSkills 内置技能:name → SKILL.md 全文。grf-auto 是自动化操作员
-// 的创作指南:源文件 internal/desktop/agentskills/grf-auto.md 同时被前端
-// core/store/automation.ts 以 vite ?raw 引用(注入操作员 system_prompt,
-// 创建自动化会话即全文生效),改指南只改这一份,不要另建拷贝。
-var builtinSkills = map[string]string{"grf-auto": grfAutoSkillMD}
+// builtinSkills 内置技能:name → SKILL.md 全文。goder-auto 是自动化操作员
+// 的创作指南:源文件 internal/desktop/agentskills/goder-auto.md 同时被前端
+// 两个 vite 配置以 define 常量 __GODER_AUTO_SKILL_MD__ 注入 core(进操作员
+// system_prompt,创建自动化会话即全文生效),改指南只改这一份,不要另建拷贝。
+var builtinSkills = map[string]string{"goder-auto": goderAutoSkillMD}
 
 // ServiceStartup wails 启动钩子:确保内置技能落盘(gh server 若已按旧
 // 清单起跑,重启 gh 后生效)。失败只降级告警,不阻断 app 启动。
@@ -360,6 +360,11 @@ func (a *AgentConfig) ServiceStartup(ctx context.Context, options application.Se
 		if err := ensureBuiltinSkill(name, content); err != nil {
 			log.Printf("[agent] 内置技能 %s 落盘失败(重启后会重试): %v", name, err)
 		}
+	}
+	// 内置技能 grf-auto 更名 goder-auto 的 alpha 迁移:清掉旧名目录,
+	// 避免技能列表里新旧两份指南并存(旧目录只剩过时正文,无用户数据)。
+	if err := os.RemoveAll(filepath.Join(skillsDir(), "grf-auto")); err != nil {
+		log.Printf("[agent] 旧内置技能 grf-auto 清理失败(不影响使用): %v", err)
 	}
 	return nil
 }
@@ -393,7 +398,7 @@ const defaultDownloadBase = "https://download.gorun.fun/grf-harness"
 var builtinPlugins = map[string]bool{"grf-browser": true, "grf-computer": true, "goder-console": true}
 
 func downloadBase() string {
-	if v := strings.TrimSpace(os.Getenv("GRF_DOWNLOAD_BASE")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("GODER_DOWNLOAD_BASE")); v != "" {
 		return strings.TrimRight(v, "/")
 	}
 	return defaultDownloadBase
@@ -522,7 +527,7 @@ func downloadFile(ctx context.Context, url, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".grf-dl-*")
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".goder-dl-*")
 	if err != nil {
 		return err
 	}
@@ -551,8 +556,8 @@ func downloadFile(ctx context.Context, url, dst string) error {
 // "browser"、"grf-browser"、"grf-browser.exe" 视为同一个。
 func matchPluginFile(files []string, name string) (string, bool) {
 	want := strings.TrimSuffix(strings.ToLower(name), ".exe")
-	if !strings.HasPrefix(want, "grf-") {
-		want = "grf-" + want
+	if !strings.HasPrefix(want, "goder-") {
+		want = "goder-" + want
 	}
 	for _, f := range files {
 		if strings.TrimSuffix(strings.ToLower(f), ".exe") == want {

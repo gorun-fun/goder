@@ -8,11 +8,11 @@ import { settingsStore } from '../../../core/settings/settings-store';
 import { inWails } from '../../../host/bridge';
 
 function isBuiltinSkill(name: string): boolean {
-  return name === 'grf-auto';
+  return name === 'goder-auto';
 }
 
-@customElement('grf-settings-skills')
-export class GrfSettingsSkills extends SettingsSectionPanel {
+@customElement('goder-settings-skills')
+export class GoderSettingsSkills extends SettingsSectionPanel {
   static styles = [
     ...sectionSharedCss,
   ];
@@ -145,7 +145,7 @@ export class GrfSettingsSkills extends SettingsSectionPanel {
             <div class="sec">
               <h4>${isBuiltinSkill(this.selSkill) ? '查看' : '编辑'} ${this.selSkill}${isBuiltinSkill(this.selSkill) ? '(内置,只读)' : ''}</h4>
               <textarea
-                style="min-height:220px;font-family:var(--grf-mono);font-size:var(--grf-font-size-sm)"
+                style="min-height:220px;font-family:var(--goder-mono);font-size:var(--goder-font-size-sm)"
                 ?readonly=${isBuiltinSkill(this.selSkill)}
                 .value=${this.skillText}
                 @input=${(e: InputEvent) => (this.skillText = (e.target as HTMLTextAreaElement).value)}
@@ -184,7 +184,7 @@ export class GrfSettingsSkills extends SettingsSectionPanel {
     if (!this.selSkill) return;
     const err = await settingsStore.writeSkill(this.selSkill, this.skillText);
     this.skillMsg = err ? `保存失败:${err}` : '已保存';
-    if (!err) this.fire('grf-saved');
+    if (!err) this.fire('goder-saved');
     this.requestUpdate();
   }
 

@@ -48,13 +48,13 @@ func TestProxyRewriteAndTokenInjection(t *testing.T) {
 	defer up.Close()
 
 	h := NewProxy(ProxyOptions{
-		Prefix: "/grf-api",
+		Prefix: "/goder-api",
 		Resolve: func(*http.Request) (Upstream, error) {
 			return Upstream{Target: mustURL(t, up.URL), Token: "tok-1"}, nil
 		},
 	})
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://x/grf-api/v1/conversations", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://x/goder-api/v1/conversations", nil))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态码 %d", w.Code)
@@ -72,12 +72,12 @@ func TestProxyKeepsClientCredentialsOverwritten(t *testing.T) {
 	up := newRecordingUpstream()
 	defer up.Close()
 	h := NewProxy(ProxyOptions{
-		Prefix: "/grf-api",
+		Prefix: "/goder-api",
 		Resolve: func(*http.Request) (Upstream, error) {
 			return Upstream{Target: mustURL(t, up.URL), Token: "server-side"}, nil
 		},
 	})
-	req := httptest.NewRequest(http.MethodGet, "http://x/grf-api/v1/x", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://x/goder-api/v1/x", nil)
 	req.Header.Set("Authorization", "Bearer browser-leaked")
 	h.ServeHTTP(httptest.NewRecorder(), req)
 	if up.gotAuth != "Bearer server-side" {
@@ -90,12 +90,12 @@ func TestProxyPrefixOnlyPath(t *testing.T) {
 	up := newRecordingUpstream()
 	defer up.Close()
 	h := NewProxy(ProxyOptions{
-		Prefix: "/grf-api",
+		Prefix: "/goder-api",
 		Resolve: func(*http.Request) (Upstream, error) {
 			return Upstream{Target: mustURL(t, up.URL)}, nil
 		},
 	})
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://x/grf-api", nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://x/goder-api", nil))
 	if up.gotPath != "/" {
 		t.Fatalf("空前缀应归一为 /,得到 %q", up.gotPath)
 	}
@@ -107,13 +107,13 @@ func TestProxyBodyBackfill(t *testing.T) {
 	up := newRecordingUpstream()
 	defer up.Close()
 	h := NewProxy(ProxyOptions{
-		Prefix: "/grf-api",
+		Prefix: "/goder-api",
 		Resolve: func(*http.Request) (Upstream, error) {
 			return Upstream{Target: mustURL(t, up.URL), Token: "t"}, nil
 		},
 	})
 	body := []byte(`{"input":[{"type":"input_text","text":"你好"}]}`)
-	req := httptest.NewRequest(http.MethodPost, "http://x/grf-api/v1/responses", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "http://x/goder-api/v1/responses", bytes.NewReader(body))
 	req.ContentLength = 0 // 模拟 wails 合成请求
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -134,13 +134,13 @@ func TestProxyBodyLimit(t *testing.T) {
 	up := newRecordingUpstream()
 	defer up.Close()
 	h := NewProxy(ProxyOptions{
-		Prefix:       "/grf-api",
+		Prefix:       "/goder-api",
 		MaxBodyBytes: 8,
 		Resolve: func(*http.Request) (Upstream, error) {
 			return Upstream{Target: mustURL(t, up.URL)}, nil
 		},
 	})
-	req := httptest.NewRequest(http.MethodPost, "http://x/grf-api/v1/responses", strings.NewReader("0123456789ABCDEF"))
+	req := httptest.NewRequest(http.MethodPost, "http://x/goder-api/v1/responses", strings.NewReader("0123456789ABCDEF"))
 	req.ContentLength = 0
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -151,13 +151,13 @@ func TestProxyBodyLimit(t *testing.T) {
 
 func TestProxyResolveError(t *testing.T) {
 	h := NewProxy(ProxyOptions{
-		Prefix: "/grf-api",
+		Prefix: "/goder-api",
 		Resolve: func(*http.Request) (Upstream, error) {
 			return Upstream{}, io.ErrUnexpectedEOF
 		},
 	})
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://x/grf-api/v1/x", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://x/goder-api/v1/x", nil))
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("Resolve 失败应 502,得到 %d", w.Code)
 	}

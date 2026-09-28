@@ -1,16 +1,16 @@
-// session-detail.ts — <grf-session-detail>:右栏会话详情:模型与用量、todo/goal 状态、
+// session-detail.ts — <goder-session-detail>:右栏会话详情:模型与用量、todo/goal 状态、
 // 工具调用时间线(全部工具卡片,含子代理)、会话元信息(workspace)。
 import { css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme, controls } from '../../ui/panel';
+import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtDuration, fmtTokens, toolLabel } from '../../util/fmt';
 import { displayFullModel } from '../../core/settings/settings-store';
 import type { ToolItem } from '../../core/model/chat-model';
 
-@customElement('grf-session-detail')
-export class GrfSessionDetail extends GrfPanel {
+@customElement('goder-session-detail')
+export class GoderSessionDetail extends GoderPanel {
   @state() private detailTab: 'timeline' | 'todos' = 'timeline';
   private detailTimer?: ReturnType<typeof setInterval>;
 
@@ -23,19 +23,19 @@ export class GrfSessionDetail extends GrfPanel {
         flex-direction: column;
         height: 100%;
         min-height: 0;
-        background: var(--grf-bg-raise);
-        border-left: 1px solid var(--grf-border-soft);
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        background: var(--goder-bg-raise);
+        border-left: 1px solid var(--goder-border-soft);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
         width: 100%;
       }
       .head {
         flex: none;
         padding: 10px 12px;
         font-weight: 650;
-        font-size: var(--grf-font-size);
-        border-bottom: 1px solid var(--grf-border-soft);
+        font-size: var(--goder-font-size);
+        border-bottom: 1px solid var(--goder-border-soft);
       }
       .scroll {
         flex: 1;
@@ -48,8 +48,8 @@ export class GrfSessionDetail extends GrfPanel {
       }
       .sec h4 {
         margin: 0 0 7px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-faint);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
         font-weight: 650;
         letter-spacing: 0.4px;
         text-transform: uppercase;
@@ -65,14 +65,14 @@ export class GrfSessionDetail extends GrfPanel {
         display: grid;
         grid-template-columns: auto 1fr;
         gap: 4px 12px;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
       }
       .kv .k {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         white-space: nowrap;
       }
       .kv .v {
-        color: var(--grf-text);
+        color: var(--goder-text);
         text-align: right;
         word-break: break-all;
         font-variant-numeric: tabular-nums;
@@ -80,20 +80,20 @@ export class GrfSessionDetail extends GrfPanel {
       .tabs {
         display: flex;
         gap: 4px;
-        border-bottom: 1px solid var(--grf-border-soft);
+        border-bottom: 1px solid var(--goder-border-soft);
         margin-bottom: 2px;
       }
       .tab {
         padding: 4px 10px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
         cursor: pointer;
         border-bottom: 2px solid transparent;
         margin-bottom: -1px;
       }
       .tab.on {
-        color: var(--grf-text);
-        border-bottom-color: var(--grf-accent);
+        color: var(--goder-text);
+        border-bottom-color: var(--goder-accent);
       }
       .timeline {
         display: grid;
@@ -103,38 +103,38 @@ export class GrfSessionDetail extends GrfPanel {
         display: flex;
         align-items: center;
         gap: 7px;
-        font-size: var(--grf-font-size-xs);
+        font-size: var(--goder-font-size-xs);
         padding: 4px 6px;
-        border-radius: var(--grf-radius-sm);
+        border-radius: var(--goder-radius-sm);
         cursor: default;
       }
       .row:hover {
-        background: var(--grf-bg-hover);
+        background: var(--goder-bg-hover);
       }
       .row .st {
         width: 8px;
         height: 8px;
         border-radius: 50%;
         flex: none;
-        background: var(--grf-text-faint);
+        background: var(--goder-text-faint);
       }
-      .row.done .st { background: var(--grf-success); }
-      .row.error .st { background: var(--grf-error); }
-      .row.denied .st { background: var(--grf-warn); }
+      .row.done .st { background: var(--goder-success); }
+      .row.error .st { background: var(--goder-error); }
+      .row.denied .st { background: var(--goder-warn); }
       .row.running .st {
-        background: var(--grf-accent);
+        background: var(--goder-accent);
         animation: blink 1.2s ease-in-out infinite;
       }
       @keyframes blink {
         50% { opacity: 0.35; }
       }
       .row .nm {
-        font-family: var(--grf-mono);
-        color: var(--grf-text);
+        font-family: var(--goder-mono);
+        color: var(--goder-text);
         flex: none;
       }
       .row .sm {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -142,7 +142,7 @@ export class GrfSessionDetail extends GrfPanel {
         min-width: 0;
       }
       .row .ag {
-        color: var(--grf-reasoning);
+        color: var(--goder-reasoning);
         flex: none;
         font-size: 10px;
       }
@@ -151,13 +151,13 @@ export class GrfSessionDetail extends GrfPanel {
         gap: 8px;
         align-items: baseline;
         padding: 3px 0;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
       }
       .todo .box {
         flex: none;
         width: 13px;
         height: 13px;
-        border: 1px solid var(--grf-text-faint);
+        border: 1px solid var(--goder-text-faint);
         border-radius: 3px;
         display: inline-flex;
         align-items: center;
@@ -165,12 +165,12 @@ export class GrfSessionDetail extends GrfPanel {
         margin-top: 2px;
       }
       .todo.completed {
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         text-decoration: line-through;
       }
       .todo.completed .box {
-        background: var(--grf-success);
-        border-color: var(--grf-success);
+        background: var(--goder-success);
+        border-color: var(--goder-success);
       }
       .todo.completed .box svg {
         width: 9px;
@@ -178,15 +178,15 @@ export class GrfSessionDetail extends GrfPanel {
         color: #0c2817;
       }
       .todo.in_progress {
-        color: var(--grf-text);
+        color: var(--goder-text);
       }
       .todo.in_progress .box {
-        border-color: var(--grf-accent);
-        box-shadow: 0 0 0 2px var(--grf-accent-soft);
+        border-color: var(--goder-accent);
+        box-shadow: 0 0 0 2px var(--goder-accent-soft);
       }
       .empty {
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-xs);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-xs);
         padding: 6px 2px;
       }
       .actions {
@@ -281,11 +281,11 @@ export class GrfSessionDetail extends GrfPanel {
         <div class="sec">
           <h4>${unsafeHTML(icon.folder)} 元信息</h4>
           <div class="kv">
-            <span class="k">会话 ID</span><span class="v" style="font-family:var(--grf-mono);font-size:var(--grf-font-size-xs)">${sid}</span>
+            <span class="k">会话 ID</span><span class="v" style="font-family:var(--goder-mono);font-size:var(--goder-font-size-xs)">${sid}</span>
             <span class="k">创建</span><span class="v">${new Date(rec?.createdAt ?? conv?.created_at ?? Date.now()).toLocaleString()}</span>
           </div>
           ${conv?.workspace
-            ? html`<div class="kv" style="margin-top:4px"><span class="k">Workspace</span><span class="v" style="font-family:var(--grf-mono);font-size:var(--grf-font-size-xs)">${conv.workspace}</span></div>`
+            ? html`<div class="kv" style="margin-top:4px"><span class="k">Workspace</span><span class="v" style="font-family:var(--goder-mono);font-size:var(--goder-font-size-xs)">${conv.workspace}</span></div>`
             : nothing}
           <div class="actions">
             <button title="压缩上下文" ?disabled=${!rt?.lastResponseId} @click=${() => void s.compactActive()}>
@@ -346,6 +346,6 @@ export class GrfSessionDetail extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-session-detail': GrfSessionDetail;
+    'goder-session-detail': GoderSessionDetail;
   }
 }

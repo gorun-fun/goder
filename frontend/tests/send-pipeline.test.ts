@@ -3,7 +3,7 @@
 // 在此覆盖各分支。
 import { describe, it, expect, vi } from 'vitest';
 import { createSendPipeline, errText, type SendPipelineDeps } from '../src/core/store/send-pipeline';
-import { GrfApiError } from '../src/core/api/client';
+import { GoderApiError } from '../src/core/api/client';
 import { newRuntime } from '../src/core/model/chat-model';
 import type { ResponseResource, SendOptions } from '../src/core/api/types';
 
@@ -95,7 +95,7 @@ describe('send-pipeline', () => {
       send: async (o) => {
         sent++;
         ctx.sends.push(o);
-        if (sent === 1) throw new GrfApiError(400, 'bad_request', 'resp_x is not the latest response in the conversation');
+        if (sent === 1) throw new GoderApiError(400, 'bad_request', 'resp_x is not the latest response in the conversation');
         return done({ id: 'resp_ok' });
       },
       getConversation: async () => ({ last_response_id: 'resp_server_tail' }) as never,
@@ -112,7 +112,7 @@ describe('send-pipeline', () => {
   it('非重试错误(401)原样抛出,不重试', async () => {
     const { pipeline } = makePipeline({
       send: async () => {
-        throw new GrfApiError(401, 'unauthorized', 'token expired');
+        throw new GoderApiError(401, 'unauthorized', 'token expired');
       },
       getConversation: async () => ({ last_response_id: '' }) as never,
       retrieveResponse: async () => null as never,
@@ -124,7 +124,7 @@ describe('send-pipeline', () => {
   it('链尾失配但服务器尾与请求一致:真实错误上抛(不无限循环)', async () => {
     const { pipeline } = makePipeline({
       send: async () => {
-        throw new GrfApiError(400, 'bad_request', 'forking history is not supported');
+        throw new GoderApiError(400, 'bad_request', 'forking history is not supported');
       },
       getConversation: async () => ({ last_response_id: 'resp_old' }) as never,
       retrieveResponse: async () => null as never,

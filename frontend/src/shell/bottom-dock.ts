@@ -1,13 +1,13 @@
-// bottom-dock.ts — <grf-bottom-dock>:底栏 dock(多 tab,按会话分组常驻
+// bottom-dock.ts — <goder-bottom-dock>:底栏 dock(多 tab,按会话分组常驻
 // 保活)。从 chat-panel 剥离的通用容器:每个 tab 一个独立实例元素
 // (BottomTabDef.create),所有会话的 tab pane 常驻 DOM(隐藏保活),
 // 仅「当前会话 + 激活 tab」可见;tab 行只展示当前会话的 tab。展开态由
-// 壳层受控(grf-toggle-bottom 上抛),高度可拖。
+// 壳层受控(goder-toggle-bottom 上抛),高度可拖。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { PropertyValues } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { GrfPanel, theme } from '../ui/panel';
+import { GoderPanel, theme } from '../ui/panel';
 import { icon } from '../util/icons';
 import { registry, type PanelContext, type BottomTabDef } from '../registry/registry';
 
@@ -18,8 +18,8 @@ interface BottomTabInstance {
   el: HTMLElement;
 }
 
-@customElement('grf-bottom-dock')
-export class GrfBottomDock extends GrfPanel {
+@customElement('goder-bottom-dock')
+export class GoderBottomDock extends GoderPanel {
   /** 展开态(tab 会话保活,收起不销毁) */
   @property({ type: Boolean }) on = false;
 
@@ -49,9 +49,9 @@ export class GrfBottomDock extends GrfPanel {
         flex: none;
         min-height: 90px;
         background: transparent;
-        font-family: var(--grf-font);
-        font-size: var(--grf-font-size);
-        color: var(--grf-text);
+        font-family: var(--goder-font);
+        font-size: var(--goder-font-size);
+        color: var(--goder-text);
       }
       :host(.off),
       :host(.no-defs) {
@@ -68,10 +68,10 @@ export class GrfBottomDock extends GrfPanel {
         content: '';
         position: absolute;
         inset: 1.5px 0;
-        background: var(--grf-border-soft);
+        background: var(--goder-border-soft);
       }
       .gutter-h:hover::after {
-        background: var(--grf-border-hover);
+        background: var(--goder-border-hover);
       }
       .gutter-h.off {
         display: none;
@@ -99,19 +99,19 @@ export class GrfBottomDock extends GrfPanel {
         align-items: center;
         gap: 5px;
         padding: 3px 9px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
         border-bottom: 2px solid transparent;
         cursor: pointer;
         white-space: nowrap;
       }
       .bt-tab:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text);
+        background: var(--goder-bg-hover);
       }
       .bt-tab.on {
-        color: var(--grf-text);
-        border-bottom-color: var(--grf-text);
+        color: var(--goder-text);
+        border-bottom-color: var(--goder-text);
       }
       .bt-tab svg {
         width: 11px;
@@ -123,7 +123,7 @@ export class GrfBottomDock extends GrfPanel {
         border: none;
         background: transparent;
         padding: 0 0 0 2px;
-        color: var(--grf-text-faint);
+        color: var(--goder-text-faint);
         cursor: pointer;
       }
       .bt-tab .x svg {
@@ -134,7 +134,7 @@ export class GrfBottomDock extends GrfPanel {
         display: inline-flex;
       }
       .bt-tab .x:hover {
-        color: var(--grf-error);
+        color: var(--goder-error);
       }
       .bt-ops {
         margin-left: auto;
@@ -148,14 +148,14 @@ export class GrfBottomDock extends GrfPanel {
         padding: 3px 5px;
         border: none;
         background: transparent;
-        color: var(--grf-text-faint);
-        border-radius: var(--grf-radius-sm);
+        color: var(--goder-text-faint);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
         display: inline-flex;
       }
       .bt-ops .op:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text);
+        background: var(--goder-bg-hover);
       }
       .bt-ops .op svg {
         width: 12px;
@@ -167,10 +167,10 @@ export class GrfBottomDock extends GrfPanel {
         top: 100%;
         right: 6px;
         z-index: 30;
-        background: var(--grf-bg-raise);
-        border: 1px solid var(--grf-border);
-        border-radius: var(--grf-radius);
-        box-shadow: var(--grf-shadow);
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border);
+        border-radius: var(--goder-radius);
+        box-shadow: var(--goder-shadow);
         padding: 4px;
         min-width: 140px;
         display: flex;
@@ -182,15 +182,15 @@ export class GrfBottomDock extends GrfPanel {
         align-items: center;
         gap: 8px;
         padding: 6px 8px;
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
-        border-radius: var(--grf-radius-sm);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
+        border-radius: var(--goder-radius-sm);
         cursor: pointer;
         user-select: none;
       }
       .bt-menu .mi:hover {
-        background: var(--grf-bg-hover);
-        color: var(--grf-text);
+        background: var(--goder-bg-hover);
+        color: var(--goder-text);
       }
       .bt-menu .mi svg {
         width: 12px;
@@ -343,7 +343,7 @@ export class GrfBottomDock extends GrfPanel {
     if (next.length === 0) {
       this.activeId = '';
       this.activeBySid.set(this.poolSid, '');
-      this.fire('grf-toggle-bottom'); // 最后一个关掉:整栏收起
+      this.fire('goder-toggle-bottom'); // 最后一个关掉:整栏收起
       return;
     }
     if (this.activeId === uid) {
@@ -396,7 +396,7 @@ export class GrfBottomDock extends GrfPanel {
             ${defs.length > 1
               ? html`<button class="op" title=${this.t('新建底栏 tab')} @click=${() => (this.menuOpen = !this.menuOpen)}>${unsafeHTML(icon.plus)}</button>`
               : html`<button class="op" title=${this.t('新建{label}', { label: defs[0].label })} @click=${() => this.addTab()}>${unsafeHTML(icon.plus)}</button>`}
-            <button class="op" title=${this.t('收起底栏')} @click=${() => this.fire('grf-toggle-bottom')}>${unsafeHTML(icon.close)}</button>
+            <button class="op" title=${this.t('收起底栏')} @click=${() => this.fire('goder-toggle-bottom')}>${unsafeHTML(icon.close)}</button>
           </span>
           ${this.menuOpen
             ? html`
@@ -440,6 +440,6 @@ export class GrfBottomDock extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-bottom-dock': GrfBottomDock;
+    'goder-bottom-dock': GoderBottomDock;
   }
 }

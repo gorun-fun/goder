@@ -12,8 +12,8 @@ import '../shell/builtin-common';
 import '../shell/builtin-desktop';
 import '../panels/chat/chat-panel';
 
-@customElement('grf-desktop')
-export class GrfDesktop extends LitElement {
+@customElement('goder-desktop')
+export class GoderDesktop extends LitElement {
   @state() private ready = false;
   /** init 诊断标记(顶栏显示,定位启动链路问题) */
   @state() private initStage = 'mount';
@@ -26,7 +26,7 @@ export class GrfDesktop extends LitElement {
         width: 100%;
         height: 100vh;
       }
-      grf-app-shell {
+      goder-app-shell {
         height: 100%;
       }
     `,
@@ -53,12 +53,12 @@ export class GrfDesktop extends LitElement {
     }
     // 桌面:先把连接无阻塞切到同源代理(wails 调用通道加载初期可能挂起,
     // 不能把连接设置挡在任何 wails 调用后面);token 等桥就绪后异步补上。
-    configureScope('app', { baseUrl: `${location.origin}/grf-api`, token: '', persistToken: true });
+    configureScope('app', { baseUrl: `${location.origin}/goder-api`, token: '', persistToken: true });
     this.initStage = 'proxy';
     void this.bootstrapDesktop();
   }
 
-  // bootstrapDesktop 桌面态异步引导:冷启动连接只走同源 /grf-api/token
+  // bootstrapDesktop 桌面态异步引导:冷启动连接只走同源 /goder-api/token
   // (纯 fetch,零 wails 依赖;Go 侧已在启动时自行拉起托管 gh)。桥与
   // 配置读取延后懒做,失败不影响连接。
   private async bootstrapDesktop(): Promise<void> {
@@ -67,7 +67,7 @@ export class GrfDesktop extends LitElement {
         try {
           // 注意:勿用 cache:'no-store' —— WKWebView 自定义 scheme 对该
           // 缓存模式的请求可能被直接丢弃(请求不达 Go 侧)。
-          const r = await fetch(`${location.origin}/grf-api/token`);
+          const r = await fetch(`${location.origin}/goder-api/token`);
           if (r.ok) {
             const info = (await r.json()) as { mode: string; running?: boolean; token?: string };
             // 托管模式:令牌由 app 内同源代理注入,浏览器侧留空即可就绪;
@@ -108,14 +108,14 @@ export class GrfDesktop extends LitElement {
     const hasModel = (mc.providers ?? []).some((p) => (p.models ?? []).length > 0);
     if (hasModel) return;
     void this.updateComplete.then(() => {
-      const shell = this.renderRoot.querySelector('grf-app-shell');
-      shell?.dispatchEvent(new CustomEvent('grf-open-settings', { bubbles: true, composed: true }));
-      shell?.dispatchEvent(new CustomEvent('grf-settings-section', { detail: 'models', bubbles: true, composed: true }));
+      const shell = this.renderRoot.querySelector('goder-app-shell');
+      shell?.dispatchEvent(new CustomEvent('goder-open-settings', { bubbles: true, composed: true }));
+      shell?.dispatchEvent(new CustomEvent('goder-settings-section', { detail: 'models', bubbles: true, composed: true }));
     });
   }
 
   render() {
-    return html`<grf-app-shell scope="app"></grf-app-shell>`;
+    return html`<goder-app-shell scope="app"></goder-app-shell>`;
   }
 }
 
@@ -124,7 +124,7 @@ export class GrfDesktop extends LitElement {
 // —— 必须先于 UI 挂载完成,否则面板可见性守卫(inWails)会取到 false。
 const mount = () => {
   void detectDesktopHost().then(() => {
-    const el = document.createElement('grf-desktop');
+    const el = document.createElement('goder-desktop');
     document.body.appendChild(el);
   });
 };

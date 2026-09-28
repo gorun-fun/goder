@@ -4,7 +4,7 @@
 // 嵌入方运行时策略(会话兜底配置/发送钩子/审批钩子)经 host-config.ts
 // 按 scope 注入;恢复策略(重试判定)经 retry-policy.ts 可注入;轻量持久化
 // 统一走 storage.ts 的可注入键值存储。
-import { GrfApiError, GrfClient } from '../api/client';
+import { GoderApiError, GoderClient } from '../api/client';
 import { friendlyError } from '../../util/fmt';
 import { tFor } from '../i18n';
 import type {
@@ -75,7 +75,7 @@ export interface ConsoleEntry {
 /** 鉴权预留:多用户网关模式下 401 的处置。职责边界 —— 登录体系属于
  * 部署方/集成方;这里只提供"未登录时该做什么"的挂钩。 */
 export interface AuthConfig {
-  /** 未登录时跳转的登录入口(如 /grf-api/auth/login);优先于 onUnauthorized */
+  /** 未登录时跳转的登录入口(如 /goder-api/auth/login);优先于 onUnauthorized */
   loginUrl?: string;
   /** 未登录回调(宿主自定义跳转/弹窗);设置后不再自动跳 loginUrl */
   onUnauthorized?: (scope: string) => void;
@@ -108,9 +108,9 @@ export interface DraftInfo {
   variant?: 'run';
 }
 
-export class GrfScope extends Emitter {
+export class GoderScope extends Emitter {
   readonly name: string;
-  client: GrfClient;
+  client: GoderClient;
   model?: string;
   connState: ConnState = 'unknown';
   connError?: string;
@@ -168,7 +168,7 @@ export class GrfScope extends Emitter {
     super();
     this.name = name;
     this.t = tFor(name);
-    this.client = new GrfClient({ baseUrl: cfg.baseUrl, token: cfg.token });
+    this.client = new GoderClient({ baseUrl: cfg.baseUrl, token: cfg.token });
     this.model = fullModelName(cfg.model);
     this.persistToken = cfg.persistToken === true;
     // 思考强度无可继承记录/未选择时默认高(goder 约定,不依赖服务端默认)
@@ -366,31 +366,38 @@ export class GrfScope extends Emitter {
       ...(this.model ? { model: this.model } : {}),
       ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
     });
-    this.connState = 'unknown';
+    this.setConnState('unknown');
     this.notify();
     void this.probeHealth();
     void this.refreshConversations();
   }
 
   async probeHealth(): Promise<void> {
-    this.connState = 'checking';
+    this.setConnState('checking');
     this.notify();
     try {
       await this.client.health();
-      this.connState = 'ok';
+      this.setConnState('ok');
       this.connError = undefined;
     } catch (err) {
-      this.connState = 'error';
+      this.setConnState('error');
       this.connError = err instanceof Error ? err.message : String(err);
       this.maybeHandleUnauthorized(err);
     }
     this.notify();
   }
 
+  /** setConnState 收敛连接态变更并派发对外事件(冷启动/断连/恢复的
+   * 标准观测点,宿主与 AI 测试监听 goder:conn-state 断言,无需穿透 store)。 */
+  private setConnState(state: ConnState): void {
+    this.connState = state;
+    this.emitDom('goder:conn-state', { scope: this.name, state });
+  }
+
   /** maybeHandleUnauthorized 网关判定未登录:触发配置的登录流程(幂等防抖)。 */
   private authPrompted = false;
   private maybeHandleUnauthorized(err: unknown): void {
-    if (!(err instanceof GrfApiError) || !err.isUnauthorized()) return;
+    if (!(err instanceof GoderApiError) || !err.isUnauthorized()) return;
     if (this.authPrompted) return;
     const auth = this.authCfg;
     if (!auth) return;
@@ -407,14 +414,14 @@ export class GrfScope extends Emitter {
       list = await this.client.listConversations();
     } catch (err) {
       if (this.connState !== 'error') {
-        this.connState = 'error';
+        this.setConnState('error');
         this.connError = err instanceof Error ? err.message : String(err);
         this.notify();
       }
       return;
     }
     if (this.connState !== 'ok') {
-      this.connState = 'ok';
+      this.setConnState('ok');
       this.connError = undefined;
     }
     const next = new Map<string, Conversation>();
@@ -773,7 +780,7 @@ export class GrfScope extends Emitter {
     // 与 selectSession 同口径发激活事件:嵌入方(grf-play 等)靠它跟随
     // 「会话 → 所属项目」;不发则新建草稿(左栏「+」/嵌入方直驱)对
     // 订阅方不可见
-    this.emitDom('grf:session-selected', { sessionId: did });
+    this.emitDom('goder:session-selected', { sessionId: did });
     return did;
   }
 
@@ -850,7 +857,7 @@ export class GrfScope extends Emitter {
       void this.syncRunningState(sid);
     }
     this.notify();
-    this.emitDom('grf:session-selected', { sessionId: sid });
+    this.emitDom('goder:session-selected', { sessionId: sid });
   }
 
   async loadHistoryIfNeeded(sid: string): Promise<void> {
@@ -983,7 +990,7 @@ export class GrfScope extends Emitter {
     if (this.activeSessionId === sid) this.activeSessionId = undefined;
     this.persistIndex();
     await this.refreshConversations();
-    this.emitDom('grf:session-archived', { sessionId: sid });
+    this.emitDom('goder:session-archived', { sessionId: sid });
   }
 
   // ---------- 发送 ----------
@@ -1186,6 +1193,7 @@ export class GrfScope extends Emitter {
     this.activeAborts.set(sid, ac);
     this.streamDoneAt.delete(sid);
     let migrated = false;
+    let roundOk = false;
     const migrate = (newSid: string) => {
       if (migrated || !isDraft) return;
       migrated = true;
@@ -1270,6 +1278,7 @@ export class GrfScope extends Emitter {
       }
       // 用户仍停在该会话:完成即视为已查看;已切走则保留未读标记。
       if (this.activeSessionId === realSid) this.markSessionSeen(realSid);
+      roundOk = true;
     } catch (err) {
       // 会话卡死自愈:服务端判定"暂停等待交互"(getConversation paused=true)
       // 但本 UI 没有任何可应答卡片 —— 典型是 App 重启丢掉了进行中客户端
@@ -1277,7 +1286,7 @@ export class GrfScope extends Emitter {
       // 恢复请求(服务端据此续跑暂停的回合),再经发送队列重发原消息。
       // 每会话只自动修一次,避免把真实的新暂停(提问/审批)吞掉。
       if (
-        err instanceof GrfApiError &&
+        err instanceof GoderApiError &&
         /paused awaiting interaction/i.test(err.message) &&
         !opts?.resumeCallOutputs &&
         !this.pauseRepaired.has(realSid)
@@ -1317,7 +1326,7 @@ export class GrfScope extends Emitter {
       }
       // 历史前缀被服务端拒绝(多窗口并发改写等):视图已本地截断,
       // 重新拉取服务器历史对齐。
-      if (err instanceof GrfApiError && /grf:history/.test(err.message)) {
+      if (err instanceof GoderApiError && /grf:history/.test(err.message)) {
         await this.loadHistoryFresh(realSid);
       }
     } finally {
@@ -1335,6 +1344,9 @@ export class GrfScope extends Emitter {
         void this.attachScreenshotImages(rt, realSid);
       }, 300);
       this.notify();
+      // 回合终态对外事件(成功/失败/中断一律派发,宿主与 AI 测试的标准
+      // 等待点:监听它即可等流式收口,无需轮询 store)。
+      this.emitDom('goder:round-completed', { sessionId: realSid, ok: roundOk });
     }
   }
 
@@ -1580,7 +1592,7 @@ export class GrfScope extends Emitter {
     if (!respId) return;
     const n = (this.stopRetries.get(sid) ?? 0) + 1;
     this.stopRetries.set(sid, n);
-    if (n > GrfScope.STOP_RETRY_MAX) {
+    if (n > GoderScope.STOP_RETRY_MAX) {
       this.stopRequested.delete(sid);
       this.log(
         'error',
@@ -1640,7 +1652,7 @@ export class GrfScope extends Emitter {
         })
         .catch((err: unknown) => {
           // 404 = 回合已结束;其余失败交由 syncRunningState 对账兜底。
-          if (!(err instanceof GrfApiError && err.status === 404)) {
+          if (!(err instanceof GoderApiError && err.status === 404)) {
             this.log('warn', `中断请求失败:${errText(err, this.t)}`);
           }
         });
@@ -1671,7 +1683,7 @@ export class GrfScope extends Emitter {
       this.notify();
     } catch (err) {
       // 404 = 回合刚好结束。
-      if (!(err instanceof GrfApiError && err.status === 404)) {
+      if (!(err instanceof GoderApiError && err.status === 404)) {
         this.log('warn', `中断失败:${errText(err, this.t)}`);
       }
     }
@@ -1783,10 +1795,10 @@ function fullModelName(m: string | undefined): string | undefined {
 
 // ---------- scope 注册表 ----------
 
-const scopes = new Map<string, GrfScope>();
+const scopes = new Map<string, GoderScope>();
 export const scopeConfigs = new Map<string, ConnectionConfig>();
 
-// scope 引用计数:GrfPanel 挂载时经 getScope/configureScope acquire、
+// scope 引用计数:GoderPanel 挂载时经 getScope/configureScope acquire、
 // 断开时 releaseScope;归零后延迟回收(清 5s 轮询定时器、摘注册表),
 // 期间再 acquire 则取消回收 —— 覆盖嵌入方动态挂载/卸载面板与 tab 元素
 // 池 detach/reattach 的瞬时归零,防定时器与 scope 实例泄漏。桌面态由
@@ -1798,10 +1810,10 @@ const SCOPE_GC_DELAY = 30_000;
 
 // 连接配置持久化(纯 web 态;桌面态由 wails AppConfig 托管,但本地副本
 // 也能让 webview 冷启动更快连上)。落点统一走可注入键值存储(storage.ts)。
-const connKey = (name: string) => `grf-ui:${name}:conn`;
+const connKey = (name: string) => `goder:${name}:conn`;
 
 // 新会话策略偏好持久化(随 scope 隔离;仅接受预制两值)。
-const policyKey = (name: string) => `grf-ui:${name}:policy`;
+const policyKey = (name: string) => `goder:${name}:policy`;
 
 function loadPolicyLocal(name: string): string | undefined {
   try {
@@ -1830,7 +1842,7 @@ export function savedConn(name: string): Partial<ConnectionConfig> | null {
   return loadConnLocal(name);
 }
 
-export function getScope(name = 'default'): GrfScope {
+export function getScope(name = 'default'): GoderScope {
   let s = scopes.get(name);
   if (!s) {
     const saved = loadConnLocal(name);
@@ -1845,15 +1857,15 @@ export function getScope(name = 'default'): GrfScope {
         ...(saved?.reasoningEffort ? { reasoningEffort: saved.reasoningEffort } : {}),
       };
     scopeConfigs.set(name, cfg);
-    s = new GrfScope(name, cfg);
+    s = new GoderScope(name, cfg);
     scopes.set(name, s);
     void s.start();
   }
   return s;
 }
 
-/** 持有一次 scope 引用(GrfPanel 挂载时调用;内部确保 scope 存在)。 */
-export function acquireScope(name = 'default'): GrfScope {
+/** 持有一次 scope 引用(GoderPanel 挂载时调用;内部确保 scope 存在)。 */
+export function acquireScope(name = 'default'): GoderScope {
   const pendingGc = scopeGc.get(name);
   if (pendingGc) {
     clearTimeout(pendingGc);
@@ -1863,7 +1875,7 @@ export function acquireScope(name = 'default'): GrfScope {
   return getScope(name);
 }
 
-/** 释放一次 scope 引用(GrfPanel 断开时调用);归零后延迟回收。 */
+/** 释放一次 scope 引用(GoderPanel 断开时调用);归零后延迟回收。 */
 export function releaseScope(name = 'default'): void {
   const n = (scopeRefs.get(name) ?? 0) - 1;
   scopeRefs.set(name, Math.max(0, n));
@@ -1880,7 +1892,7 @@ export function releaseScope(name = 'default'): void {
   scopeGc.set(name, t);
 }
 
-export function configureScope(name: string, cfg: Partial<ConnectionConfig>): GrfScope {
+export function configureScope(name: string, cfg: Partial<ConnectionConfig>): GoderScope {
   // 兜底 base 保留已保存的 model:启动期 initWebConn 会带着仅 baseUrl/token
   // 的补丁进来,若 base 丢掉 model 会把已选模型从本地存储里抹掉。
   const saved = loadConnLocal(name);
@@ -1905,11 +1917,11 @@ export function configureScope(name: string, cfg: Partial<ConnectionConfig>): Gr
 }
 
 export function locationDefaultBase(): string {
-  // web 形态默认走同源网关(/grf-api,由 grf-web-serve 或三方后端提供;
+  // web 形态默认走同源网关(/goder-api,由 goder-web-serve 或三方后端提供;
   // 多用户网关按登录用户注入令牌,浏览器无需配置)。非 http 环境
   // (桌面 wails 自定义 scheme)由桌面入口显式配置,不会走到这里。
   if (typeof location !== 'undefined' && location.protocol.startsWith('http')) {
-    return '/grf-api';
+    return '/goder-api';
   }
   return 'http://127.0.0.1:7400';
 }

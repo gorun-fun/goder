@@ -6,8 +6,8 @@ import { theme, controls } from '../../ui/panel';
 import { toolArgSummary, toolLabel } from '../../util/fmt';
 import type { ApprovalItem } from '../../core/model/chat-model';
 
-@customElement('grf-approval-card')
-export class GrfApprovalCard extends LitElement {
+@customElement('goder-approval-card')
+export class GoderApprovalCard extends LitElement {
   @property({ type: Object }) item!: ApprovalItem;
 
   @state() private showFeedback = false;
@@ -20,9 +20,9 @@ export class GrfApprovalCard extends LitElement {
         display: block;
       }
       .card {
-        border: 1px solid var(--grf-warn);
-        background: var(--grf-warn-soft);
-        border-radius: var(--grf-radius);
+        border: 1px solid var(--goder-warn);
+        background: var(--goder-warn-soft);
+        border-radius: var(--goder-radius);
         padding: 12px 14px;
         margin: 8px 0;
         display: grid;
@@ -32,8 +32,8 @@ export class GrfApprovalCard extends LitElement {
         display: flex;
         align-items: center;
         gap: 7px;
-        color: var(--grf-warn);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-warn);
+        font-size: var(--goder-font-size-sm);
         font-weight: 600;
       }
       .banner svg {
@@ -42,21 +42,21 @@ export class GrfApprovalCard extends LitElement {
         flex: none;
       }
       .tool {
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-sm);
-        color: var(--grf-text);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-sm);
+        color: var(--goder-text);
       }
       .args {
-        font-family: var(--grf-mono);
-        font-size: var(--grf-font-size-xs);
-        color: var(--grf-text-dim);
+        font-family: var(--goder-mono);
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-dim);
         white-space: pre-wrap;
         word-break: break-all;
         max-height: 220px;
         overflow: auto;
-        background: var(--grf-bg);
-        border: 1px solid var(--grf-border-soft);
-        border-radius: var(--grf-radius-sm);
+        background: var(--goder-bg);
+        border: 1px solid var(--goder-border-soft);
+        border-radius: var(--goder-radius-sm);
         padding: 8px 10px;
         margin: 0;
       }
@@ -68,13 +68,13 @@ export class GrfApprovalCard extends LitElement {
       }
       .feedback {
         width: 100%;
-        font-size: var(--grf-font-size-sm);
+        font-size: var(--goder-font-size-sm);
         min-height: 52px;
         resize: vertical;
       }
       .done {
-        color: var(--grf-text-dim);
-        font-size: var(--grf-font-size-sm);
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-sm);
       }
     `,
   ];
@@ -140,6 +140,6 @@ export class GrfApprovalCard extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-approval-card': GrfApprovalCard;
+    'goder-approval-card': GoderApprovalCard;
   }
 }

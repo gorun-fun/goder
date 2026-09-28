@@ -1,6 +1,6 @@
-// terminal.ts — <grf-terminal>:内嵌交互终端(xterm.js + 桌面 PTY)。
+// terminal.ts — <goder-terminal>:内嵌交互终端(xterm.js + 桌面 PTY)。
 // 仅桌面形态使用(main.ts import 注册);嵌入产物不含本模块与 xterm 依赖,
-// 嵌入态经 panelRegistered('grf-terminal') 探测并隐藏入口。
+// 嵌入态经 panelRegistered('goder-terminal') 探测并隐藏入口。
 // PTY 会话随组件生命周期:挂载即启动、卸载即终止;cwd 变化时自动重启。
 import { unsafeCSS , type PropertyValues } from 'lit';
 import { css, html, nothing } from 'lit';
@@ -8,7 +8,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import xtermCss from '@xterm/xterm/css/xterm.css?inline';
-import { GrfPanel, theme } from '../../ui/panel';
+import { GoderPanel, theme } from '../../ui/panel';
 import { inWails, startTerm, writeTerm, resizeTerm, killTerm, readTerm, onTermEvent } from '../../host/bridge';
 import { consumePendingTerm, onConsoleTerm, registerVisibleTerm, unregisterVisibleTerm } from '../../shell/console-ui';
 
@@ -20,8 +20,8 @@ function decodeB64(b64: string): Uint8Array {
   return out;
 }
 
-@customElement('grf-terminal')
-export class GrfTerminal extends GrfPanel {
+@customElement('goder-terminal')
+export class GoderTerminal extends GoderPanel {
   /** 终端工作目录(当前项目本地路径) */
   @property({ type: String }) cwd = '';
 
@@ -53,7 +53,7 @@ export class GrfTerminal extends GrfPanel {
         flex-direction: column;
         min-height: 0;
         min-width: 0;
-        font-family: var(--grf-font);
+        font-family: var(--goder-font);
       }
       .wrap {
         flex: 1;
@@ -69,7 +69,7 @@ export class GrfTerminal extends GrfPanel {
         overflow: hidden;
       }
       /* 覆盖 xterm 默认底色与滚动条,让终端透明融进黑卡、
-       * 滚动条与聊天等面板一致(--grf-scroll-thumb 细圆角) */
+       * 滚动条与聊天等面板一致(--goder-scroll-thumb 细圆角) */
       .term .xterm {
         background: transparent;
       }
@@ -82,7 +82,7 @@ export class GrfTerminal extends GrfPanel {
         background: transparent;
       }
       .term .xterm .xterm-viewport::-webkit-scrollbar-thumb {
-        background: var(--grf-scroll-thumb);
+        background: var(--goder-scroll-thumb);
         border-radius: 5px;
         border: 2px solid transparent;
         background-clip: padding-box;
@@ -97,35 +97,35 @@ export class GrfTerminal extends GrfPanel {
         align-items: center;
         justify-content: center;
         gap: 8px;
-        background: var(--grf-card);
-        color: var(--grf-text-faint);
-        font-size: var(--grf-font-size-sm);
-        font-family: var(--grf-font);
+        background: var(--goder-card);
+        color: var(--goder-text-faint);
+        font-size: var(--goder-font-size-sm);
+        font-family: var(--goder-font);
         border: none;
         padding: 0;
         cursor: default;
         user-select: none;
       }
       .veil.err {
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
         white-space: pre-wrap;
         text-align: center;
         padding: 0 24px;
       }
       .veil.exit {
         cursor: pointer;
-        color: var(--grf-text-dim);
+        color: var(--goder-text-dim);
       }
       .veil.exit:hover {
-        color: var(--grf-text);
-        background: var(--grf-bg-hover);
+        color: var(--goder-text);
+        background: var(--goder-bg-hover);
       }
       .spin {
         width: 12px;
         height: 12px;
         border-radius: 50%;
-        border: 1.5px solid var(--grf-border-hover);
-        border-top-color: var(--grf-accent);
+        border: 1.5px solid var(--goder-border-hover);
+        border-top-color: var(--goder-accent);
         animation: spin 0.8s linear infinite;
         flex: none;
         box-sizing: border-box;
@@ -196,15 +196,15 @@ export class GrfTerminal extends GrfPanel {
       const cs = getComputedStyle(this);
       const tok = (n: string, f: string) => cs.getPropertyValue(n).trim() || f;
       const term = new Term({
-        fontFamily: tok('--grf-mono', 'ui-monospace, Menlo, monospace'),
+        fontFamily: tok('--goder-mono', 'ui-monospace, Menlo, monospace'),
         fontSize: 12.5,
         cursorBlink: true,
         allowProposedApi: true,
         allowTransparency: true,
         theme: {
           background: 'rgba(0,0,0,0)',
-          foreground: tok('--grf-text', '#d7dae0'),
-          cursor: tok('--grf-accent', '#4c8dff'),
+          foreground: tok('--goder-text', '#d7dae0'),
+          cursor: tok('--goder-accent', '#4c8dff'),
         },
       });
       const fit = new Fit();
@@ -324,6 +324,6 @@ export class GrfTerminal extends GrfPanel {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'grf-terminal': GrfTerminal;
+    'goder-terminal': GoderTerminal;
   }
 }

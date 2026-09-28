@@ -28,7 +28,7 @@ import (
 
 // Options 网关参数。
 type Options struct {
-	// APIPrefix API 前缀,默认 /grf-api。
+	// APIPrefix API 前缀,默认 /goder-api。
 	APIPrefix string
 	// StaticDir 前端静态目录;空 = 纯 API 网关。
 	StaticDir string
@@ -43,7 +43,7 @@ type Options struct {
 	Resolver identity.Resolver
 	Manager  *ghserver.Manager
 	// FixedUpstream 直连模式 —— 反代外部 gh server,不托管进程,
-	// 令牌由浏览器 Authorization 头携带(兼容旧 GRF_UPSTREAM 用法)。
+	// 令牌由浏览器 Authorization 头携带(兼容旧 GODER_UPSTREAM 用法)。
 	FixedUpstream *url.URL
 	// AdminToken 管理 API 令牌(空 = 关闭 /admin/*)。
 	AdminToken string
@@ -65,7 +65,7 @@ type Gateway struct {
 // webhook。
 func New(opts Options) *Gateway {
 	if opts.APIPrefix == "" {
-		opts.APIPrefix = "/grf-api"
+		opts.APIPrefix = "/goder-api"
 	}
 	opts.APIPrefix = strings.TrimRight(opts.APIPrefix, "/")
 	g := &Gateway{opts: opts, prefix: opts.APIPrefix, stop: make(chan struct{})}
@@ -360,7 +360,7 @@ func (g *Gateway) unauthorized(w http.ResponseWriter) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if login != "" {
-		w.Header().Set("Grf-Login", g.prefix+login)
+		w.Header().Set("Goder-Login", g.prefix+login)
 	}
 	w.WriteHeader(http.StatusUnauthorized)
 	body := map[string]any{"error": map[string]any{"message": "未登录或会话已过期", "type": "unauthorized"}}
