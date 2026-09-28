@@ -1,7 +1,7 @@
 # 接入方 AI 自动化测试指导
 
 > 本文档面向**把 goder 作为基座集成**的三方(嵌入 `goder.js` 的页面方、
-> 部署 `goder-web-serve` 的网关方)与执行自动化测试的 AI 智能体:如何用
+> 部署 `goder-serve` 的网关方)与执行自动化测试的 AI 智能体:如何用
 > 浏览器自动化测 goder 的**全部功能与扩展点**,而不依赖真实 gh server
 > 与真实模型。
 >
@@ -219,7 +219,7 @@ test-harness 是模板。自建测试页三步:
 
 ## 7. 网关接入方(Go):FakeUpstream
 
-部署 `goder-web-serve` 的接入方在 Go 测试里用 `pkg/ghserver.FakeUpstream`
+部署 `goder-serve` 的接入方在 Go 测试里用 `pkg/ghserver.FakeUpstream`
 替代真实 gh 进程:`FixedUpstream` 指向它即可零二进制测网关全链路
 (路由/鉴权/令牌注入/多用户隔离/类型化错误)。详见
 `pkg/ghserver/fake.go` 头注释与 `fake_test.go` 用例。

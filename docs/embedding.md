@@ -313,15 +313,15 @@ API Key/MCP Token 掩码——不下发明文,空值=保留)。多用户网关�
 新增自定义分区、覆写/隐藏内置分区见上文「自定义设置分区
 (registry.settings)」。
 
-## 5. 服务端接入:goder-web-serve 网关
+## 5. 服务端接入:goder-serve 网关
 
 浏览器不能直连 gh server(无 CORS 头)。两种接法:
 
-1. **同源网关(推荐)**:部署 `cmd/goder-web-serve`(或把同样的逻辑放进你
+1. **同源网关(推荐)**:部署 `cmd/goder-serve`(或把同样的逻辑放进你
    的后端/网关):静态托管前端产物 + `/goder-api` 反代。
 2. 给 gh server 加 CORS(不推荐,SSE 也要带头,且令牌暴露给浏览器)。
 
-`goder-web-serve` 的核心能力是**多用户隔离:一个用户一个 gh server 进程**
+`goder-serve` 的核心能力是**多用户隔离:一个用户一个 gh server 进程**
 (独立端口池 17400-18400、独立数据目录 `<GODER_DATA>/users/<uid>/server-data`),
 用户令牌由网关注入。身份模式经 `GODER_IDENTITY` 选择:
 
@@ -331,7 +331,7 @@ API Key/MCP Token 掩码——不下发明文,空值=保留)。多用户网关�
 gh server(不托管进程,浏览器携带 token —— 兼容最简部署)。
 
 ```sh
-GODER_DATA=./goder-web-data ADDR=127.0.0.1:7700 go run ./cmd/goder-web-serve
+GODER_DATA=./goder-web-data ADDR=127.0.0.1:7700 go run ./cmd/goder-serve
 ```
 
 ### header —— 被三方应用集成(如 game-web)
@@ -343,7 +343,7 @@ GODER_DATA=./goder-web-data ADDR=127.0.0.1:7700 go run ./cmd/goder-web-serve
 浏览器 ──cookie──▶ 三方应用后端(game-web)
                       │ 反代 /goder-api + 注入 X-GRF-UID: <用户id>
                       ▼
-                 goder-web-serve(GODER_IDENTITY=header)
+                 goder-serve(GODER_IDENTITY=header)
                       │ uid → 独立 gh server(端口池 + 独立数据目录)
                       ▼
                  gh server ×N
@@ -351,7 +351,7 @@ GODER_DATA=./goder-web-data ADDR=127.0.0.1:7700 go run ./cmd/goder-web-serve
 
 ```sh
 GODER_IDENTITY=header GODER_UID_HEADER=X-GRF-UID ADDR=127.0.0.1:7702 \
-  GODER_DATA=/srv/goder-web GODER_IDLE_TTL=30m go run ./cmd/goder-web-serve
+  GODER_DATA=/srv/goder-web GODER_IDLE_TTL=30m go run ./cmd/goder-serve
 ```
 
 自检端点:`GET /goder-api/whoami` 返回当前解析到的用户与后端进程地址;
@@ -393,7 +393,7 @@ GODER_IDENTITY=sso \
   SSO_ENDPOINT=https://sso.example.com \
   SSO_CLIENT_ID=… SSO_CLIENT_SECRET=… \
   SSO_REDIRECT_URL=https://app.example.com/goder-api/auth/callback \
-  COOKIE_SECURE=1 ADDR=:7700 go run ./cmd/goder-web-serve
+  COOKIE_SECURE=1 ADDR=:7700 go run ./cmd/goder-serve
 ```
 
 前端配置未登录跳转:`configure('scope', { baseUrl: '/goder-api',

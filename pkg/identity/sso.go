@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// SSOConfig Casdoor 登录配置(环境变量含义见 cmd/goder-web-serve)。
+// SSOConfig Casdoor 登录配置(环境变量含义见 cmd/goder-serve)。
 type SSOConfig struct {
 	Endpoint     string // Casdoor 根地址,如 https://sso.example.com
 	ClientID     string

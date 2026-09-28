@@ -1,4 +1,4 @@
-// goder-web-serve — 纯 web 形态服务端(多用户网关):静态托管前端构建产物 +
+// goder-serve — 纯 web 形态服务端(多用户网关):静态托管前端构建产物 +
 // 把 /goder-api/* 路由到"当前用户专属的 gh server 子进程"。
 //
 // 身份模式(GODER_IDENTITY):
@@ -145,7 +145,7 @@ func main() {
 		_ = server.Shutdown(ctx)
 	}()
 
-	log.Printf("goder-web-serve: http://%s  (API /goder-api,静态 %s)", addr, staticDir)
+	log.Printf("goder-serve: http://%s  (API /goder-api,静态 %s)", addr, staticDir)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}

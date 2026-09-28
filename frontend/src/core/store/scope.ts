@@ -1917,7 +1917,7 @@ export function configureScope(name: string, cfg: Partial<ConnectionConfig>): Go
 }
 
 export function locationDefaultBase(): string {
-  // web 形态默认走同源网关(/goder-api,由 goder-web-serve 或三方后端提供;
+  // web 形态默认走同源网关(/goder-api,由 goder-serve 或三方后端提供;
   // 多用户网关按登录用户注入令牌,浏览器无需配置)。非 http 环境
   // (桌面 wails 自定义 scheme)由桌面入口显式配置,不会走到这里。
   if (typeof location !== 'undefined' && location.protocol.startsWith('http')) {

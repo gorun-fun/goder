@@ -1,6 +1,6 @@
 // fake.go — 导出的可编程 fake 上游(网关接入方测试装具)。
 //
-// 面向部署 goder-web-serve / 复用 pkg/gateway 的接入方:FixedUpstream
+// 面向部署 goder-serve / 复用 pkg/gateway 的接入方:FixedUpstream
 // 指向本 fake 即可零 gh 二进制测网关全链路(按用户路由、令牌注入、
 // 多用户隔离、类型化错误映射)。与 proxy_test.go 的包内 recordingUpstream
 // 的区别:并发安全、请求历史(非覆盖式)、可编程响应(按方法+路径精确

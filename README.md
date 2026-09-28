@@ -6,11 +6,11 @@
 |------|------|------|
 | **桌面 App**(wails v3) | 可直接安装的本地应用:左边项目级会话列表、中间聊天、右栏 tab 化(详情/审查/终端/浏览器/文件)、底栏内嵌终端(进入当前项目目录);自动托管 `gh server` 子进程 | `./build.sh app` → `dist/goder.app` |
 | **三方 Web 集成** | 会话列表 / 聊天 / 详情 / 审查 / 浏览器 / 事件台等均为独立 web components,可嵌入任意第三方页面;左栏导航、右栏 tab、底栏 tab 全部经 registry 注册表装配(条目可按 scope 归属),内置条目与三方自定义条目走同一条 API;消息内容层开放定制(registry.chat:自定义消息渲染器、工具展示元数据、markdown 渲染覆写);发送钩子(onBeforeSend)与工具审批钩子(onApproval)可接管出站消息与审批决策;i18n 文案覆盖;`GODER_UI_VERSION` 版本常量 + 完整 .d.ts 类型产物 | `frontend/dist-embed/goder.js` + `types/`(ESM,零外部依赖) |
-| **多用户 Web 网关** | `cmd/goder-web-serve`:静态托管 + `/goder-api` 多用户路由 —— **一个登录用户一个独立 gh server 进程**(独立端口与数据目录,令牌由网关注入,不下发浏览器) | `./build.sh web` |
+| **多用户 Web 网关** | `cmd/goder-serve`:静态托管 + `/goder-api` 多用户路由 —— **一个登录用户一个独立 gh server 进程**(独立端口与数据目录,令牌由网关注入,不下发浏览器) | `./build.sh web` |
 
 与 gh 的对接完全走 `gh server`(ORS 兼容 Responses API):SSE 流式、
 ask_user_question / 工具审批的**暂停-应答链式续交**、多会话、跨重启恢复。
-浏览器一律经同源 `/goder-api` 访问(桌面 app 内置反代或 goder-web-serve 网关,
+浏览器一律经同源 `/goder-api` 访问(桌面 app 内置反代或 goder-serve 网关,
 规避 gh server 无 CORS 头的问题)。
 
 ```
@@ -74,12 +74,12 @@ ask_user_question / 工具审批的**暂停-应答链式续交**、多会话、�
 
 ### 纯 web 形态(调试 / 部署)
 
-`./build.sh web` 启动 `goder-web-serve`(默认 http://127.0.0.1:7700):
+`./build.sh web` 启动 `goder-serve`(默认 http://127.0.0.1:7700):
 静态托管前端 + `/goder-api` 网关。**默认单用户自管模式**:首次 API 请求懒拉起
 一个 gh server(数据目录 `./goder-web-data/users/local/`),浏览器零配置直连
 `/goder-api` 即用。
 
-多用户与身份模式经环境变量切换(完整清单见 `cmd/goder-web-serve/main.go`
+多用户与身份模式经环境变量切换(完整清单见 `cmd/goder-serve/main.go`
 头部注释与 docs/embedding.md):
 
 ```sh
@@ -87,13 +87,13 @@ ask_user_question / 工具审批的**暂停-应答链式续交**、多会话、�
 GODER_IDENTITY=single GODER_UPSTREAM=http://127.0.0.1:7400 ./build.sh web
 
 # 信任上级网关的用户头(被三方应用集成时推荐;一用户一 gh 进程)
-GODER_IDENTITY=header GODER_UID_HEADER=X-GRF-UID ADDR=:7700 go run ./cmd/goder-web-serve
+GODER_IDENTITY=header GODER_UID_HEADER=X-GRF-UID ADDR=:7700 go run ./cmd/goder-serve
 
 # 内置 Casdoor SSO(独立部署的完整方案;/goder-api/auth/* 提供登录流程)
 GODER_IDENTITY=sso SSO_ENDPOINT=https://sso.example.com \
   SSO_CLIENT_ID=… SSO_CLIENT_SECRET=… \
   SSO_REDIRECT_URL=https://app.example.com/goder-api/auth/callback \
-  go run ./cmd/goder-web-serve
+  go run ./cmd/goder-serve
 ```
 
 多用户托管参数:`GODER_DATA`(数据根)、`GODER_PORT_MIN/MAX`(用户进程端口池,
@@ -187,7 +187,7 @@ internal/                Go 桌面专属层
   appcfg/                桌面配置与项目索引的文件持久化(原子写)
   desktop/ browser/      wails 服务薄壳、右栏内嵌浏览器原生实现
 main.go / *.go           wails v3 桌面入口(服务注册/窗口/embed 资源)
-cmd/goder-web-serve/       多用户网关 CLI(环境变量驱动三种身份模式)
+cmd/goder-serve/       多用户网关 CLI(环境变量驱动三种身份模式)
 frontend/src/
   core/                  无 UI 的核心层:api(ORS 客户端+SSE+超时)、model
                          (会话运行时)、store(scope 编排/持久化/响应式基座/

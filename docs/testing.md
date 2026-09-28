@@ -21,7 +21,7 @@ goder 是同一份前端跑多形态的应用。**测试优先级:test-serve(自
 |---|---|---|---|
 | **test-serve**(无头测试态) | `goder test-serve` | 浏览器自动化(playwright 等),**AI 主战场** | 除「原生窗口/webview 专属」外的全部桌面能力:终端面板、配置持久化、gh 托管、文件浏览、git 审查、设置全分区、聊天全流程、自动化操作员 |
 | 桌面 App | 发布版 .app / .exe | 手动 + computer-use 类工具 | 窗口装饰/拖拽缩放、右栏**原生**浏览器面板、原生对话框(目录选择)、自动更新、托盘退出 |
-| web 网关 | `goder-web-serve`(静态 + `/goder-api`) | 浏览器自动化 | 纯 web 行为:localStorage 持久化、agent API 代理路径、多用户网关 |
+| web 网关 | `goder-serve`(静态 + `/goder-api`) | 浏览器自动化 | 纯 web 行为:localStorage 持久化、agent API 代理路径、多用户网关 |
 | 嵌入库 | `frontend/dist-embed/goder.js` 宿主页 | 浏览器自动化 | 嵌入方 API:registry 装配、换肤、事件总线、共享右栏面板 |
 
 ### 1.1 test-serve 形态说明(重要)
@@ -290,7 +290,7 @@ CSS 边角)仍按 §5.5 在各平台桌面 App 抽查。
 
 ## 4. web 与嵌入形态专项
 
-### 4.1 web 网关(goder-web-serve)
+### 4.1 web 网关(goder-serve)
 
 - `./build.sh web` 起服务后:登录(按身份模式)、项目索引存
   **localStorage**(刷新保留;与桌面文件持久化互不干扰)。

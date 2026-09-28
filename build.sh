@@ -3,7 +3,7 @@
 #   ./build.sh            构建前端 + wails 桌面二进制(./goder)
 #   ./build.sh app        组装 goder.app(macOS .app 包)
 #   ./build.sh embed      仅构建三方嵌入库(frontend/dist-embed/goder.js)
-#   ./build.sh web        构建 + 启动纯 web 形态(goder-web-serve,联调用)
+#   ./build.sh web        构建 + 启动纯 web 形态(goder-serve,联调用)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -22,7 +22,7 @@ case "${1:-}" in
     echo "==> 启动纯 web 形态(静态 + /goder-api 代理)"
     GODER_UPSTREAM="${GODER_UPSTREAM:-http://127.0.0.1:7400}" \
     ADDR="${ADDR:-127.0.0.1:7700}" \
-    go run ./cmd/goder-web-serve
+    go run ./cmd/goder-serve
     exit 0
     ;;
 esac

@@ -3,15 +3,15 @@
 Goder:grf-harness(gh)的 ZCode 风格图形界面。一个 Lit 前端,多种形态:
 wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面的 web components
 库(`frontend/dist-embed/goder.js`,ESM、零外部依赖、shadow DOM 自隔离),
-以及多用户 web 网关(`cmd/goder-web-serve`:一个登录用户一个独立 gh server 进程)。
+以及多用户 web 网关(`cmd/goder-serve`:一个登录用户一个独立 gh server 进程)。
 
 ## 常用命令
 
 - `./build.sh` — 前端 + 桌面二进制 `./goder`
 - `./build.sh app` — 组装 macOS `dist/goder.app`(adhoc 签名)
 - `./build.sh embed` — 仅构建嵌入库 `frontend/dist-embed/goder.js`
-- `./build.sh web` — 纯 web 形态(goder-web-serve 网关:静态 + `/goder-api`,
-  http://127.0.0.1:7700;身份模式与多用户参数见 cmd/goder-web-serve 头注释)
+- `./build.sh web` — 纯 web 形态(goder-serve 网关:静态 + `/goder-api`,
+  http://127.0.0.1:7700;身份模式与多用户参数见 cmd/goder-serve 头注释)
 - `./run.sh start|stop|restart` — 桌面 App 生命周期(后台运行,PID/日志在 `.run/`)
 - `./goder test-serve [--port 7460]` — 无头测试形态:同一份二进制不建窗口,
   经本地 HTTP 服务器(令牌门槛)把完整桌面 UI 暴露给浏览器,wails 服务
@@ -97,7 +97,7 @@ plugins/console/         goder-console:智能体驱动界面面板的 MCP 服务
                          plugins 键时 upsert 命令项,不破坏自动发现语义)
 main.go                  wails v3 桌面入口(仅装配:服务注册、窗口、embed 资源;
                          开头分派 `goder console-shim` 子命令)
-cmd/goder-web-serve/       多用户网关 CLI(GODER_IDENTITY=single|header|sso;
+cmd/goder-serve/       多用户网关 CLI(GODER_IDENTITY=single|header|sso;
                          运维 env:GODER_ADMIN_TOKEN/GODER_WEBHOOK_URL/
                          GODER_CORS_ORIGINS/GODER_ACCESS_LOG/GODER_SESSIONS_FILE)
 frontend/src/
@@ -158,19 +158,19 @@ frontend/src/
 ```
 
 依赖方向:panels/shell → registry/core;core 不依赖 UI;桌面专属能力只经
-`host/bridge.ts` 进出。Go 侧桌面壳(internal/desktop)与网关(cmd/goder-web-serve)
+`host/bridge.ts` 进出。Go 侧桌面壳(internal/desktop)与网关(cmd/goder-serve)
 只做参数装配,进程/反代/身份逻辑一律在 pkg。
 
 ## 硬性约束(改代码前必读)
 
 - **双形态不变量**:同一份前端代码同时跑在 wails 桌面、三方嵌入页与
-  goder-web-serve 静态页。`@wailsio/runtime` 只能动态 import(嵌入产物不含它,
+  goder-serve 静态页。`@wailsio/runtime` 只能动态 import(嵌入产物不含它,
   `vite.embed.config.ts` 已 external);一切 wails 调用收敛在
   `frontend/src/host/bridge.ts`,纯 web 态必须 no-op 回退。
 - 桌面态检测用 `inWails()`(协议/hostname + 真实调用探针),不能只看
   `window._wails`(浏览器懒加载 runtime 后也会置位)。
 - **新增功能必须先做网页形态评估**:同一份代码跑双形态,新功能默认
-  桌面/网页都要可用;实现前先评估网页形态(嵌入库 / goder-web-serve)
+  桌面/网页都要可用;实现前先评估网页形态(嵌入库 / goder-serve)
   是否有等价通道——密钥、文件系统等桌面专属资源,网页形态往往可经
   gh server `/v1/agent/*` 服务端代理承载。**确有等价通道的必须实现
   网页路径,不得用 `inWails()` 一刀切关闭**;只有确认网页端确实无
