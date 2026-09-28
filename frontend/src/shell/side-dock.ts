@@ -45,7 +45,9 @@ export class GrfSideDock extends GrfPanel {
     css`
       :host {
         display: flex;
-        flex-direction: column;
+        /* 行布局:拖拽条在左、面板在右,拖拽条被拉伸为通高竖线
+         * (列布局会让 4px 拖拽条高度塌 0,分隔线不可见) */
+        flex-direction: row;
         min-width: 0;
         min-height: 0;
         flex: 0 1 auto;

@@ -53,7 +53,8 @@ export class GrfBottomDock extends GrfPanel {
         font-size: var(--grf-font-size);
         color: var(--grf-text);
       }
-      :host(.off) {
+      :host(.off),
+      :host(.no-defs) {
         display: none;
       }
       /* 底栏拖拽条:常显一条横线作为与聊天区的分界 */
@@ -353,6 +354,11 @@ export class GrfBottomDock extends GrfPanel {
 
   render() {
     const defs = this.visibleDefs();
+    // 宿主级显隐同步(:host(.off)/:host(.no-defs) 选择器据此生效):
+    // 收起时整体不占位;本形态无可见条目时(如 web 态仅桌面终端)同样
+    // 隐藏 —— 否则 .col-main > * { flex:1 } 会让空壳占掉一半高度。
+    this.classList.toggle('off', !this.on);
+    this.classList.toggle('no-defs', defs.length === 0);
     if (defs.length === 0) return nothing;
     return html`
       <div class="gutter-h ${this.on ? '' : 'off'}" @pointerdown=${() => this.startDrag()}></div>

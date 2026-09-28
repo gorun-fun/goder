@@ -623,9 +623,6 @@ export class GrfComposer extends LitElement {
                       <path d="M8 3v10M3 8h10" stroke-linecap="round" />
                     </svg>
                   </button>
-                  {/* 仅图片:ORS 线格式 ContentPart 只有 input_text/input_image
-                      (与 gh server dto.go 对齐),任意文件无协议通道 —— 双形态
-                      评估结论:不做非图片附件,文本内容让用户自行粘贴。 */}
                   <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple @change=${this.onFile} />
                 ${this.policySelector
                   ? html`<button
@@ -1064,6 +1061,9 @@ export class GrfComposer extends LitElement {
     }
   }
 
+  // 附件仅图片:ORS 线格式 ContentPart 只有 input_text/input_image(与
+  // gh server dto.go 对齐),任意文件无协议通道 —— 双形态评估结论:不做
+  // 非图片附件,文本内容让用户自行粘贴。
   private pickImage(): void {
     this.renderRoot.querySelector<HTMLInputElement>('input[type=file]')?.click();
   }
