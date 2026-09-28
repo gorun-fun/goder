@@ -21,6 +21,11 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
   testing.md 为源,响应头带版本/平台元数据)。AI/发布版 E2E 主战场;
   勿与桌面 App 同时运行(goder-console 烙写互踩)
 - 类型检查:`cd frontend && npx tsc --noEmit`;Go:`go build ./... && go vet ./...`
+- 单元测试:`cd frontend && npm test`(vitest,按模块拆分在 frontend/tests/:
+  registry/markdown/chat-model 归约器/automation 协议块/i18n/storage/
+  retry-policy/发送管线/工具词典/scope 生命周期);
+  `go test ./...`(pkg 基座面:ghserver 进程管理与反代、identity、
+  gateway;internal/desktop 含 gh 下载与 bridge FQN 对齐守护)
 - (自动化测试以 test-serve + 浏览器驱动为主,指导见 `docs/testing.md`;
   人工 E2E 为真实 gh server + 真实模型的手动浏览器验证,playwright-cli
   或浏览器驱动)
@@ -46,17 +51,33 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
 ## 结构与分层
 
 ```
-internal/                Go 共享层(桌面壳与 web 网关同一套实现)
-  ghserver/              Proc(单 gh server 生命周期:启动/收养/就绪等待/
-                         令牌/停止)+ Manager(uid → Proc:端口池分配、懒启动、
-                         空闲回收、数量上限)+ NewProxy(反代核心:去前缀、
-                         注入 Bearer、SSE flush、无 Content-Length body 缓冲补齐)
-  appcfg/                桌面配置与项目索引的文件持久化(wails AppConfig 薄壳用)
-  identity/              身份解析 Resolver:single(单用户)/ header(信任上级
-                         网关用户头,被集成推荐)/ sso(Casdoor OAuth2 + 本地
-                         会话 cookie;SessionStore 接口预留持久化)
-  gateway/               多用户网关:静态托管 + /grf-api 按用户路由(身份 →
-                         懒拉起用户进程 → 注入令牌转发)+ auth 端点挂载 + CORS
+pkg/                     Go 公开层(三方 Go module 可 import 的基座面;
+                         桌面壳与 web 网关同一套实现)
+  ghserver/              gh server 进程管理:Proc(单进程生命周期:启动/
+                         收养/就绪等待/令牌/停止、Unix 管道 + Windows Job
+                         看门狗)+ Manager(uid → 进程注册表:端口池分配、
+                         懒启动、空闲回收、崩溃重启冷却、数量上限、
+                         PerUserHome 隔离)+ NewProxy(反代核心:去前缀、
+                         注入 Bearer、SSE flush、无 Content-Length body
+                         缓冲补齐、请求体上限)+ 类型化错误(errors.go:
+                         容量类 429 / 未就绪与冷却 503)
+  identity/              用户身份解析 Resolver:single(单用户)/ header
+                         (信任上级网关用户头,被集成推荐)/ sso(Casdoor
+                         OAuth2 + 本地会话 cookie;SessionStore 可注入,
+                         file_sessions.go 提供 GRF_SESSIONS_FILE 文件
+                         持久化,单实例定位,分布式需自换实现)
+  gateway/               多用户 web 网关:静态托管 + /grf-api 按用户路由
+                         (身份 → 懒拉起用户进程 → 注入令牌转发)+ auth
+                         端点挂载 + CORS(通配/白名单)+ /healthz/ready +
+                         /admin/* 管理 API(statuses/start/stop/restart,
+                         Bearer AdminToken)+ webhook + 请求日志
+internal/                Go 桌面专属层
+  appcfg/                桌面配置与项目索引的文件持久化(原子写)
+  desktop/               桌面 wails 服务薄壳(AppConfig/ServerManager/
+                         ModelConfig/AgentConfig/Desktop/TerminalManager/
+                         BrowserManager/ConsoleMCP/Updater + rootHandler
+                         /grf-api 反代与 /grf-api/token 冷启动端点;引用
+                         internal/appcfg、pkg/ghserver)
   browser/               右栏内嵌浏览器面板的原生 webview(macOS 自建
                          WKWebView 子视图/Windows WebView2 重父级子窗),
                          含 Eval/截图与 console/网络捕获钩子(eval.go:
@@ -76,10 +97,6 @@ plugins/console/         goder-console:智能体驱动界面面板的 MCP 服务
                          plugins 键时 upsert 命令项,不破坏自动发现语义)
 main.go                  wails v3 桌面入口(仅装配:服务注册、窗口、embed 资源;
                          开头分派 `goder console-shim` 子命令)
-internal/desktop/        桌面 wails 服务薄壳(AppConfig/ServerManager/
-                         ModelConfig/Desktop/TerminalManager/BrowserManager/
-                         ConsoleMCP + rootHandler /grf-api 反代与 /grf-api/token
-                         冷启动端点;引用 internal/appcfg、pkg/ghserver)
 cmd/grf-web-serve/       多用户网关 CLI(GRF_IDENTITY=single|header|sso;
                          运维 env:GRF_ADMIN_TOKEN/GRF_WEBHOOK_URL/
                          GRF_CORS_ORIGINS/GRF_ACCESS_LOG/GRF_SESSIONS_FILE)
@@ -88,7 +105,10 @@ frontend/src/
            agent-dto 为 gh 智能体配置 DTO,桌面桥与网页 agent-api 共用)/
            model(会话运行时模型)/ store(emitter 响应式基座——subscribe
            全量 + subscribeSession 会话定向,流式 delta 只唤醒关注该会话
-           的面板、scope 编排、persistence、storage(可注入键值存储,
+           的面板、scope 编排(引用计数 acquire/release + 归零延迟回收,
+           清轮询定时器防泄漏)、send-pipeline(发送/恢复管线:链尾失配
+           自愈 → 工具调用瞬时 400 → 断流退避三层重试与终态对账,
+           依赖注入、可独立单测)、persistence、storage(可注入键值存储,
            core 全部 localStorage 落点的统一通道,setKeyValueStorage 整体
            替换)、retry-policy(流恢复策略,可注入)、host-config(嵌入方
            按 scope 注入的运行时策略:sessionDefaults/ungroupedSessions/
@@ -135,8 +155,8 @@ frontend/src/
 ```
 
 依赖方向:panels/shell → registry/core;core 不依赖 UI;桌面专属能力只经
-`host/bridge.ts` 进出。Go 侧桌面壳与网关只做参数装配,进程/反代/身份逻辑
-一律在 internal。
+`host/bridge.ts` 进出。Go 侧桌面壳(internal/desktop)与网关(cmd/grf-web-serve)
+只做参数装配,进程/反代/身份逻辑一律在 pkg。
 
 ## 硬性约束(改代码前必读)
 
@@ -178,7 +198,8 @@ frontend/src/
   先查 registry.chat 的 ToolMetaDef 再落内置词典(fmt.ts)。
 - **core 持久化与策略注入不变量**:core 的一切 localStorage 读写必须经
   `core/store/storage.ts` 的 KeyValueStorage(嵌入方可整体替换),不许
-  再新增裸 localStorage 调用;连接副本默认不落 token(`persistToken: true`
+  再新增裸 localStorage 调用;JSON 类读写统一走同文件的 kvGet/kvSet/
+  kvDel 容错帮助函数;连接副本默认不落 token(`persistToken: true`
   显式开启,桌面入口已开)。嵌入方运行时策略(发送/审批钩子等)一律经
   `core/store/host-config.ts` 按 scope 注入;流恢复参数经 retry-policy.ts。
   automation 的 grf-auto 技能正文经 vite define(`__GRF_AUTO_SKILL_MD__`,
@@ -201,14 +222,19 @@ frontend/src/
   settings 里的端点/令牌由启动期 Install 烙写,端口令牌持久化在
   appcfg 目录 console-mcp.json;goder-console 在 builtinPlugins 里
   不可删。工具命名带 `goder_` 前缀,避免与 grf-browser 插件的
-  `browser_*` 撞名(gh 对重名工具取先连者并告警)。浏览器面板求值
-  的平台机制(macOS callAsyncJavaScript 回调 / Windows fetch 回报)
-  见 internal/browser/eval.go 头注释,改信封格式两边同步。
+  `browser_*` 撞名(gh 对重名工具取先连者并告警);全部工具的中文
+  展示名在前端 `shell/console-ui.ts` 与接线同源注册
+  (registry.chat.addToolMeta,Go 侧 tools.go 增改工具时两边同步)。
+  浏览器面板求值的平台机制(macOS callAsyncJavaScript 回调 /
+  Windows fetch 回报)见 internal/browser/eval.go 头注释,改信封
+  格式两边同步。
 - 桌面 wails 服务(`internal/desktop/` 下 `appconfig.go`/`servermanager.go`/
   `desktop.go`/`modelconfig.go`/`terminal.go`)的 DTO 与
   `frontend/src/host/bridge.ts` 手工对齐,两边同改保持同步;wails
   `Call.ByName` 按完整包路径 FQN(`bridge.ts` 的 SVC 常量)匹配,挪包时
-  两边同步;AppConfig/ServerManager 是薄壳,逻辑改动应落在
+  两边同步 —— FQN 失配有机械护栏:`go test ./internal/desktop/` 的
+  `bridge_fqn_test.go` 反射服务方法集与 bridge.ts 引用比对,挪包/改名
+  先红;AppConfig/ServerManager 是薄壳,逻辑改动应落在
   internal/appcfg、pkg/ghserver。
 - 前端 web 默认 baseUrl、桌面 bootstrap 顺序(先同源代理再补 token)与
   `/grf-api/token` 端点是冷启动链路的一部分,改动需回归桌面+web 两形态。

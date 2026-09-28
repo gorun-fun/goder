@@ -384,8 +384,9 @@ GRF_IDENTITY=header GRF_UID_HEADER=X-GRF-UID ADDR=127.0.0.1:7702 \
 
 网关自己做 Casdoor OAuth2 授权码登录(参考 game-web 的流程,独立实现、
 无数据库依赖):`/grf-api/auth/login | callback | logout | me`,本地签发
-不透明随机会话(HttpOnly cookie,默认内存表,`identity.SessionStore`
-接口预留持久化)。开发后门 `AUTH_DEV_EMAIL` 仅供本地联调。
+不透明随机会话(HttpOnly cookie,默认内存表;`GRF_SESSIONS_FILE` 启用
+文件持久化,重启免重登,单实例定位)。开发后门 `AUTH_DEV_EMAIL` 仅供
+本地联调。
 
 ```sh
 GRF_IDENTITY=sso \

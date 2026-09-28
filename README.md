@@ -191,7 +191,8 @@ cmd/grf-web-serve/       多用户网关 CLI(环境变量驱动三种身份模�
 frontend/src/
   core/                  无 UI 的核心层:api(ORS 客户端+SSE+超时)、model
                          (会话运行时)、store(scope 编排/持久化/响应式基座/
-                         可注入键值存储/恢复策略/嵌入方运行时策略钩子)、
+                         可注入键值存储/恢复策略/嵌入方运行时策略钩子/
+                         发送恢复管线)、
                          settings(设置状态)、i18n(文案定制通道)
   registry/              UI 注册表:nav/side/bottom/settings 四区条目 +
                          chat 消息内容层(渲染器/工具元数据/markdown 覆写);
