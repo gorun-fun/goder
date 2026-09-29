@@ -104,8 +104,6 @@ export class GoderChat extends GoderPanel {
         font-size: var(--goder-font-size);
         color: var(--goder-text);
         height: 100%;
-        /* 状态浮窗(position:absolute)的定位基准:锚在聊天列右上 */
-        position: relative;
       }
       :host(.flat) {
         background: transparent;
@@ -187,7 +185,8 @@ export class GoderChat extends GoderPanel {
         color: var(--goder-text);
         background: var(--goder-bg-active);
       }
-      /* 消息区容器:定位基准,承载左侧导航小横线与运行圆环 */
+      /* 消息区容器:定位基准,承载状态浮窗(锚在 header 之下的聊天列
+       * 右上,不遮头部右侧的三栏开关按钮)、左侧导航小横线与运行圆环 */
       .msgs-wrap {
         flex: 1;
         min-height: 0;
@@ -697,7 +696,9 @@ export class GoderChat extends GoderPanel {
   }
 
   protected firstUpdated(): void {
-    const el = this.renderRoot.querySelector('.col-main');
+    // 观察 .msgs-wrap(本组件内的聊天列;dock 重构后 .col-main 在壳层,
+    // 此前查不到导致窄列收缩检测一直失效)
+    const el = this.renderRoot.querySelector('.msgs-wrap');
     if (el && this.colRo) this.colRo.observe(el);
   }
 
@@ -833,10 +834,10 @@ export class GoderChat extends GoderPanel {
               </span>
             </header>
           `}
-      ${getStatusPop(this.scope)
-        ? html`<goder-status-pop scope=${this.scope} .git=${this.git} .narrow=${this.colNarrow}></goder-status-pop>`
-        : nothing}
       <div class="msgs-wrap">
+            ${getStatusPop(this.scope)
+              ? html`<goder-status-pop scope=${this.scope} .git=${this.git} .narrow=${this.colNarrow}></goder-status-pop>`
+              : nothing}
             <div class="msgs" @scroll=${this.onScroll}>
               <div class="inner">
                 ${!sid || sid.startsWith('draft:')

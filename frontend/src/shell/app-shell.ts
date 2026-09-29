@@ -221,6 +221,13 @@ export class GoderAppShell extends GoderPanel {
         flex: 1;
         min-height: 0;
       }
+      /* 底栏 dock 按内容高(拖拽条 4px + 内联 height),不参与平分:
+       * 通配 flex:1 会覆盖 dock :host 的 flex:none(外部规则胜 :host
+       * 声明),与聊天对半分高后拖动高度不再改变 dock 总高,分割线
+       * 拖不动 —— 收起/无条目时 :host(.off/.no-defs) 已 display:none */
+      .workcard .col-main > goder-bottom-dock {
+        flex: none;
+      }
       .hidden {
         display: none !important;
       }

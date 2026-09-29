@@ -61,6 +61,16 @@ export class GoderSideDock extends GoderPanel {
       aside.side.off {
         display: none;
       }
+      /* 右栏面板本体:列布局,承载 tab 行 + 内容区的高度分配。漏掉它
+       * (.side-body 的 flex:1 在 block 流里失效)会让内容区高度塌成
+       * 内容高:终端点击区残缺、浏览器空态(place-content 居中于
+       * 0 高容器)上下溢出盖住地址栏 —— 对齐剥离前 chat-panel 的 .side */
+      aside.side {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+      }
       /* 右栏拖拽条:常显一条灰线作为与聊天区的分界,悬停提亮一档 */
       .gutter-side {
         flex: none;
@@ -294,16 +304,23 @@ export class GoderSideDock extends GoderPanel {
     super.disconnectedCallback();
   }
 
+  /** 拖拽参照容器(app-shell 的 .cols)快照:startDrag 时测一次。参照必须
+   * 固定 —— 若每帧取 dock 自身 rect,其左缘随宽度实时变化,上限跟着上一帧
+   * 宽度走,拖宽越过聊天列保底线时宽度在两个值间振荡(分隔线跳动) */
+  private dragRect: DOMRect | null = null;
+
   private onDrag = (e: PointerEvent): void => {
-    if (!this.dragging) return;
-    const rect = this.getBoundingClientRect();
-    // 右栏拖宽:下限 260(右栏自身可用),上限保留聊天列最小宽度 300
-    // (dock 左缘到视口左端的空间减去聊天列保底)
-    this.width = Math.min(Math.max(rect.right - e.clientX, 260), Math.max(rect.left - 300, 260));
+    if (!this.dragging || !this.dragRect) return;
+    const rect = this.dragRect;
+    // 右栏拖宽:下限 260(右栏自身可用),上限保留聊天列最小宽度 300。
+    // 与剥离前 chat-panel 同语义(整个 cols 容器宽 - 300),宽度对宽度比较;
+    // 不能用 dock 左缘的绝对坐标做上限(量纲不符,且随拖拽移动)
+    this.width = Math.min(Math.max(rect.right - e.clientX, 260), Math.max(rect.width - 300, 260));
   };
 
   private stopDrag = (): void => {
     this.dragging = false;
+    this.dragRect = null;
     this.classList.remove('dragging');
   };
 
@@ -478,6 +495,8 @@ export class GoderSideDock extends GoderPanel {
   private startDrag(): void {
     this.dragging = true;
     this.classList.add('dragging');
+    // 参照取父容器(壳层 .cols;独立使用时回退自身),拖拽期间不再重测
+    this.dragRect = (this.parentElement ?? this).getBoundingClientRect();
   }
 
   // renderTabBar 右栏顶部 tab 栏;无已开 tab 时显示居中类型入口。
