@@ -69,6 +69,12 @@ static void* goder_createBrowserView(void* mainWin, const char* hooks) {
 			});
 			WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
 			config.websiteDataStore = store;
+			// UA 必须带 Version/Safari 尾巴:应用内嵌 WKWebView 的默认 UA 是
+			// 裸 WebKit 串,部分站点(实测百度 www)对它返回「location.replace
+			// 降级到 http://」的跳转桩;内嵌视图受 ATS 约束禁止明文 http,
+			// 该跳转被静默拦截,页面停在空桩文档上 —— 现象是整页全白。
+			// 补全为 Safari 形态 UA(站点不校验版本号,伪装版本无副作用)。
+			config.applicationNameForUserAgent = @"Version/26.0 Safari/605.1.15";
 			if (hooks && hooks[0]) {
 				WKUserContentController* ucc = [[WKUserContentController alloc] init];
 				[ucc addUserScript:[[WKUserScript alloc]
