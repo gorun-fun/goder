@@ -539,7 +539,9 @@ interface WailsEvents {
 /** 订阅终端输出/退出事件(kind: data=base64 输出块 / exit=退出码);返回取消订阅。非桌面态为 no-op。 */
 export function onTermEvent(id: string, kind: 'data' | 'exit', cb: (payload: string) => void): () => void {
   if (!inWails()) return () => {};
-  const name = `grf:term-${kind}:${id}`;
+  // 事件名须与 Go 侧 terminal.go 的 Emit 一致(goder: 前缀;grf→goder
+  // 更名时此处漏改,订阅名与发射名不匹配会让终端收不到任何输出)
+  const name = `goder:term-${kind}:${id}`;
   let off: (() => void) | null = null;
   let cancelled = false;
   void (async () => {
