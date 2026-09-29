@@ -22,8 +22,6 @@ import {
   browserHide,
   browserSetRect,
   browserSetBackground,
-  browserBack,
-  browserForward,
   browserReload,
 } from '../../host/bridge';
 
@@ -117,9 +115,6 @@ export class GoderBrowser extends GoderPanel {
       }
       .bar button.ghost {
         padding: 4px 6px;
-      }
-      .bar button.ghost.flip svg {
-        transform: scaleX(-1);
       }
       .page {
         flex: 1;
@@ -326,11 +321,15 @@ export class GoderBrowser extends GoderPanel {
   }
 
   private reload(): void {
-    if (!this.url) return;
+    // 原生模式:重载原生视图「当前页」,不依赖前端 this.url —— 智能体经
+    // goder-console 直连导航(goder_browser_navigate)或面板从未手动输入过
+    // 地址时 this.url 可能为空/陈旧,此时静默 return 会让刷新按钮看起来
+    // 完全失效(视图明明有页面可刷)。
     if (this.native) {
       void browserReload();
       return;
     }
+    if (!this.url) return;
     this.frameSrc = '';
     this.reloadTimer = window.setTimeout(() => {
       this.frameSrc = this.url;
@@ -341,17 +340,6 @@ export class GoderBrowser extends GoderPanel {
     const loaded = this.native ? this.url : this.frameSrc;
     return html`
       <div class="bar">
-        <button class="ghost" title="后退" ?hidden=${!this.native} @click=${() => void browserBack()}>
-          ${unsafeHTML(icon.arrowLeft)}
-        </button>
-        <button
-          class="ghost flip"
-          title="前进"
-          ?hidden=${!this.native}
-          @click=${() => void browserForward()}
-        >
-          ${unsafeHTML(icon.arrowLeft)}
-        </button>
         <input
           type="text"
           placeholder="输入网址,如 example.com"

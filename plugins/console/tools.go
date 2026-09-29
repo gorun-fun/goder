@@ -126,9 +126,11 @@ func (s *Server) registerBrowserTools() {
 			// 导航竞争;先让它发生,智能体的导航必须是最后到达的那个)。
 			s.emitUI("side_tab_open", map[string]any{"defId": "browser"})
 			time.Sleep(700 * time.Millisecond) // 等前端恢复上次地址的自导航先发生
-			if !s.deps.Browser.Navigate(strings.TrimSpace(a.URL)) {
-				return textErr("面板浏览器不可用(平台不支持原生内嵌或主窗口未就绪)")
-			}
+			// 导航必须走前端 open_browser 通道(面板 open()→load()),不能
+			// Go 直连 Browser.Navigate:直连只驱动原生视图,前端 this.url/
+			// 地址栏/localStorage 记忆地址全部脱节 —— 用户随后点「刷新」时
+			// this.url 可能为空导致静默失效,地址栏也显示错页面。
+			s.emitUI("open_browser", map[string]any{"url": strings.TrimSpace(a.URL)})
 			// 等加载:导航是异步的,起点页(about:blank 或恢复的旧地址)
 			// 本来就 complete,readyState 不可作信号 —— 以 href 到达目标
 			// 为准,再等 readyState complete。

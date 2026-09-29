@@ -66,7 +66,17 @@ export function registerBuiltinCommon(): void {
     label: '浏览器',
     icon: icon.globe,
     width: 560,
-    render: (ctx) => html`<goder-browser scope=${ctx.scope}></goder-browser>`,
+    // 返回 HTMLElement 池化保活 + shared 单例:浏览器持有跨渲染状态
+    // (当前地址、原生 webview 绑定),且原生视图全局仅一块 —— 模板条目
+    // 会在重渲时换元素、多个实例在各自连接时互相抢导航,还让壳层的
+    // panelEl('browser').open(url) 编程导航(file-view 眼睛、智能体
+    // open_browser)取不到元素而静默失效。
+    shared: true,
+    render: (ctx) => {
+      const el = document.createElement('goder-browser');
+      el.setAttribute('scope', ctx.scope);
+      return el;
+    },
   });
   registry.side.add({
     id: 'detail',
