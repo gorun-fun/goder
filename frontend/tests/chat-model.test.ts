@@ -38,6 +38,21 @@ describe('applyEvent', () => {
     expect(tool && tool.kind === 'tool' && tool.output).toBe('file-a');
   });
 
+  it('压缩摘要消息渲染为通知卡,中断标记尾巴剥掉(gh 会话压缩/取消前缀)', () => {
+    const items = historyToItems([
+      { role: 'user', content: '[conversation summary] 任务:修构建。已完成:编译通过。' },
+      { role: 'assistant', content: '回答前半段\n\n[interrupted: this reply was cut off mid-stream by a cancellation; the text above was already shown to the user — do not repeat it verbatim, continue from where it stopped]' },
+    ] as never);
+    // 摘要不进用户气泡,落 notice 卡(compact)
+    expect(items.filter((i) => i.kind === 'user').length).toBe(0);
+    const notice = items.find((i) => i.kind === 'notice');
+    expect(notice && notice.kind === 'notice' && notice.noticeKind).toBe('compact');
+    expect(notice && notice.kind === 'notice' && notice.detail).toContain('修构建');
+    // 中断标记是模型向指令,展示层剥掉
+    const asst = items.find((i) => i.kind === 'assistant');
+    expect(asst && asst.kind === 'assistant' && asst.text).toBe('回答前半段');
+  });
+
   it('工具调用物化为 tool 条目(名字/参数/结果)', () => {
     const rt = newRuntime();
     applyEvent(rt, { type: 'grf:tool_call.started', item: { type: 'grf:tool_call', name: 'bash', call_id: 'c9', arguments: '{"command":"ls"}' } } as unknown as SSEEvent);

@@ -310,6 +310,17 @@ export function shotUrlsOfFile(text: string): string[] {
 // 捕获组 = 工具名)。识别这类消息用:不进用户气泡,只回填工具卡。
 export const TOOL_RESULT_RE = /^\[tool result: ([^\]]+)\]/;
 
+// gh 会话压缩(手动 /compact 或超阈值自动压缩)把历史收敛为一条
+// "[conversation summary] …" 的 user 消息(agent/compact.go 的
+// compactSummaryMarker)。这是模型向锚点,用户并没有发过这条——恢复
+// 历史时渲染为摘要通知卡,不进用户气泡。
+const COMPACT_SUMMARY_RE = /^\[conversation summary\]\s*/;
+
+// gh 取消中断的流式回复在内容尾部追加的模型向标记(turn.go 的
+// keepDeliveredPrefix):提示模型续答不复述。对用户是英文噪音,恢复
+// 历史展示时剥掉(仅显示层,不影响会话历史本身)。
+const INTERRUPTED_MARK_RE = /\n*\[interrupted:[^\]]*\]\s*$/;
+
 export function historyToItems(hist: HistMessage[]): ChatItem[] {
   const items: ChatItem[] = [];
   const byCallId = new Map<string, ToolItem>();
@@ -338,12 +349,19 @@ export function historyToItems(hist: HistMessage[]): ChatItem[] {
           break;
         }
         if (text || images.length) {
+          // 压缩摘要锚点:通知卡承载,不进用户气泡。
+          const cs = text.match(COMPACT_SUMMARY_RE);
+          if (cs) {
+            const summary = text.slice(cs[0].length);
+            if (summary) items.push({ kind: 'notice', id: genId('n'), noticeKind: 'compact', detail: summary });
+            break;
+          }
           items.push({ kind: 'user', id: genId('u'), text, images: images.length ? images : undefined });
         }
         break;
       }
       case 'assistant': {
-        const text = textOfContent(msg.content);
+        const text = textOfContent(msg.content).replace(INTERRUPTED_MARK_RE, '');
         if (text.trim()) items.push({ kind: 'assistant', id: genId('a'), text, streaming: false });
         for (const tc of msg.tool_calls ?? []) {
           const tool: ToolItem = {
