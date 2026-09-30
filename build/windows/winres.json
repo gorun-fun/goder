@@ -1,0 +1,38 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": [
+        "icon-frames/16.png",
+        "icon-frames/24.png",
+        "icon-frames/32.png",
+        "icon-frames/48.png",
+        "icon-frames/64.png",
+        "icon-frames/128.png",
+        "icon-frames/256.png"
+      ]
+    }
+  },
+  "RT_MANIFEST": {
+    "1": {
+      "0409": {
+        "path": "app.manifest"
+      }
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "0.1.0.0",
+          "product_version": "0.1.0.0"
+        },
+        "info": {
+          "0409": {
+            "FileDescription": "Goder",
+            "ProductName": "Goder"
+          }
+        }
+      }
+    }
+  }
+}
