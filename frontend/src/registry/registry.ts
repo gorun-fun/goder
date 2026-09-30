@@ -60,6 +60,9 @@ export interface NavViewDef {
   visible?: (ctx: PanelContext) => boolean;
   /** 从该视图返回时回到哪个导航(goder-nav-back 事件的落点);缺省 = 首个可见条目 */
   exitTo?: string;
+  /** 全幅视图:激活时收起右栏/底栏 dock(进入前状态记住,退出时恢复),
+   *  且左栏锁定不可收起(设置等自带左侧分区导航的视图用)。 */
+  fullView?: boolean;
   /** 只在这些 scope 名下可见(缺省 = 所有 scope);同页多嵌入实例各装配
    * 各的面板集合时用,与 visible(ctx) 守卫正交 */
   scopes?: string[];

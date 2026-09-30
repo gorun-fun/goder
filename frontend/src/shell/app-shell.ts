@@ -54,6 +54,8 @@ export class GoderAppShell extends GoderPanel {
   @state() private sideTabs: SideTabInstance[] = [];
   /** 右栏当前激活的 tab id */
   @state() private activeSideTab = '';
+  /** 全幅视图(设置)进入前的右栏/底栏展开态,退出时恢复;null = 不在全幅视图 */
+  @state() private dockStash: { sidebar: boolean; bottom: boolean } | null = null;
 
   /** macOS 桌面态(检测见 host/platform.ts):左栏顶行左侧为红绿灯
    * (关/最小/最大化)预留悬浮位,最大化按钮之后仅放左边栏开关。 */
@@ -467,12 +469,39 @@ export class GoderAppShell extends GoderPanel {
 
   setSessions(on: boolean): void {
     if (this.uiGate({ type: 'sessions', on })) return;
+    // 全幅视图(设置)锁定左栏:收起请求忽略(展开不受限)。设置的左栏
+    // 是分区导航,收起后设置失去自身入口。
+    if (!on && this.navFullView()) return;
     this.showSessions = on;
   }
 
   /** 当前激活导航条目 id。 */
   get activeNav(): string {
     return this.activeNavId;
+  }
+
+  /** 当前激活导航是否全幅视图(registry NavViewDef.fullView;条目被
+   *  移除时 get 返回 undefined,视为非全幅)。 */
+  private navFullView(id: string = this.activeNavId): boolean {
+    return registry.nav.get(id)?.fullView === true;
+  }
+
+  /** 全幅视图切换沿:进入时记住右栏/底栏展开态并收起(全幅内容需要
+   *  整幅宽度,dock 是会话上下文面板),退出时恢复进入前状态 —— dock
+   *  元素只切 .off 不销毁,浏览器面板等有状态内容不丢。 */
+  private syncFullView(prevId: string): void {
+    const now = this.navFullView();
+    const was = this.navFullView(prevId);
+    if (now === was) return;
+    if (now) {
+      this.dockStash = { sidebar: this.showSidebar, bottom: this.showBottom };
+      this.showSidebar = false;
+      this.showBottom = false;
+    } else if (this.dockStash) {
+      this.showSidebar = this.dockStash.sidebar;
+      this.showBottom = this.dockStash.bottom;
+      this.dockStash = null;
+    }
   }
 
   private firstNavId(): string {
@@ -526,7 +555,7 @@ export class GoderAppShell extends GoderPanel {
     reportConsoleUi(this.consoleSnapshot());
   }
 
-  protected willUpdate(_props: PropertyValues<this>): void {
+  protected willUpdate(props: PropertyValues<this>): void {
     // 激活导航不可见(初始默认值失效、被 hide/remove)时落到首个可见
     // 条目 —— 渲染取 def 用 get 不校验隐藏,不收敛会让被裁剪的视图
     // 残留在首屏(嵌入方 hide('sessions') 只留自家条目的场景)。
@@ -534,6 +563,10 @@ export class GoderAppShell extends GoderPanel {
       const first = this.firstNavId();
       if (first) this.activeNavId = first;
     }
+    // 全幅视图进入/退出沿(收起与恢复右栏/底栏;覆盖 navTo、启动初值、
+    // 上面不可见收敛等一切激活切换路径)
+    const navKey = 'activeNavId' as keyof GoderAppShell;
+    if (props.has(navKey)) this.syncFullView(String(props.get(navKey) ?? ''));
   }
 
   /** 打开右栏浏览器 tab 并导航(智能体 open_browser 与 file-view 的
@@ -627,9 +660,11 @@ export class GoderAppShell extends GoderPanel {
                   @dblclick=${(e: MouseEvent) => this.tdrag?.onDbl(e)}
                 >
                   ${getSideTop(this.scope)?.leading ? html`${this.sideTopEl('leading')}` : nothing}
-                  <span class="toggler">
-                    <button class="on" title="收起侧栏" @click=${() => this.setSessions(false)}>${unsafeHTML(icon.panelLeft)}</button>
-                  </span>
+                  ${navDef?.fullView
+                    ? nothing
+                    : html`<span class="toggler">
+                        <button class="on" title="收起侧栏" @click=${() => this.setSessions(false)}>${unsafeHTML(icon.panelLeft)}</button>
+                      </span>`}
                   ${ctx.desktop && panelRegistered('goder-update-chip')
                     ? html`<goder-update-chip></goder-update-chip>`
                     : nothing}
