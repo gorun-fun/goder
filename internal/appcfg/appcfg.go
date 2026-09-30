@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 )
 
 // Config 应用配置。JSON 字段与前端 host/bridge.ts 的 AppConfigDTO 对齐。
@@ -89,7 +90,14 @@ func (s *Store) Save(cfg Config) error {
 
 // atomicWrite 同目录写临时文件后 rename 顶替(同分区保证原子性;
 // 失败时清理临时文件,目标文件保持旧内容)。
+// writeMu 串行化并发写:tmp 文件名固定,两个调用者同时落盘同一目标时
+// 会交叉写同一 tmp 或先后 rename 使后者 ENOENT(实测 E2E 中
+// index-app.json 并发更新即踩中),丢一次更新且可能落盘交错内容。
+var writeMu sync.Mutex
+
 func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, perm); err != nil {
 		return err
