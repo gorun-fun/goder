@@ -52,7 +52,16 @@ export class GoderChat extends GoderPanel {
    * workcard 容器,避免双层卡片);独立嵌入不传,保留卡片感。 */
   @property({ type: Boolean }) flat = false;
 
+  /** 底部吸附态:用户在消息区最底(距底容差内)时新内容自动滚到最底;
+   * 向上滚看历史即脱离,滚回最底恢复(见 onScroll/STICK_AT)。 */
   @state() private stickBottom = true;
+  /** 距底多少像素内仍视为吸附中(容差:流式重排的微小抖动不算离底) */
+  private static readonly STICK_AT = 60;
+  /** 消息内容/滚动视口尺寸观察(底部吸附:吸附态下内容增高或视口变化
+   * 即回最底;观察 .inner 覆盖流式增量、图片异步加载等一切高度变化) */
+  private stickRo: ResizeObserver | null = null;
+  /** 上次渲染的会话 id(切会话重置吸附并滚到最新) */
+  private lastSid?: string;
   /** 聊天列过窄(右栏/窗口挤压):状态浮窗自动收成单行,避免盖住对话内容 */
   @state() private colNarrow = false;
   /** 聊天列窄阈值(px):低于即自动收缩浮窗 */
@@ -284,6 +293,40 @@ export class GoderChat extends GoderPanel {
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
+      }
+      /* 回到底部:脱离吸附(用户在上方看历史)时浮现于消息区右下角 */
+      .to-bottom {
+        position: absolute;
+        right: 20px;
+        bottom: 14px;
+        z-index: 25;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border-radius: 50%;
+        border: 1px solid var(--goder-border);
+        background: var(--goder-bg-raise);
+        color: var(--goder-text-dim);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: var(--goder-shadow);
+        animation: tb-in 0.15s ease;
+      }
+      .to-bottom:hover {
+        color: var(--goder-text);
+        border-color: var(--goder-border-hover);
+      }
+      .to-bottom svg {
+        width: 15px;
+        height: 15px;
+      }
+      @keyframes tb-in {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
       }
       /* 会话运行中:加载圆环跟在最后一条消息之后 */
       .run-ring {
@@ -700,6 +743,27 @@ export class GoderChat extends GoderPanel {
     // 此前查不到导致窄列收缩检测一直失效)
     const el = this.renderRoot.querySelector('.msgs-wrap');
     if (el && this.colRo) this.colRo.observe(el);
+    // 底部吸附:观察消息内容 .inner 与滚动视口 .msgs —— 流式增量、图片
+    // 异步加载、窗口/面板伸缩都会改变二者尺寸,吸附态下即滚回最底;
+    // 相比在 updated 里滚,RO 能覆盖不经 Lit 渲染的高度变化。
+    const msgs = this.renderRoot.querySelector('.msgs');
+    const inner = this.renderRoot.querySelector('.msgs .inner');
+    if (msgs && inner) {
+      this.stickRo = new ResizeObserver(() => this.maybeScroll());
+      this.stickRo.observe(inner);
+      this.stickRo.observe(msgs);
+    }
+  }
+
+  protected updated(props: PropertyValues<this>): void {
+    super.updated(props);
+    // 切会话:重置吸附并滚到最新消息(此时 DOM 已更新,直接到位;历史
+    // 若稍后异步到达,增高由 stickRo 兜底回底)
+    if (this.sid !== this.lastSid) {
+      this.lastSid = this.sid;
+      this.stickBottom = true;
+      this.maybeScroll();
+    }
   }
 
   disconnectedCallback(): void {
@@ -707,6 +771,8 @@ export class GoderChat extends GoderPanel {
     this.tdrag = null;
     this.colRo?.disconnect();
     this.colRo = null;
+    this.stickRo?.disconnect();
+    this.stickRo = null;
     if (this.gitTimer) window.clearInterval(this.gitTimer);
     this.gitTimer = undefined;
     this.settingsUnsub?.();
@@ -734,6 +800,8 @@ export class GoderChat extends GoderPanel {
     }
   }
 
+  /** 底部吸附滚动:仅吸附态执行;流式高频调用必须用即时滚动(instant),
+   * smooth 会堆叠动画跟不上内容增长。 */
   private maybeScroll(): void {
     if (!this.stickBottom) return;
     const el = this.renderRoot.querySelector('.msgs');
@@ -742,7 +810,15 @@ export class GoderChat extends GoderPanel {
 
   private onScroll(e: Event): void {
     const el = e.target as HTMLElement;
-    this.stickBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    // 向上滚看历史即脱离吸附;滚回距底容差内恢复。程序设置的 scrollTop
+    // 也会触发本事件,但落点在最底 → 仍判定吸附,自洽。
+    this.stickBottom = el.scrollHeight - el.scrollTop - el.clientHeight < GoderChat.STICK_AT;
+  }
+
+  /** 「回到底部」按钮:恢复吸附并滚到最新消息。 */
+  private toBottom(): void {
+    this.stickBottom = true;
+    this.maybeScroll();
   }
 
   /** 头部修饰类:macOS 红绿灯悬浮位(左栏收起时)/ 无边框桌面平台窗口控制让位 */
@@ -847,6 +923,11 @@ export class GoderChat extends GoderPanel {
               </div>
             </div>
             ${renderChatNav(rt?.items ?? [], cnavWave, cnavReset, (id) => this.scrollToMsg(id))}
+            ${!this.stickBottom
+              ? html`<button class="to-bottom" title=${this.t('回到底部')} @click=${this.toBottom}>
+                  ${unsafeHTML(icon.arrowDown)}
+                </button>`
+              : nothing}
           </div>
           ${this.noComposer
             ? nothing
@@ -984,6 +1065,8 @@ export class GoderChat extends GoderPanel {
 
   private onSend(e: CustomEvent<{ text: string; images?: string[] }>): void {
     const payload = e.detail;
+    // 用户主动发言即想看最新回合:恢复吸附(即便刚才在上面翻历史)
+    this.stickBottom = true;
     void this.ensureModelReady(payload).then((ok) => {
       if (ok) void this.store!.send(payload.text, payload.images);
     });
@@ -1065,6 +1148,7 @@ export class GoderChat extends GoderPanel {
     this.cancelEdit();
     // 编辑重发:从被编辑消息处截断历史(grf:history),编辑文本作为该回合输入
     if (text) {
+      this.stickBottom = true; // 同 onSend:用户主动发起回合,恢复吸附
       void this.ensureModelReady({ text }).then((ok) => {
         if (ok) void this.store!.send(text, undefined, editOf ? { editOf } : undefined);
       });
