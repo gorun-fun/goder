@@ -552,19 +552,26 @@ func downloadFile(ctx context.Context, url, dst string) error {
 	return installDownload(name, dst)
 }
 
-// matchPluginFile 宽松匹配下载服务器上的插件文件名(与 gh pick 一致):
-// "browser"、"grf-browser"、"grf-browser.exe" 视为同一个。
+// matchPluginFile 宽松匹配下载服务器上的插件文件名(与 gh 的
+// normPluginName 同语义):"browser"、"grf-browser"、"grf-browser.exe"
+// 视为同一个。插件产物是 gh 生态的下载服务器发布的,一律 grf- 前缀,
+// 不随本程序命名(不要把前缀改成 goder-)。
 func matchPluginFile(files []string, name string) (string, bool) {
-	want := strings.TrimSuffix(strings.ToLower(name), ".exe")
-	if !strings.HasPrefix(want, "goder-") {
-		want = "goder-" + want
-	}
+	want := normPluginName(name)
 	for _, f := range files {
-		if strings.TrimSuffix(strings.ToLower(f), ".exe") == want {
+		if normPluginName(f) == want {
 			return f, true
 		}
 	}
 	return "", false
+}
+
+// normPluginName 插件名归一:去 grf- 前缀与 .exe 后缀(小写),与
+// grf-harness plugin/download.go 的 normPluginName 同语义。
+func normPluginName(s string) string {
+	s = strings.ToLower(s)
+	s = strings.TrimPrefix(s, "grf-")
+	return strings.TrimSuffix(s, ".exe")
 }
 
 // PluginInstall 从官方服务器安装插件到 ~/.grf/plugins/,并在显式列表
