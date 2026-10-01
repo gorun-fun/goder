@@ -295,9 +295,10 @@ func syncPluginsForGh(dir, ver string) {
 }
 
 // applyGoder 更新 goder 自身:下载 zip → 解包 → 自替换(见 installGoder)
-// → 停 gh(新进程会重新拉起)→ 启动新进程 → 退出当前进程。返回 done
-// 阶段的提示文案;终态事件由 Apply 统一下发(前端把 restart 阶段视为
-// 完成,之后进程即将退出)。
+// → 停 gh(新进程会重新拉起)→ 启动新进程(带 --wait-pid 接力参数,先等
+// 本进程退出再初始化,避免 Windows 上新旧并存撞 WebView2 数据目录锁)→
+// 退出当前进程。返回 done 阶段的提示文案;终态事件由 Apply 统一下发
+// (前端把 restart 阶段视为完成,之后进程即将退出)。
 func (u *Updater) applyGoder() (string, error) {
 	dir, err := ghPlatformDir()
 	if err != nil {
@@ -338,14 +339,17 @@ func (u *Updater) applyGoder() (string, error) {
 	GetServerManager().Stop()
 	u.emit(UpdateProgressDTO{Which: "goder", Phase: "restart", Msg: "正在重启应用"})
 
-	cmd := exec.Command(newExe)
+	// 接力参数:新进程启动时先等本进程完全退出再初始化(Windows 上新旧
+	// 并存会撞 WebView2 用户数据目录锁,新进程环境创建失败即静默退出,
+	// 见 relaunch.go)。
+	cmd := exec.Command(newExe, fmt.Sprintf("--wait-pid=%d", os.Getpid()))
 	hideConsole(cmd)
 	cmd.Dir = filepath.Dir(newExe)
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("启动新版本失败: %w", err)
 	}
-	time.Sleep(500 * time.Millisecond) // 让新进程先完成启动
+	time.Sleep(500 * time.Millisecond) // 让新进程先完成接力启动
 	if app := application.Get(); app != nil {
 		app.Quit()
 	}

@@ -21,6 +21,11 @@ import (
 var assets embed.FS
 
 func main() {
+	// 自更新接力:本进程是 applyGoder 拉起的新版本,先等旧进程完全退出
+	// (Windows WebView2 数据目录锁与 console MCP 端口烙写都不容忍新旧
+	// 并存,见 relaunch.go)再初始化。参数不存在时零开销。必须抢在一切
+	// GUI 初始化之前。
+	waitRelaunchParent(os.Args)
 	// goder-console 的 stdio shim 子命令:gh 以本地 MCP 插件方式 spawn
 	// 本程序(`goder console-shim <endpoint> <token>`),行 JSON-RPC 转
 	// 发到桌面进程的 loopback /mcp。必须抢在一切 GUI 初始化之前分派。
