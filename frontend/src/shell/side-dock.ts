@@ -1,6 +1,9 @@
 // side-dock.ts — <goder-side-dock>:右栏 dock(tab 行 + 内容元素池)。
 // 从 chat-panel 剥离的通用容器:dock 属于壳层布局、与聊天内容无关,
 // 剥离后「无聊天但保留右栏」的装配(panels="sessions,sidebar")成立。
+// tab 行展开时兼任标题栏角色(高 40px 与左栏顶行/聊天头部拉通):空白区
+// 按住拖动 = 移动窗口、双击 = 缩放(经 util/titledrag 转发,非桌面态静默);
+// 无 tab 的空态入口页顶部补同款空白拖拽条,保持标题行连续。
 // 池化语义与剥离前一致:render 返回 HTMLElement 的条目按 (tab id, 会话)
 // 池化保活(跨 tab 开关与会话切换不销毁,如终端 PTY),shared 条目为
 // scope 级单例(切会话不动,如嵌入方的项目级面板);条目被 hide 后其
@@ -13,6 +16,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme } from '../ui/panel';
 import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
+import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
 import { registry, sideTabId, type PanelContext, type SideTabDef, type SideTabInstance } from '../registry/registry';
 
 @customElement('goder-side-dock')
@@ -23,6 +27,9 @@ export class GoderSideDock extends GoderPanel {
   @property({ type: Array }) tabs: SideTabInstance[] = [];
   /** 当前激活的 tab id */
   @property({ type: String }) activeTab = '';
+  /** 无边框桌面平台(Windows/Linux):壳右上角自绘窗口控制悬浮于
+   * tab 行之上,右侧让位(同 chat 头部的 .win) */
+  @property({ type: Boolean, attribute: 'win-controls' }) winControls = false;
 
   /** 用户拖拽后的宽度(null = 按 tab 默认宽) */
   @state() private width: number | null = null;
@@ -30,6 +37,8 @@ export class GoderSideDock extends GoderPanel {
   @state() private menuOpen = false;
   @state() private menuLeft = 0;
   private dragging = false;
+  /** tab 行空白区的窗口拖拽(移动/双击缩放;非桌面态静默) */
+  private tdrag: TitleDrag | null = null;
 
   /** 返回 HTMLElement 的右栏条目(终端等有状态内容)按 (tab id, 会话)
    * 池化保活:跨 tab 开关与会话切换不销毁元素 */
@@ -114,10 +123,25 @@ export class GoderSideDock extends GoderPanel {
         padding: 5px 6px 0;
         border-bottom: 1px solid var(--goder-border);
         user-select: none;
-        min-height: 32px;
+        /* 与左栏顶行/聊天头部同为 40px(含分隔线),三段标题行拉通对齐 */
+        height: 40px;
+        box-sizing: border-box;
         /* 文件 tab(相对路径标题)可能很多/很长:tab 行横向滚动 */
         overflow-x: auto;
         overflow-y: hidden;
+      }
+      /* 无边框桌面平台:壳右上角自绘窗口控制(30×3 + 间隙)悬浮于本行,
+       * 右侧让位(同 chat 头部 .win) */
+      .side-tabs.win {
+        padding-right: 106px;
+      }
+      /* 空态(无 tab 的入口页)顶部空白拖拽条:补齐标题行,空白区可拖动窗口 */
+      .tabs-blank {
+        flex: none;
+        height: 40px;
+        box-sizing: border-box;
+        border-bottom: 1px solid var(--goder-border);
+        user-select: none;
       }
       .stab .stab-t {
         max-width: 170px;
@@ -289,12 +313,16 @@ export class GoderSideDock extends GoderPanel {
 
   connectedCallback(): void {
     super.connectedCallback();
+    // 排除项:tab 本体/关闭键/「+」与下拉菜单(button 兜底未来新增控件)
+    this.tdrag = makeTitleDrag('button, .stab, .side-menu');
     window.addEventListener('pointermove', this.onDrag);
     window.addEventListener('pointerup', this.stopDrag);
     window.addEventListener('pointerdown', this.onWinPointerDown);
   }
 
   disconnectedCallback(): void {
+    this.tdrag?.dispose();
+    this.tdrag = null;
     window.removeEventListener('pointermove', this.onDrag);
     window.removeEventListener('pointerup', this.stopDrag);
     window.removeEventListener('pointerdown', this.onWinPointerDown);
@@ -506,6 +534,7 @@ export class GoderSideDock extends GoderPanel {
     const openable = defs.filter((d) => !d.passive);
     if (tabs.length === 0) {
       return html`
+        <div class="tabs-blank" @mousedown=${(e: MouseEvent) => this.tdrag?.onDown(e)} @dblclick=${(e: MouseEvent) => this.tdrag?.onDbl(e)}></div>
         <div class="side-empty">
           <div class="hint">${this.t('选择要打开的面板')}</div>
           <div class="entries">
@@ -522,8 +551,12 @@ export class GoderSideDock extends GoderPanel {
       `;
     }
     return html`
-      <div class="tabs-head">
-        <div class="side-tabs">
+      <div
+        class="tabs-head"
+        @mousedown=${(e: MouseEvent) => this.tdrag?.onDown(e)}
+        @dblclick=${(e: MouseEvent) => this.tdrag?.onDbl(e)}
+      >
+        <div class="side-tabs ${this.winControls ? 'win' : ''}">
           ${tabs.map((t) => {
             const def = defs.find((d) => d.id === t.defId)!;
             const tid = sideTabId(t);

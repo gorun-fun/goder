@@ -721,6 +721,7 @@ export class GoderAppShell extends GoderPanel {
                     .on=${this.showSidebar}
                     .tabs=${this.sideTabs}
                     .activeTab=${this.activeSideTab}
+                    .winControls=${this.nativeWinControls}
                   ></goder-side-dock>`
                 : nothing}
             </div>
