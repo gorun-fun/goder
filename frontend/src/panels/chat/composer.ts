@@ -14,6 +14,7 @@ import { fmtTokens } from '../../util/fmt';
 import type { AskItem } from '../../core/model/chat-model';
 import type { LLMStats, Usage } from '../../core/api/types';
 import { getSendInterceptor } from '../../core/store/host-config';
+import { settingsStore } from '../../core/settings/settings-store';
 import { translate } from '../../core/i18n';
 import './ask-form';
 
@@ -959,6 +960,7 @@ export class GoderComposer extends LitElement {
       this.modelPos = this.modelPos ? null : this.anchorPos(el, 'right');
       this.policyPos = null;
       this.effortPos = null;
+      if (this.modelPos) this.refreshModelCfg();
     } else {
       this.effortPos = this.effortPos ? null : this.anchorPos(el, 'right');
       this.policyPos = null;
@@ -974,7 +976,15 @@ export class GoderComposer extends LitElement {
       this.modelPos = this.anchorPos(btn, 'right');
       this.policyPos = null;
       this.effortPos = null;
+      this.refreshModelCfg();
     }
+  }
+
+  /** 弹层打开即强刷模型配置一次:模型表可能在会话外变化(嵌入平台的
+   * 套餐模型热下发、外部改配置),现表只作首屏、拉到新表后 store bump
+   * 触发重渲染就地刷新。fire-and-forget,失败静默保留现表。 */
+  private refreshModelCfg(): void {
+    void settingsStore.loadModelCfg(true);
   }
 
   // 圆环 tooltip:右对齐圆环
