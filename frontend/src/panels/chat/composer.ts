@@ -198,33 +198,33 @@ export class GoderComposer extends LitElement {
         gap: 6px;
         min-width: 0;
       }
-      /* 宽度不足时按优先级隐藏工具栏项:显示优先级 思考强度 > 用量圆环 >
-       * 添加附件 > 访问策略 > 模型,低者优先隐藏;发送/停止按钮始终显示。
+      /* 宽度不足时按优先级隐藏工具栏项:显示优先级 模型 > 添加附件 >
+       * 访问策略 > 思考强度 > 用量圆环,低者优先隐藏;发送/停止按钮始终显示。
        * 按钮自身可收缩截断(.bar-btn flex 0 1 auto),这些阈值是收缩到
        * 不可读后的兜底 —— 未发生重叠时不隐藏。
        * 选择器限定 .bar-btn/按钮本身 —— 弹出菜单(.pop)同名类不受影响 */
       @container (max-width: 420px) {
-        .bar .bar-btn.model-ctl {
-          display: none;
-        }
-      }
-      @container (max-width: 340px) {
-        .bar .bar-btn.policy-ctl {
-          display: none;
-        }
-      }
-      @container (max-width: 300px) {
-        .bar button.attach {
-          display: none;
-        }
-      }
-      @container (max-width: 270px) {
         .bar .ctx {
           display: none;
         }
       }
-      @container (max-width: 220px) {
+      @container (max-width: 340px) {
         .bar .bar-btn.effort-ctl {
+          display: none;
+        }
+      }
+      @container (max-width: 300px) {
+        .bar .bar-btn.policy-ctl {
+          display: none;
+        }
+      }
+      @container (max-width: 270px) {
+        .bar button.attach {
+          display: none;
+        }
+      }
+      @container (max-width: 220px) {
+        .bar .bar-btn.model-ctl {
           display: none;
         }
       }
