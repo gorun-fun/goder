@@ -39,7 +39,8 @@ export function registerBuiltinCommon(): void {
     icon: icon.settings,
     order: 90,
     exitTo: 'sessions',
-    // 全幅视图:进入设置收起右栏/底栏(退出恢复)、左栏锁定不可收起
+    // 全幅视图:进入设置收起右栏/底栏(退出恢复);左栏同样可收
+    // (左栏顶行收起开关 + 设置头部展开开关,与聊天一致)
     fullView: true,
     // 设置分区状态由 settings-nav 冒泡 goder-nav-state 上来,shell 下发回
     // view(当前分区高亮)与 center(设置工作面板)

@@ -178,7 +178,7 @@ export class GoderSettingsPage extends GoderPanel {
         @dblclick=${(e: MouseEvent) => this.tdrag?.onDbl(e)}
       >
         ${this.leftToggle && !this.leftOn
-          ? html`<button class="tg" title="展开会话列表" @click=${() => this.fire('goder-toggle-sessions')}>${unsafeHTML(icon.panelLeft)}</button>`
+          ? html`<button class="tg" title="展开侧栏" @click=${() => this.fire('goder-toggle-sessions')}>${unsafeHTML(icon.panelLeft)}</button>`
           : nothing}
         ${unsafeHTML(ic)}
         <span>${title}</span>

@@ -164,8 +164,8 @@ registry.nav.add({
   view: (ctx) => html`<my-help-panel user=${ctx.store}></my-help-panel>`,
   // center: (ctx, state) => html`…`,  // 可选:激活该导航时中央显示的内容
   // fullView: true,                   // 可选:全幅视图——激活时收起右栏/底栏
-  //                                    // (进入前状态记住、退出恢复),左栏锁定
-  //                                    // 不可收起(内置设置即此形态)
+  //                                    // (进入前状态记住、退出恢复);左栏
+  //                                    // 仍可收起(内置设置即此形态)
 });
 
 // 右栏 tab:render 返回模板或 HTMLElement(HTMLElement 跨 tab 开关保活)

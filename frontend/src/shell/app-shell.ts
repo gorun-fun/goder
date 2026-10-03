@@ -469,9 +469,8 @@ export class GoderAppShell extends GoderPanel {
 
   setSessions(on: boolean): void {
     if (this.uiGate({ type: 'sessions', on })) return;
-    // 全幅视图(设置)锁定左栏:收起请求忽略(展开不受限)。设置的左栏
-    // 是分区导航,收起后设置失去自身入口。
-    if (!on && this.navFullView()) return;
+    // 全幅视图(设置)同样可收:收起后设置工作卡头部出现展开开关
+    // (settings-page 头部),分区导航入口不丢,与聊天头部同款机制。
     this.showSessions = on;
   }
 
@@ -660,11 +659,9 @@ export class GoderAppShell extends GoderPanel {
                   @dblclick=${(e: MouseEvent) => this.tdrag?.onDbl(e)}
                 >
                   ${getSideTop(this.scope)?.leading ? html`${this.sideTopEl('leading')}` : nothing}
-                  ${navDef?.fullView
-                    ? nothing
-                    : html`<span class="toggler">
-                        <button class="on" title="收起侧栏" @click=${() => this.setSessions(false)}>${unsafeHTML(icon.panelLeft)}</button>
-                      </span>`}
+                  <span class="toggler">
+                    <button class="on" title="收起侧栏" @click=${() => this.setSessions(false)}>${unsafeHTML(icon.panelLeft)}</button>
+                  </span>
                   ${ctx.desktop && panelRegistered('goder-update-chip')
                     ? html`<goder-update-chip></goder-update-chip>`
                     : nothing}
