@@ -102,6 +102,9 @@ build:
     paths:
       - .gocache/
       - .gomodcache/
+      # arm64 host 现场构建的交叉 sysroot(.ci-cache/xs2,数百 MB deb 解包),
+      # 入缓存后跨版本复用,避免每次重下重解
+      - .ci-cache/
   before_script:
     # 交叉方向按 host 架构推导;arm64 host 无预烤 sysroot 时 script 内现建
     - |
