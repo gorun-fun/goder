@@ -850,10 +850,21 @@ export class GoderComposer extends LitElement {
   }
 
   // 上下文占用圆环 + 悬停详情
+  /** 当前上下文占用(圆环分子/tooltip 首行):新 gh 的会话 stats 带最后一次
+   * LLM 调用的精确 usage(prompt 即该次全量上下文,含缓存命中);旧 gh 无
+   * 此字段时退化最近 response 的 usage —— 注意那是回合内各次工具循环调用
+   * prompt 的累加(每次都带全量上下文),多工具回合显著偏大,仅作兜底。 */
+  private ctxTokensNow(): number {
+    const llm = this.stats?.llm;
+    if (llm && (llm.LastPromptTokens ?? 0) > 0) {
+      return llm.LastPromptTokens! + (llm.LastCompletionTokens ?? 0);
+    }
+    const u = this.usage;
+    return u ? u.input_tokens + u.output_tokens : 0;
+  }
+
   private renderCtxRing() {
-    const u = this.usage!;
-    // 下一回合的近似上下文 = 上回合输入 + 输出
-    const ctxTokens = u.input_tokens + u.output_tokens;
+    const ctxTokens = this.ctxTokensNow();
     const win = Math.max(this.contextWindow, 1);
     const pct = Math.min(ctxTokens / win, 1);
     const C = 2 * Math.PI * 8; // r=8 周长

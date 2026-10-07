@@ -430,7 +430,7 @@ export class ScriptedApi {
           last_response_id: conv.lastResponseId ?? '',
           paused: conv.paused,
           running: conv.running,
-          stats: { llm: { Rounds: conv.turns, LLMTime: 0, FirstTokenAvg: 0, GenerationTime: 0, PromptTokens: 100, CompletionTokens: 50, CachedTokens: 0, UsageSeen: true, CachePct: 0 }, tools: { calls: 0, time_ms: 0 } },
+          stats: { llm: { Rounds: conv.turns, LLMTime: 0, FirstTokenAvg: 0, GenerationTime: 0, PromptTokens: 100, CompletionTokens: 50, CachedTokens: 0, UsageSeen: true, CachePct: 0, LastPromptTokens: 80, LastCompletionTokens: 40 }, tools: { calls: 0, time_ms: 0 } },
         };
         return jsonResponse(detail);
       }

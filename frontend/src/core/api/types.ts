@@ -149,6 +149,11 @@ export interface LLMStats {
   CachedTokens: number;
   UsageSeen: boolean;
   CachePct: number;
+  /** 最后一次 LLM 调用的精确 usage(prompt = 该次全量上下文,含缓存命中)。
+   * 累计值 PromptTokens 把回合内每次工具循环的全量 prompt 加一遍,不能
+   * 当上下文长度;上下文占用一律取这两个字段(旧版 gh 无此字段,为 0)。 */
+  LastPromptTokens?: number;
+  LastCompletionTokens?: number;
 }
 
 export interface ConversationDetail {
