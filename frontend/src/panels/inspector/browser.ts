@@ -8,12 +8,14 @@
 //     视图由 Go 侧覆盖布局。
 //   - 余下情况(Linux 等无原生内嵌、纯 web/嵌入态、原生创建失败):
 //     iframe 回退,部分站点禁止内嵌属站点安全策略。
-// 上次访问地址按 scope 记忆在 localStorage。
+// 上次访问地址按 scope 记忆在键值存储(core/store/storage 统一通道,
+// 嵌入方替换存储实现时同步生效)。
 import { css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
+import { kvGet, kvSet } from '../../core/store/storage';
 import {
   inWails,
   browserAvailable,
@@ -163,7 +165,7 @@ export class GoderBrowser extends GoderPanel {
   connectedCallback(): void {
     super.connectedCallback();
     try {
-      const saved = localStorage.getItem(this.storeKey());
+      const saved = kvGet<string>(this.storeKey());
       if (saved) {
         this.url = saved;
         this.input = displayUrl(saved);
@@ -302,7 +304,7 @@ export class GoderBrowser extends GoderPanel {
     this.input = displayUrl(u);
     this.url = u;
     try {
-      localStorage.setItem(this.storeKey(), u);
+      kvSet(this.storeKey(), u);
     } catch {
       /* 忽略 */
     }

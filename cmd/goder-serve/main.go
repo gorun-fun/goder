@@ -29,7 +29,11 @@
 //	SSO_ORGANIZATION / AUTH_DEV_EMAIL / COOKIE_SECURE / GODER_SESSIONS_FILE(仅 sso)
 //	GODER_CORS_ORIGINS(逗号分隔白名单,给出时精确放行+允许凭据,优先于 GODER_CORS)
 //	GODER_ADMIN_TOKEN(/admin/* 管理 API 令牌;空 = 关闭)  GODER_WEBHOOK_URL(进程
-//	生命周期事件回调;空 = 关闭)  GODER_ACCESS_LOG(1 = 请求日志)
+//	生命周期事件回调;空 = 关闭)  GODER_WEBHOOK_SECRET(回调 HMAC-SHA256 签名密钥)
+//	GODER_ACCESS_LOG(1 = 请求日志)
+//	GODER_GH_ENV_<KEY>(透传额外环境给每个 gh 子进程,如
+//	  GODER_GH_ENV_GRF_TURN_WEBHOOK_URL / GODER_GH_ENV_GRF_TURN_WEBHOOK_SECRET
+//	  开启 gh 回合终态事件外发——宿主无头任务由轮询转事件驱动)
 package main
 
 import (
@@ -61,7 +65,10 @@ func main() {
 		CORS:      envBool("GODER_CORS", true),
 		AdminToken: env("GODER_ADMIN_TOKEN", ""),
 		WebhookURL: env("GODER_WEBHOOK_URL", ""),
-		AccessLog:  envBool("GODER_ACCESS_LOG", false),
+		// 事件回调 HMAC-SHA256 签名密钥(公网/跨信任域回调必配;接收方
+		// 常量时间校验 X-Goder-Signature 头)。
+		WebhookSecret: env("GODER_WEBHOOK_SECRET", ""),
+		AccessLog:     envBool("GODER_ACCESS_LOG", false),
 	}
 	if v := os.Getenv("GODER_CORS_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {
@@ -153,7 +160,9 @@ func main() {
 
 // managerFromEnv 从环境变量构建多用户进程管理器。
 // GODER_USER_HOME(默认 1):每用户独立 GRF_HOME;GODER_SETTINGS_SEED
-// (空/1/绝对路径):用户首启无 settings.json 时的播种来源。
+// (空/1/绝对路径):用户首启无 settings.json 时的播种来源;
+// GODER_GH_ENV_<KEY>=<value>:透传额外环境给每个 gh 子进程(如
+// GODER_GH_ENV_GRF_TURN_WEBHOOK_URL / _SECRET 开回合事件外发)。
 func managerFromEnv(ghBin, dataDir string) *ghserver.Manager {
 	return ghserver.NewManager(ghserver.ManagerConfig{
 		GhBin:        ghBin,
@@ -165,7 +174,28 @@ func managerFromEnv(ghBin, dataDir string) *ghserver.Manager {
 		ReadyTimeout: envDur("GODER_READY_TIMEOUT", 15*time.Second),
 		PerUserHome:  envBool("GODER_USER_HOME", true),
 		SettingsSeed: settingsSeedFromEnv(),
+		ExtraEnv:     ghExtraEnvFromEnv(),
 	})
+}
+
+// ghExtraEnvFromEnv 收集 GODER_GH_ENV_<KEY>=<value> 形态的环境变量,
+// 剥前缀后作为 KEY=<value> 透传给每个 gh 子进程。键名内可含下划线
+// (环境变量名合法字符),如 GODER_GH_ENV_GRF_TURN_WEBHOOK_URL →
+// GRF_TURN_WEBHOOK_URL。
+func ghExtraEnvFromEnv() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || !strings.HasPrefix(k, "GODER_GH_ENV_") {
+			continue
+		}
+		key := strings.TrimPrefix(k, "GODER_GH_ENV_")
+		if key == "" {
+			continue
+		}
+		out = append(out, key+"="+v)
+	}
+	return out
 }
 
 // settingsSeedFromEnv 解析播种来源:"1" = 宿主默认配置,绝对路径 = 指定

@@ -6,11 +6,15 @@ import { readFileSync } from 'node:fs';
 // 同一份;core 不再跨树 ?raw 引用,见 core/store/automation.ts)。
 const goderAutoSkill = readFileSync(resolve(__dirname, '../internal/desktop/agentskills/goder-auto.md'), 'utf8');
 
+// 版本号与 package.json 同源(嵌入库 GODER_UI_VERSION 的 define 同款,
+// 改版本只改 package.json)。
+const uiVersion = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')).version;
+
 // 桌面 app 构建(也用于浏览器直开调试):入口 main.ts + embed-demo。
 export default defineConfig({
   define: {
     __GODER_AUTO_SKILL_MD__: JSON.stringify(goderAutoSkill),
-    __GODER_UI_VERSION__: JSON.stringify("0.1.0"),
+    __GODER_UI_VERSION__: JSON.stringify(uiVersion),
   },
   base: './',
   build: {

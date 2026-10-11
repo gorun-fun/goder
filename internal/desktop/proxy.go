@@ -73,7 +73,9 @@ var localFileTypes = map[string]string{
 // serveLocalFile GET /goder-api/local-file?path=<绝对路径>:只读返回本地文件。
 // 右栏内嵌浏览器用它在 iframe 里按本地路径渲染 html(file:// 被 webview
 // 的源隔离拦下,data URL 又丢路径上下文,同源路径服务两者皆得)。
-// 仅桌面本机场景,不做目录白名单;限制普通文件 + 64MB 上限。
+// 仅桌面本机场景;双层防线:guardLocalHost 挡外域页面,localFileAllowed
+// 收窄可读面到 主目录/gh 数据目录/项目索引登记的项目目录。限制普通文件
+// + 64MB 上限。
 func serveLocalFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -89,6 +91,10 @@ func serveLocalFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	}
+	if !localFileAllowed(path) {
+		http.Error(w, "path not allowed", http.StatusForbidden)
+		return
+	}
 	if st.Size() > 64<<20 {
 		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 		return
@@ -98,6 +104,77 @@ func serveLocalFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, path)
+}
+
+// localFileAllowed local-file 服务的路径白名单:落在用户主目录、托管 gh
+// 数据目录或项目索引登记的项目目录之内才放行。Host 白名单(上方)防的
+// 是外域页面借 DNS rebinding 命中端点;这里防的是 UI 层一旦被注入后把
+// 任意系统文件(/etc、其他用户目录)回读外传——右栏浏览器/文件预览的
+// 合法场景(项目文件、~ 下文档)不受影响。
+func localFileAllowed(path string) bool {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		real = path // Stat 已成功,个别平台评估失败时退回原路径
+	}
+	for _, root := range localFileRoots() {
+		abs, err := filepath.Abs(root)
+		if err != nil || abs == "" {
+			continue
+		}
+		if ev, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = ev // 根目录自身是符号链接(macOS 数据目录常见)时按真实路径比
+		}
+		prefix := filepath.Clean(abs) + string(filepath.Separator)
+		if strings.HasPrefix(filepath.Clean(real), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// localFileRoots 收集允许根目录:用户主目录、托管 gh server 数据目录、
+// 全部 scope 项目索引里登记的项目目录(项目可建在任意位置,用户自选)。
+func localFileRoots() []string {
+	var roots []string
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		roots = append(roots, home)
+	}
+	if st := GetServerManager().Status(); st.DataDir != "" {
+		roots = append(roots, st.DataDir)
+	}
+	dir, err := appcfg.DefaultDir()
+	if err != nil {
+		return roots
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return roots
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "index-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		// 只取 path 字段;索引其余结构由前端全权定义,这里不耦合。
+		var idx struct {
+			Projects []struct {
+				Path string `json:"path"`
+			} `json:"projects"`
+		}
+		if json.Unmarshal(data, &idx) != nil {
+			continue
+		}
+		for _, p := range idx.Projects {
+			if p.Path != "" {
+				roots = append(roots, p.Path)
+			}
+		}
+	}
+	return roots
 }
 
 // desktopProxy 桌面态代理:每请求解析上游;托管模式下注入进程令牌

@@ -1162,10 +1162,12 @@ export class GoderScope extends Emitter {
     // 恒定追加,不受它影响):操作员项目注入操作员/执行版提示词,
     // 其余项目 defaults 未自带 system_prompt 时兜底 goder 默认提示词。
     // defaults 亦可带 default_skill(默认技能全文注入,如 grf-play 的
-    // grf-start)——经下方展开直接透传,无需在此特判。嵌入方另可经
-    // configure 的 sessionDefaults 给「无 defaults 项目/未分组」会话兜底
-    // (展开在项目 defaults 之前,逐字段被其覆盖;workspace 优先级为
-    // 项目路径 > homeDir > sessionDefaults.workspace)。
+    // grf-start)——经下方展开直接透传,无需在此特判。host_context
+    // (宿主环境简报)同理:sessionDefaults 注入后逐字段透传给全部新
+    // 会话(项目 defaults 不含该字段;gh 侧独立拼段,不与 system_prompt
+    // 抢占)。嵌入方另可经 configure 的 sessionDefaults 给「无 defaults
+    // 项目/未分组」会话兜底(展开在项目 defaults 之前,逐字段被其覆盖;
+    // workspace 优先级为项目路径 > homeDir > sessionDefaults.workspace)。
     let grfSession: GrfSessionConfig | undefined;
     if (isDraft) {
       const sd = getSessionDefaults(this.name);

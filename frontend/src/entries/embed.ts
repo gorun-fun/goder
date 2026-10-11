@@ -3,12 +3,14 @@
 //   <goder-app-shell panels="chat,sidebar"></goder-app-shell>
 //   或独立面板:<goder-session-list> / <goder-chat> / <goder-session-detail> / <goder-console>
 // 用法 B(JS 配置 + UI 定制):
-//   import { configure, registry } from 'goder-ui';
+//   import { configure, registry, html } from 'goder-ui';
 //   configure('myscope', { baseUrl: '/goder-api' });          // 网关模式无需 token
 //   registry.side.hide('console');                          // 裁剪右栏条目
-//   registry.nav.add({ id: 'help', label: '帮助', view: (ctx) => … }); // 自定义导航
+//   registry.nav.add({ id: 'help', label: '帮助', view: (ctx) => html`…` }); // 自定义导航
 //   registry.chat.addRenderer({ id: 'mytool', toolName: 'mcp__mine__q', render: … }); // 定制消息
 // 同一 scope 的面板共享数据;不同 scope 互不干扰。
+// html/nothing 从本库导出(与内部同源的 lit html 标签),自定义条目的
+// render 返回 TemplateResult 时直接用,无需自带 lit。
 // 版本:GODER_UI_VERSION 常量(与构建产物同源),升级前可做特性协商。
 export { GoderAppShell } from '../shell/app-shell';
 export type { PanelName } from '../shell/app-shell';
@@ -36,6 +38,10 @@ export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settin
 export { GoderClient, GoderApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
+// lit html 标签(与内部渲染同源):自定义 nav/side/bottom/chat 条目的
+// render 返回 TemplateResult 时使用;嵌入方零外部依赖即可拼模板。
+// 返回 HTMLElement 的条目不需要它。lit 本就打包在产物内,导出零增量。
+export { html, nothing } from 'lit';
 // 键值存储注入(嵌入方整体替换 core 的本地持久化落点)
 export { setKeyValueStorage, keyValueStorage, MemoryStorage } from '../core/store/storage';
 export type { KeyValueStorage } from '../core/store/storage';
@@ -148,8 +154,11 @@ registerBuiltinCommon();
  * 守卫:gh 侧没有任何可用模型时自动进入设置-模型页引导完成配置
  * (下发过 model 的 scope 不适用)。sessionDefaults 供嵌入方给「项目
  * 无 defaults/未分组」的会话兜底 grf:session 配置(system_prompt/
- * default_skill/policy 等;草稿落定时展开在项目 defaults 之前,逐字段
- * 被其覆盖——有 defaults 的项目不受影响)。disableDefaultPrompt: true
+ * host_context/default_skill/policy 等;草稿落定时展开在项目 defaults
+ * 之前,逐字段被其覆盖——有 defaults 的项目不受影响)。host_context 是
+ * 宿主环境简报(gh 独立拼段,不与 system_prompt 抢占):嵌入方用它让
+ * 会话知道自己"运行在哪个宿主里、用户是谁、有哪些宿主专属工具",
+ * 典型如 openos 的「你运行在 OpenOS 桌面…」简报。disableDefaultPrompt: true
  * 完全关闭 goder 默认身份提示词(sessionDefaults 与项目 defaults 均未给
  * system_prompt 时留空,不再兜底注入)。ungroupedSessions: false
  * 禁止未分组会话:无激活会话直接发送时兜底改绑最近使用的项目,左栏

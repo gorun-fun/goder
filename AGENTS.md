@@ -76,8 +76,11 @@ internal/                Go 桌面专属层
   desktop/               桌面 wails 服务薄壳(AppConfig/ServerManager/
                          ModelConfig/AgentConfig/Desktop/TerminalManager/
                          BrowserManager/ConsoleMCP/Updater + rootHandler
-                         /goder-api 反代与 /goder-api/token 冷启动端点;引用
-                         internal/appcfg、pkg/ghserver)
+                         /goder-api 反代与 /goder-api/token 冷启动端点;
+                         /goder-api/local-file 本地文件只读服务带目录
+                         白名单(用户主目录/gh 数据目录/项目索引登记目录,
+                         proxy.go 的 localFileAllowed——改允许面时同步);
+                         引用 internal/appcfg、pkg/ghserver)
   browser/               右栏内嵌浏览器面板的原生 webview(macOS 自建
                          WKWebView 子视图/Windows WebView2 重父级子窗),
                          含 Eval/截图与 console/网络捕获钩子(eval.go:
@@ -99,6 +102,9 @@ main.go                  wails v3 桌面入口(仅装配:服务注册、窗口�
                          开头分派 `goder console-shim` 子命令)
 cmd/goder-serve/       多用户网关 CLI(GODER_IDENTITY=single|header|sso;
                          运维 env:GODER_ADMIN_TOKEN/GODER_WEBHOOK_URL/
+                         GODER_WEBHOOK_SECRET(事件回调 HMAC 签名)/
+                         GODER_GH_ENV_<KEY>(透传环境给 gh 子进程,如
+                         GRF_TURN_WEBHOOK_*,回合事件外发)/
                          GODER_CORS_ORIGINS/GODER_ACCESS_LOG/GODER_SESSIONS_FILE)
 frontend/src/
   core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗+非流式超时;
@@ -122,7 +128,10 @@ frontend/src/
            叠加结构,草稿落定时项目 defaults 与操作员提示词均未带
            system_prompt 则注入该默认值(disableDefaultPrompt 可关闭);
            defaults 另可带 default_skill 指定默认技能全文注入,经
-           grf:session 透传、同为嵌入方开放通道)/ settings(设置状态)/
+           grf:session 透传、同为嵌入方开放通道;grf:session.host_context
+           (宿主环境简报)是嵌入方(openos 等)注入运行环境事实的正规通道,
+           gh 侧独立拼段、与 system_prompt 叠加,sessionDefaults/
+           configure 下发后随新会话逐字段透传)/ settings(设置状态)/
            i18n.ts(gettext 风格文案通道:key 即中文默认文案,嵌入方经
            configure({locale,messages}) 覆盖;GoderPanel.t() 与 core 文案
            均过它,收口持续推进)

@@ -34,6 +34,12 @@ type ManagerConfig struct {
 	// 不再触发 Start(返回 ErrStartCooling),防止坏二进制 + 大流量下
 	// 的反复 spawn 风暴;0 = 默认 10s。
 	RestartCooldown time.Duration
+	// ExtraEnv 追加注入每个 gh 子进程的额外环境(KEY=VALUE)。宿主网关
+	// 用它透传 gh 侧能力开关,典型如回合事件外发:
+	// GRF_TURN_WEBHOOK_URL / GRF_TURN_WEBHOOK_SECRET(openos 等宿主的
+	// 无头任务由轮询转事件驱动)。goder-serve 经 GODER_GH_ENV_<KEY>
+	// 前缀收集(见 cmd/goder-serve)。
+	ExtraEnv []string
 	// Hooks 进程生命周期回调(网关的 webhook 转发、运维日志等挂这里;
 	// 回调在独立 goroutine 执行,勿阻塞)。
 	Hooks ManagerHooks
@@ -186,6 +192,7 @@ func (m *Manager) Get(uid string) (*Proc, error) {
 		DataDir:      m.UserDir(uid),
 		ReadyTimeout: m.cfg.ReadyTimeout,
 		GrfHome:      grfHome,
+		ExtraEnv:     m.cfg.ExtraEnv,
 	})
 	m.procs[uid] = p
 	m.ports[port] = uid

@@ -36,6 +36,10 @@ type ProcConfig struct {
 	// GrfHome 非空时给 gh 进程注入 GRF_HOME(配置/技能/插件按用户隔离;
 	// 桌面形态留空沿用 ~/.grf,与桌面端 UI 同一份配置)。
 	GrfHome string
+	// ExtraEnv 追加注入 gh 子进程的额外环境(KEY=VALUE 形态)。宿主网关
+	// 透传回合事件 webhook(GRF_TURN_WEBHOOK_URL/SECRET)等 gh 侧能力
+	// 开关;与 GrfHome 一样只追加覆盖,继承网关进程的其余环境。
+	ExtraEnv []string
 }
 
 // Proc 单个 gh server 的句柄。Stop 后不再复用,需要时新建。
@@ -105,10 +109,15 @@ func (p *Proc) Start() Status {
 	cmd.Stdout = lf
 	cmd.Stderr = lf
 	cmd.SysProcAttr = childProcAttr() // 平台差异见 proc_unix.go / proc_windows.go
-	if p.cfg.GrfHome != "" {
-		// 按用户隔离 gh 配置(settings.json/skills/plugins 解析根);
-		// 只追加覆盖,继承网关进程的其余环境。
-		cmd.Env = append(os.Environ(), "GRF_HOME="+p.cfg.GrfHome)
+	if p.cfg.GrfHome != "" || len(p.cfg.ExtraEnv) > 0 {
+		// 按用户隔离 gh 配置(settings.json/skills/plugins 解析根)+
+		// 宿主透传的额外环境;只追加覆盖,继承网关进程的其余环境。
+		env := os.Environ()
+		if p.cfg.GrfHome != "" {
+			env = append(env, "GRF_HOME="+p.cfg.GrfHome)
+		}
+		env = append(env, p.cfg.ExtraEnv...)
+		cmd.Env = env
 	}
 	if err := cmd.Start(); err != nil {
 		lf.Close()

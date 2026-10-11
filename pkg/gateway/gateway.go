@@ -6,12 +6,17 @@
 // 运维面:/healthz(存活)与 /healthz/ready(就绪,gh 二进制可解析);
 // AdminToken 配置后开放 /admin/* 管理端点(statuses/start/stop/restart,
 // headless 运维与三方后端的编程入口)。WebhookURL 配置后,用户进程
-// 启停/崩溃事件 POST 回调给三方后端(会话完成等应用级事件仍走浏览器
-// SSE 消费)。
+// 启停/崩溃事件 POST 回调给三方后端(WebhookSecret 配置时附 HMAC-SHA256
+// 签名头;回合级应用事件由 gh 子进程的 GRF_TURN_WEBHOOK_* 外发,见
+// pkg/ghserver 的 ExtraEnv 透传)。
 package gateway
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
@@ -49,6 +54,10 @@ type Options struct {
 	AdminToken string
 	// WebhookURL 进程生命周期事件的 POST 回调(空 = 关闭)。
 	WebhookURL string
+	// WebhookSecret 事件体 HMAC-SHA256 签名密钥(空 = 不签名)。配置后
+	// 每次回调附 X-Goder-Signature: sha256=<hex(body)>,接收方以常量
+	// 时间比较校验后再信任事件体(公网/跨信任域回调必配)。
+	WebhookSecret string
 	// AccessLog 请求日志(stdout:方法 路径 状态 耗时)。
 	AccessLog bool
 }
@@ -94,20 +103,34 @@ func New(opts Options) *Gateway {
 }
 
 // wireWebhook 把进程生命周期回调转发到配置的 WebhookURL(POST JSON,
-// 事件体 {type, uid, addr?, reason?, ts};投递尽力而为,失败记日志)。
+// 事件体 {type, uid, addr?, reason?, ts};WebhookSecret 配置时附
+// X-Goder-Signature: sha256=<hex(body)> HMAC-SHA256 签名头。投递尽力
+// 而为,失败记日志)。
 func (g *Gateway) wireWebhook(m *ghserver.Manager) {
 	hook := g.opts.WebhookURL
 	if hook == "" {
 		return
 	}
+	secret := []byte(g.opts.WebhookSecret)
 	post := func(body map[string]any) {
 		body["ts"] = time.Now().UTC().Format(time.RFC3339)
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return
 		}
+		req, err := http.NewRequest(http.MethodPost, hook, bytes.NewReader(raw))
+		if err != nil {
+			log.Printf("webhook 构建请求失败: %v", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if len(secret) > 0 {
+			mac := hmac.New(sha256.New, secret)
+			_, _ = mac.Write(raw)
+			req.Header.Set("X-Goder-Signature", "sha256 "+hex.EncodeToString(mac.Sum(nil)))
+		}
 		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Post(hook, "application/json", bytes.NewReader(raw))
+		resp, err := client.Do(req)
 		if err != nil {
 			log.Printf("webhook 投递失败: %v", err)
 			return
@@ -172,6 +195,9 @@ func (g *Gateway) Handler() http.Handler {
 		}
 	}
 	h := http.Handler(mux)
+	// 安全响应头(nosniff + 不外泄 Referrer):对 API 与静态页统一生效,
+	// 防响应被当脚本/样式嗅探执行、嵌入方页面环境信息外泄。
+	h = withSecurityHeaders(h)
 	if g.opts.AccessLog {
 		h = withAccessLog(h)
 	}
@@ -342,7 +368,9 @@ func (g *Gateway) adminMux() http.Handler {
 func (g *Gateway) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
-		if auth != "Bearer "+g.opts.AdminToken {
+		// 常量时间比较:管理令牌是长期凭据,时序侧信道不值得留给攻击者。
+		want := "Bearer " + g.opts.AdminToken
+		if subtle.ConstantTimeCompare([]byte(auth), []byte(want)) != 1 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":{"message":"管理令牌无效","type":"unauthorized"}}`))
@@ -406,6 +434,18 @@ func withCORSOrigins(next http.Handler, origins []string) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withSecurityHeaders 统一安全响应头。刻意不设 Content-Security-Policy:
+// 嵌入方宿主页面各不相同,goder 无法预知其合法资源源;需要 CSP 的部署
+// 由上级反代追加。
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
 }

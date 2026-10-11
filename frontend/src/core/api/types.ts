@@ -165,6 +165,9 @@ export interface ConversationDetail {
   running: boolean;
   /** 当前生效的访问策略(write-workspace|off 等;旧 server 无此字段) */
   policy?: string;
+  /** 宿主环境简报回显(grf:session.host_context 落定值;宿主核验注入
+   *  是否生效;旧 server 无此字段) */
+  host_context?: string;
   stats: {
     llm: LLMStats;
     tools: { calls: number; time_ms: number };
@@ -197,9 +200,15 @@ export interface GrfSessionConfig {
   policy?: string; // write-workspace|read-workspace 组合 | off
   auto_approve?: boolean;
   /** 会话级 custom 提示词(身份定义+工作方式);gh 的内置工具说明段
-   * (inner prompt)恒定追加,不被它替换。goder 普通会话未配置时兜底
-   * session-prompt.ts 的默认值;嵌入方/项目 defaults 可自带覆盖。 */
+   *  (inner prompt)恒定追加,不被它替换。goder 普通会话未配置时兜底
+   *  session-prompt.ts 的默认值;嵌入方/项目 defaults 可自带覆盖。 */
   system_prompt?: string;
+  /** 宿主环境简报(gh ≥ 该字段支持版本):嵌入方(openos 等宿主平台)注入
+   *  的运行环境事实——"你运行在 OpenOS 桌面,当前用户 X、角色 Y,可用
+   *  os_* 工具"之类。gh 侧作为独立段拼在 system_prompt 之后、inner
+   *  prompt 之前,与身份提示词叠加而非替换。经 sessionDefaults 给全部
+   *  新会话兜底(项目 defaults 不含该字段时透传);仅会话首建生效。 */
+  host_context?: string;
   /** 默认技能名:技能目录(workspace/.grf/skills 两级)中存在该名字时,
    * 其 SKILL.md 全文注入系统提示词,无需模型调 skill 工具;空 = 不注入
    * 任何默认技能(gh 侧已取消 goder-usage 回落)。经项目 defaults 开放给

@@ -55,11 +55,17 @@ configure('myscope', {
     },
   },
   sessionDefaults: {     // 可选:项目无 defaults/未分组会话的 grf:session
-                         // 兜底(system_prompt/default_skill/policy 等;
-                         // 草稿落定时展开在项目 defaults 之前,逐字段被其
-                         // 覆盖——有 defaults 的项目不受影响;不持久化,
-                         // 宿主每次加载自行下发)
+                         // 兜底(system_prompt/host_context/default_skill/
+                         // policy 等;草稿落定时展开在项目 defaults 之前,
+                         // 逐字段被其覆盖——有 defaults 的项目不受影响;
+                         // 不持久化,宿主每次加载自行下发)
     system_prompt: '…',  // custom 段(身份+工作方式;gh 内置工具说明恒定追加)
+    host_context: '你运行在 XX 平台,当前用户 …,可用 xx_* 工具…',
+                         // 宿主环境简报(gh ≥ host_context 版本):独立段拼在
+                         // system_prompt 之后、内置工具说明之前——宿主传达
+                         // 「运行在哪个宿主里/用户是谁/有哪些宿主专属工具」,
+                         // 不必为环境信息接管整段身份提示词;旧 gh 忽略该
+                         // 字段,不受影响。仅会话首建生效。
     default_skill: 'grf-start', // 默认技能全文注入(目录存在该技能时)
   },
   ungroupedSessions: false, // 可选:false 禁止未分组会话——无激活会话直接
@@ -154,6 +160,8 @@ registry.side.show('console');   // 恢复
 ### 新增自定义条目
 
 ```js
+// html/nothing 从嵌入库导出(与内部渲染同源的 lit html 标签,零额外
+// 依赖);render 返回 HTMLElement 的条目不需要它们。
 import { registry, html } from '/goder.js';
 
 // 左栏导航:一个视图 + 可选的中央工作区覆写(缺省 = 聊天)
@@ -371,13 +379,24 @@ GODER_IDENTITY=header GODER_UID_HEADER=X-GRF-UID ADDR=127.0.0.1:7702 \
 
 **webhook(可选,`GODER_WEBHOOK_URL` 开启)**:用户进程生命周期事件
 (`proc.started`/`proc.stopped`/`proc.crashed`)POST 回调给三方后端
-(body 携带 `type/uid/addr?/reason?/ts`;投递尽力而为)。会话完成等
-应用级事件仍走浏览器 SSE 消费。
+(body 携带 `type/uid/addr?/reason?/ts`;投递尽力而为)。`GODER_WEBHOOK_SECRET`
+配置时每次回调附 `X-Goder-Signature: sha256 <hex(body)>` HMAC-SHA256 签名头
+(公网/跨信任域回调必配,接收方常量时间校验)。
+
+**回合级事件外发(可选)**:gh 子进程支持 `GRF_TURN_WEBHOOK_URL` /
+`GRF_TURN_WEBHOOK_SECRET`——后台回合落定即 POST `turn.settled`(携带
+session_id/response_id/status/model/usage,HMAC 签名头 `X-GRF-Signature`),
+宿主无头任务(后台编排)由轮询转事件驱动。经 `GODER_GH_ENV_<KEY>` 环境变量
+透传给每个 gh 子进程,如 `GODER_GH_ENV_GRF_TURN_WEBHOOK_URL=…`。浏览器内的
+同步/SSE 会话仍走 SSE 消费,不受影响。
 
 **其他网关环境变量**:`GODER_CORS_ORIGINS`(逗号分隔 Origin 白名单,
 精确放行 + 允许凭据,优先于 `GODER_CORS` 的通配模式)、`GODER_ACCESS_LOG=1`
 (结构化请求日志)、`GODER_SESSIONS_FILE`(sso 会话文件持久化,重启免
-重登)、`GODER_WEBHOOK_URL`、`GODER_ADMIN_TOKEN`。网关错误已类型化:容量
+重登)、`GODER_WEBHOOK_URL`、`GODER_WEBHOOK_SECRET`、`GODER_ADMIN_TOKEN`、
+`GODER_GH_ENV_<KEY>`(透传额外环境给每个 gh 子进程)。网关响应统一带
+`X-Content-Type-Options: nosniff` 与 `Referrer-Policy: no-referrer`。
+网关错误已类型化:容量
 类(用户上限/端口耗尽)429,进程未就绪/启动失败/冷却 503,其余 502。
 
 **安全约束**:header 模式信任请求头,必须保证网关端口只接受来自你后端的
