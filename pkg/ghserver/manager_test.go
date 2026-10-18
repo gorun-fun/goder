@@ -1,11 +1,12 @@
 // manager_test.go — Manager 注册表白盒测试:uid 清洗、容量上限、冷却
-// 抑制、Stop 摘除与端口释放、死进程空闲回收、端口池耗尽。全部用未
-// 启动的 Proc 构造注册表状态,不依赖真实 gh 二进制。
+// 抑制、Stop 摘除与端口释放、死进程空闲回收、端口池耗尽、Get↔Stop
+// 并发竞态回滚。全部用未启动的 Proc 构造注册表状态,不依赖真实 gh 二进制。
 package ghserver
 
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -139,5 +140,106 @@ func TestManagerGetAllocatesDistinctPorts(t *testing.T) {
 			t.Fatalf("端口冲突: %s", st.Addr)
 		}
 		addrs[st.Addr] = true
+	}
+}
+
+// TestManagerConfirmStartRollbackOnConcurrentStop — Get↔Stop 竞态回归:
+// Get 在锁外执行 p.Start(),期间并发 Stop 把注册表项摘除后,启动成功也
+// 不得把「Manager 不再追踪的运行中进程」交还给调用方 —— 必须回滚停止
+// 并按 StartError(503 语义)上报,调用方稍后重试即走全新流程。
+//
+// 说明:Proc.Start 在单测环境无法真实成功(需 gh 二进制;收养路径又会让
+// lsof 定位到测试进程自身、回滚 Stop 误杀测试进程),故直接驱动 Start
+// 成功后的收尾 confirmStart —— Get 的回滚语义即由它承载。
+func TestManagerConfirmStartRollbackOnConcurrentStop(t *testing.T) {
+	// OnStart 经 hookStart 异步执行,用通道同步断言时序。
+	startedCh := make(chan string, 2)
+	m := NewManager(ManagerConfig{
+		DataRoot: t.TempDir(), GhBin: "/nonexistent-gh",
+		Hooks: ManagerHooks{OnStart: func(uid, addr string) { startedCh <- uid }},
+	})
+	// 构造「Start 刚成功」的 proc:running 置位、pid/adoptedPid 均为 0
+	// (Stop 只清本地状态,不会误杀外部进程)。
+	p := NewProc(ProcConfig{Addr: "127.0.0.1:17401", DataDir: t.TempDir()})
+	p.mu.Lock()
+	p.running = true
+	p.mu.Unlock()
+	st := p.Status()
+	if !st.Running {
+		t.Fatal("前置条件:构造的 proc 应处于运行态")
+	}
+
+	// 仍在注册表:正常收尾 —— 清失败标记并触发 OnStart。
+	m.procs["u1"] = p
+	m.markFail("u1")
+	if _, err := m.confirmStart("u1", p, st); err != nil {
+		t.Fatalf("未摘除时不应报错: %v", err)
+	}
+	select {
+	case uid := <-startedCh:
+		if uid != "u1" {
+			t.Fatalf("OnStart 的 uid 不符: %s", uid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnStart 应触发一次")
+	}
+	if _, ok := m.lastFailAt["u1"]; ok {
+		t.Fatal("成功收尾应清除失败标记")
+	}
+
+	// 并发 Stop 场景:注册表项已被摘除(仅移除映射,p 本身仍在运行 ——
+	// 即 Get 的 Start 在锁外执行期间被 Stop 抢先摘除的时序)。
+	delete(m.procs, "u1")
+	_, err := m.confirmStart("u1", p, st)
+	var se *StartError
+	if !errors.As(err, &se) {
+		t.Fatalf("摘除后应回滚为 StartError,得到 %v", err)
+	}
+	select {
+	case v := <-startedCh:
+		t.Fatalf("回滚不应触发 OnStart,得到 %v", v)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if p.Status().Running {
+		t.Fatal("回滚后进程应已被停止(不得遗留脱离注册表的运行中进程)")
+	}
+}
+
+// TestManagerGetStopConcurrentSmoke — 并发烟测:多组 Get(坏二进制,必然
+// StartError)与 Stop 交错执行,不得死锁/崩溃/遗留注册项。覆盖 Get 重构后
+// 的锁序(锁外 prepareUserHome 文件 IO 与注册段的并发交错);「启动成功 +
+// 摘除」的回滚语义由上一个用例确定性覆盖。
+func TestManagerGetStopConcurrentSmoke(t *testing.T) {
+	m := NewManager(ManagerConfig{
+		DataRoot: t.TempDir(), GhBin: "/nonexistent-gh",
+		PortMin: 18711, PortMax: 18719, ReadyTimeout: 100 * time.Millisecond,
+		PerUserHome: true, // 让锁外的 prepareUserHome 真正做文件 IO
+	})
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				_, _ = m.Get("u1")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				m.Stop("u1")
+			}
+		}()
+	}
+	wg.Wait()
+	// 启动失败(坏二进制)的 Get 会留册进入冷却 —— 这是既有设计;并发
+	// 正确的判据是:同一 uid 至多一条注册项(无重复建进程/占端口)。
+	sts := m.Statuses()
+	if len(sts) > 1 {
+		t.Fatalf("同一 uid 至多一条注册项,得到 %v", sts)
+	}
+	m.Stop("u1")
+	if sts = m.Statuses(); len(sts) != 0 {
+		t.Fatalf("显式 Stop 后注册表应为空,得到 %v", sts)
 	}
 }

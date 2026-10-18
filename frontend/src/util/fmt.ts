@@ -1,6 +1,9 @@
 // fmt.ts — 展示格式化辅助。工具展示名/明细/主文本会先查三方注册的
 // 工具元数据(registry.chat.addToolMeta),未注册走内置词典。
 import { registry } from '../registry/registry';
+// 错误翻译是纯函数,本体已迁 core/api/errors(core 的模块图不得含 UI,
+// 见该文件头注释);这里 re-export 保持既有 import 路径兼容。
+export { friendlyError, isToolChoiceUnsupported, type Translate } from '../core/api/errors';
 
 export function fmtTime(iso: string | number | undefined): string {
   if (!iso) return '';
@@ -51,7 +54,29 @@ export function fmtDuration(ms: number | undefined): string {
   return `${m}m${s}s`;
 }
 
-// 工具参数一行摘要(bash 取命令,read/write 取路径…)。
+/** 工具 → 主参数字段表(单表驱动):keys 为取值优先级(取到第一个
+ * 存在且非空的字符串字段即用);line = 该工具的主参数适合进工具标签行
+ * (短主参数:文件路径/查找模式/命令)。toolArgSummary(行内摘要)/
+ * toolDetail(展开明细)/ toolPrimaryText(标签行主参数)三处消费同一份
+ * 知识 —— 此前三处各维护一份 switch/词典,极易漂移。 */
+const TOOL_ARGS: Record<string, { keys: string[]; line?: boolean }> = {
+  bash: { keys: ['command'], line: true },
+  read: { keys: ['file_path', 'path'], line: true },
+  write: { keys: ['file_path', 'path'], line: true },
+  edit: { keys: ['file_path', 'path'], line: true },
+  read_image: { keys: ['file_path', 'path'], line: true },
+  glob: { keys: ['pattern'], line: true },
+  grep: { keys: ['pattern', 'query'], line: true },
+  web_search: { keys: ['queries', 'query'] },
+  skill: { keys: ['name'] },
+  subagent: { keys: ['prompt'] },
+  subagent_fork: { keys: ['prompt'] },
+  send_message: { keys: ['message'] },
+  job_output: { keys: ['job_id'] },
+  job_kill: { keys: ['job_id'] },
+};
+
+// 工具参数一行摘要(bash 取命令,read/write 取路径…),表驱动(TOOL_ARGS)。
 export function toolArgSummary(name: string, args: string): string {
   let parsed: Record<string, unknown>;
   try {
@@ -59,42 +84,16 @@ export function toolArgSummary(name: string, args: string): string {
   } catch {
     return truncate(args, 80);
   }
-  const pick = (...keys: string[]): unknown => {
-    for (const k of keys) {
+  const spec = TOOL_ARGS[name];
+  if (spec) {
+    for (const k of spec.keys) {
       const v = parsed[k];
-      if (typeof v === 'string' && v) return v;
+      if (typeof v === 'string' && v) return truncate(v, 100);
     }
-    return undefined;
-  };
-  let s: string;
-  switch (name) {
-    case 'bash':
-      s = String(pick('command') ?? '');
-      break;
-    case 'read':
-    case 'write':
-    case 'edit':
-    case 'glob':
-    case 'grep':
-    case 'read_image':
-      s = String(pick('file_path', 'path', 'pattern') ?? '');
-      break;
-    case 'web_search':
-      s = String(pick('queries', 'query') ?? '');
-      break;
-    case 'skill':
-      s = String(pick('name') ?? '');
-      break;
-    case 'subagent':
-    case 'send_message':
-    case 'subagent_fork':
-      s = String(pick('prompt', 'message') ?? '');
-      break;
-    default: {
-      const first = Object.values(parsed)[0];
-      s = typeof first === 'string' ? first : args ? JSON.stringify(parsed).slice(0, 100) : '';
-    }
+    return ''; // 已知工具但主参数无非空字符串:沿用旧 switch 语义为空串
   }
+  const first = Object.values(parsed)[0];
+  const s = typeof first === 'string' ? first : args ? JSON.stringify(parsed).slice(0, 100) : '';
   return truncate(s, 100);
 }
 
@@ -252,37 +251,14 @@ export function fmtToolDuration(ms: number | undefined): string {
   return rest ? `${m}分${rest}秒` : `${m}分`;
 }
 
-// 各工具的关键参数(展示"命令",不展示原始 JSON)。
-const TOOL_PRIMARY: Record<string, string[]> = {
-  bash: ['command'],
-  read: ['file_path', 'path'],
-  write: ['file_path', 'path'],
-  edit: ['file_path', 'path'],
-  read_image: ['file_path', 'path'],
-  glob: ['pattern'],
-  grep: ['pattern', 'query'],
-  web_search: ['queries', 'query'],
-  skill: ['name'],
-  subagent: ['prompt'],
-  subagent_fork: ['prompt'],
-  send_message: ['message'],
-  job_output: ['job_id'],
-  job_kill: ['job_id'],
-};
-
-function valText(v: unknown): string {
-  if (typeof v === 'string') return v;
-  if (v === null || v === undefined) return '';
-  if (Array.isArray(v)) return v.map((x) => valText(x)).join('\n');
-  return typeof v === 'object' ? JSON.stringify(v) : String(v);
-}
-
-// toolDetail 工具调用的可读明细:优先取该工具的关键参数(如 bash 的命令、
-// 文件工具的路径),没有固定主参数时按 "key: value" 逐行展示,避免出现
-// 带花括号引号的原始 JSON。三方注册的 detail 提取器优先(registry.chat)。
+// toolDetail 工具调用的可读明细:优先取该工具的关键参数(TOOL_ARGS,如
+// bash 的命令、文件工具的路径),没有固定主参数时按 "key: value" 逐行
+// 展示,避免出现带花括号引号的原始 JSON。三方注册的 detail 提取器优先
+// (registry.chat)。
 export function toolDetail(name: string, args: string): string {
   const meta = registry.chat.toolMetaFor(name);
   if (meta?.detail) return meta.detail(args);
+  const keys = TOOL_ARGS[name]?.keys;
   let obj: Record<string, unknown>;
   try {
     const parsed = JSON.parse(args || '{}') as unknown;
@@ -291,7 +267,6 @@ export function toolDetail(name: string, args: string): string {
   } catch {
     // 参数还在流式生成中(残缺 JSON):容错提取关键参数(如文件路径),
     // 取不到再展示原文。
-    const keys = TOOL_PRIMARY[name];
     if (keys) {
       for (const k of keys) {
         const v = extractStringArg(args, k);
@@ -300,7 +275,6 @@ export function toolDetail(name: string, args: string): string {
     }
     return args.trim();
   }
-  const keys = TOOL_PRIMARY[name];
   if (keys) {
     for (const k of keys) {
       if (k in obj) return valText(obj[k]);
@@ -309,6 +283,13 @@ export function toolDetail(name: string, args: string): string {
   return Object.entries(obj)
     .map(([k, v]) => `${k}: ${valText(v)}`)
     .join('\n');
+}
+
+function valText(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v === null || v === undefined) return '';
+  if (Array.isArray(v)) return v.map((x) => valText(x)).join('\n');
+  return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
 
 // ---- 文件修改工具的 +增/-删 实时统计 ----
@@ -399,18 +380,6 @@ export function fileEditStat(
   return undefined;
 }
 
-// 工具标签行的主参数(文件工具的路径、glob/grep 的模式、bash 的命令)——
-// 与 TOOL_PRIMARY(展开明细用)分开维护,行内只放短主参数。
-const TOOL_LINE_SUBJECT: Record<string, string[]> = {
-  bash: ['command'],
-  read: ['file_path', 'path'],
-  write: ['file_path', 'path'],
-  edit: ['file_path', 'path'],
-  read_image: ['file_path', 'path'],
-  glob: ['pattern'],
-  grep: ['pattern'],
-};
-
 // toolFilePath 文件类工具(read/write/edit/read_image)的绝对路径提取
 // (参数流式残缺时容错),供行内文件名点击打开右栏文件 tab。
 export function toolFilePath(name: string, args: string): string | undefined {
@@ -418,42 +387,19 @@ export function toolFilePath(name: string, args: string): string | undefined {
   return extractStringArg(args, 'file_path') ?? extractStringArg(args, 'path');
 }
 
-// toolPrimaryText 工具标签行的主参数文本:参数可能仍在流式生成(残缺
-// JSON),容错提取——文件名在参数刚流出时就上屏,不再只剩"运行中"转圈。
-// 取不到返回 undefined。三方注册的 primary 提取器优先(registry.chat)。
+// toolPrimaryText 工具标签行的主参数文本(TOOL_ARGS 里 line 标记的
+// 子集视图:文件工具的路径、glob/grep 的模式、bash 的命令,行内只放
+// 短主参数):参数可能仍在流式生成(残缺 JSON),容错提取——文件名在
+// 参数刚流出时就上屏,不再只剩"运行中"转圈。取不到返回 undefined。
+// 三方注册的 primary 提取器优先(registry.chat)。
 export function toolPrimaryText(name: string, args: string): string | undefined {
   const meta = registry.chat.toolMetaFor(name);
   if (meta?.primary) return meta.primary(args);
-  const keys = TOOL_LINE_SUBJECT[name];
-  if (!keys) return undefined;
-  for (const k of keys) {
+  const spec = TOOL_ARGS[name];
+  if (!spec?.line) return undefined;
+  for (const k of spec.keys) {
     const v = extractStringArg(args, k);
     if (v) return v;
   }
   return undefined;
-}
-
-// isToolChoiceUnsupported 命中"上游 vLLM 未开启工具调用"这类错误。
-// 上游网关常按后端负载均衡,部分后端没带 --enable-auto-tool-choice,会对
-// 带工具的请求瞬时 400;这类失败可重试。
-export function isToolChoiceUnsupported(msg: string): boolean {
-  return /enable-auto-tool-choice|tool[-_ ]call[-_ ]parser|"auto"\s+tool\s+choice/i.test(msg);
-}
-
-// friendlyError 把已知的后端错误翻成可操作的提示(其余原样返回)。
-// 典型:模型侧 vLLM 未开启原生工具调用,整个回合都会 400。
-// t 为 i18n 翻译函数(可选;key 即中文默认文案,支持 {x} 插值)。
-export type Translate = (key: string, params?: Record<string, string | number>) => string;
-
-export function friendlyError(msg: string, t: Translate = (k) => k): string {
-  if (isToolChoiceUnsupported(msg)) {
-    return t('当前模型服务未开启工具调用,本回合无法执行。\nvLLM 需以 --enable-auto-tool-choice 与 --tool-call-parser <解析器> 启动;若无法改动服务,请在「设置 → 模型设置」改用支持工具调用的模型。\n服务返回:{msg}', { msg });
-  }
-  if (/paused awaiting interaction/i.test(msg)) {
-    return t('会话正在等待上一次的提问/审批应答,请先完成输入框中的交互再发新消息。');
-  }
-  if (/a turn is already running/i.test(msg)) {
-    return t('本会话仍有一个回合在服务端运行(可能未能停止)。请再点一次「停止」,或稍候片刻重试。');
-  }
-  return msg;
 }

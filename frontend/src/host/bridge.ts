@@ -2,6 +2,7 @@
 // no-op 回退。职责:配置持久化(文件)、gh server 托管(启动/停止/状态)。
 import { setPersistence, type Persistence } from '../core/store/persistence';
 import type { ProjectsIndex } from '../core/store/persistence';
+import { setHomeDirProvider } from '../core/store/scope';
 // agent 配置类 DTO 已挪至 core/api/agent-dto.ts(网页形态的 agent-api 与
 // 桌面桥共用;这里 re-export 保持既有 import 路径兼容)
 export type { ProviderDTO, ModelConfigDTO, DetectedModelDTO, PluginDTO, PluginsDTO, SkillDTO, SkillsDTO } from '../core/api/agent-dto';
@@ -122,6 +123,90 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+
+// ---------- 调用形态收敛(三种同构样板的工厂) ----------
+// 探测类(quiet*/失败回落)、尽力类(silent/失败静默)、保存类(errStr/
+// 失败返回错误串)。方法名字面量保持完整可 grep:internal/desktop 的
+// bridge_fqn_test.go 靠完整方法名与 Go 服务反射对齐,不要改成动态拼接。
+
+/** 探测类调用:非桌面态/失败一律回落 null。 */
+async function quiet<T>(method: string, ...args: unknown[]): Promise<T | null> {
+  if (!inWails()) return null;
+  try {
+    return await call<T>(method, ...args);
+  } catch {
+    return null;
+  }
+}
+
+/** 空串回落类调用(身份/路径展示);返回值归一为非空串。 */
+async function quietStr(method: string, ...args: unknown[]): Promise<string> {
+  if (!inWails()) return '';
+  try {
+    return (await call<string>(method, ...args)) || '';
+  } catch {
+    return '';
+  }
+}
+
+/** 布尔回落类调用(能力探测);严格 === true 才算真。 */
+async function quietBool(method: string, ...args: unknown[]): Promise<boolean> {
+  if (!inWails()) return false;
+  try {
+    return (await call<boolean>(method, ...args)) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 尽力调用(展示态切换/上报类):无返回值,失败静默。 */
+async function silent(method: string, ...args: unknown[]): Promise<void> {
+  if (!inWails()) return;
+  try {
+    await call<void>(method, ...args);
+  } catch {
+    /* 静默:尽力调用 */
+  }
+}
+
+/** 保存/安装类调用:成功返回 null,失败返回错误信息串;非桌面态返回
+ * webFallback(「仅桌面形态可…」提示)。 */
+async function errStr(webFallback: string, method: string, ...args: unknown[]): Promise<string | null> {
+  if (!inWails()) return webFallback;
+  try {
+    await call<void>(method, ...args);
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** wails 事件订阅工厂:动态加载 runtime(嵌入产物不含它)、防竞态取消
+ * (取消先于 On 返回时丢弃订阅),非桌面态 no-op。事件订阅点
+ * (console-ui/终端输出/更新进度)的同构样板收敛;decode 返回
+ * undefined 表示丢弃本次载荷。 */
+function wailsEvent<T>(name: string, decode: (raw: unknown) => T | undefined, cb: (v: T) => void): () => void {
+  if (!inWails()) return () => {};
+  let off: (() => void) | null = null;
+  let cancelled = false;
+  void (async () => {
+    try {
+      const mod = (await import('@wailsio/runtime')) as unknown as { Events: WailsEvents };
+      if (cancelled) return;
+      off = mod.Events.On(name, (ev) => {
+        const v = decode(Array.isArray(ev?.data) ? ev.data[0] : ev?.data);
+        if (v !== undefined) cb(v);
+      });
+    } catch {
+      /* 桥不可达:保持 no-op */
+    }
+  })();
+  return () => {
+    cancelled = true;
+    off?.();
+  };
+}
+
 // ---------- 配置(AppConfig service) ----------
 
 export interface AppConfigDTO {
@@ -133,13 +218,8 @@ export interface AppConfigDTO {
   serverAddr: string;
 }
 
-export async function loadAppConfig(): Promise<AppConfigDTO | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<AppConfigDTO>(`${SVC}.AppConfig.Load`);
-  } catch {
-    return null;
-  }
+export function loadAppConfig(): Promise<AppConfigDTO | null> {
+  return quiet<AppConfigDTO>(`${SVC}.AppConfig.Load`);
 }
 
 export async function saveAppConfig(cfg: AppConfigDTO): Promise<void> {
@@ -153,13 +233,8 @@ export async function saveAppConfig(cfg: AppConfigDTO): Promise<void> {
 
 
 /** 读取供应商与默认模型;非桌面态返回 null(纯 web 态无法访问 gh 配置)。 */
-export async function loadModelConfig(): Promise<ModelConfigDTO | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<ModelConfigDTO>(`${SVC}.ModelConfig.Load`);
-  } catch {
-    return null;
-  }
+export function loadModelConfig(): Promise<ModelConfigDTO | null> {
+  return quiet<ModelConfigDTO>(`${SVC}.ModelConfig.Load`);
 }
 
 /** 写回 providers 与 default;其余配置键原样保留。 */
@@ -172,13 +247,8 @@ export async function saveModelConfig(cfg: ModelConfigDTO): Promise<void> {
 
 /** 探测供应商可用模型(GET {baseURL}/models,OpenAI 兼容,含模型元数据);
  * 非桌面态返回 null。 */
-export async function detectModels(p: ProviderDTO): Promise<DetectedModelDTO[] | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<DetectedModelDTO[]>(`${SVC}.ModelConfig.DetectModels`, p);
-  } catch {
-    return null;
-  }
+export function detectModels(p: ProviderDTO): Promise<DetectedModelDTO[] | null> {
+  return quiet<DetectedModelDTO[]>(`${SVC}.ModelConfig.DetectModels`, p);
 }
 
 // ---------- 智能体扩展(AgentConfig service,插件/MCP/技能) ----------
@@ -189,13 +259,8 @@ export async function detectModels(p: ProviderDTO): Promise<DetectedModelDTO[] |
 
 
 /** 读取插件/MCP 配置;非桌面态返回 null。 */
-export async function loadPlugins(): Promise<PluginsDTO | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<PluginsDTO>(`${SVC}.AgentConfig.PluginsLoad`);
-  } catch {
-    return null;
-  }
+export function loadPlugins(): Promise<PluginsDTO | null> {
+  return quiet<PluginsDTO>(`${SVC}.AgentConfig.PluginsLoad`);
 }
 
 /** 写回 plugins 键(explicit=false 删键回到自动发现)。 */
@@ -205,45 +270,23 @@ export async function savePlugins(cfg: PluginsDTO): Promise<void> {
 }
 
 /** 列出技能(~/.grf/skills);非桌面态返回 null。 */
-export async function loadSkills(): Promise<SkillsDTO | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<SkillsDTO>(`${SVC}.AgentConfig.SkillsLoad`);
-  } catch {
-    return null;
-  }
+export function loadSkills(): Promise<SkillsDTO | null> {
+  return quiet<SkillsDTO>(`${SVC}.AgentConfig.SkillsLoad`);
 }
 
 /** 读取技能全文;失败返回 null。 */
-export async function getSkillContent(name: string): Promise<string | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<string>(`${SVC}.AgentConfig.SkillGet`, name);
-  } catch {
-    return null;
-  }
+export function getSkillContent(name: string): Promise<string | null> {
+  return quiet<string>(`${SVC}.AgentConfig.SkillGet`, name);
 }
 
 /** 新建/覆盖技能;失败返回错误信息。 */
-export async function saveSkill(name: string, content: string): Promise<string | null> {
-  if (!inWails()) return '仅桌面形态可管理技能';
-  try {
-    await call<void>(`${SVC}.AgentConfig.SkillSave`, name, content);
-    return null;
-  } catch (e) {
-    return String(e);
-  }
+export function saveSkill(name: string, content: string): Promise<string | null> {
+  return errStr('仅桌面形态可管理技能', `${SVC}.AgentConfig.SkillSave`, name, content);
 }
 
 /** 删除技能目录;失败返回错误信息。 */
-export async function deleteSkill(name: string): Promise<string | null> {
-  if (!inWails()) return '仅桌面形态可管理技能';
-  try {
-    await call<void>(`${SVC}.AgentConfig.SkillDelete`, name);
-    return null;
-  } catch (e) {
-    return String(e);
-  }
+export function deleteSkill(name: string): Promise<string | null> {
+  return errStr('仅桌面形态可管理技能', `${SVC}.AgentConfig.SkillDelete`, name);
 }
 
 /** 官方下载服务器上一个版本的可用产物列表。 */
@@ -253,78 +296,38 @@ export interface RemoteReleaseDTO {
 }
 
 /** 官方服务器可安装的插件列表;非桌面态/无产物返回 null/空。 */
-export async function pluginRemoteList(): Promise<RemoteReleaseDTO | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<RemoteReleaseDTO>(`${SVC}.AgentConfig.PluginRemoteList`);
-  } catch {
-    return null;
-  }
+export function pluginRemoteList(): Promise<RemoteReleaseDTO | null> {
+  return quiet<RemoteReleaseDTO>(`${SVC}.AgentConfig.PluginRemoteList`);
 }
 
 /** 在线安装插件(下载到 ~/.grf/plugins,显式模式下自动入列);返回错误信息或 null。 */
-export async function pluginInstall(name: string): Promise<string | null> {
-  if (!inWails()) return '仅桌面形态可安装插件';
-  try {
-    await call<void>(`${SVC}.AgentConfig.PluginInstall`, name);
-    return null;
-  } catch (e) {
-    return String(e);
-  }
+export function pluginInstall(name: string): Promise<string | null> {
+  return errStr('仅桌面形态可安装插件', `${SVC}.AgentConfig.PluginInstall`, name);
 }
 
 /** 删除插件(内置浏览器/电脑操作不可删);返回错误信息或 null。 */
-export async function pluginDelete(name: string): Promise<string | null> {
-  if (!inWails()) return '仅桌面形态可删除插件';
-  try {
-    await call<void>(`${SVC}.AgentConfig.PluginDelete`, name);
-    return null;
-  } catch (e) {
-    return String(e);
-  }
+export function pluginDelete(name: string): Promise<string | null> {
+  return errStr('仅桌面形态可删除插件', `${SVC}.AgentConfig.PluginDelete`, name);
 }
 
 /** 官方服务器可安装的技能列表(暂无产物返回空)。 */
-export async function skillRemoteList(): Promise<RemoteReleaseDTO | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<RemoteReleaseDTO>(`${SVC}.AgentConfig.SkillRemoteList`);
-  } catch {
-    return null;
-  }
+export function skillRemoteList(): Promise<RemoteReleaseDTO | null> {
+  return quiet<RemoteReleaseDTO>(`${SVC}.AgentConfig.SkillRemoteList`);
 }
 
 /** 在线安装技能(x.md → skills/<name>/SKILL.md);返回错误信息或 null。 */
-export async function skillInstall(file: string): Promise<string | null> {
-  if (!inWails()) return '仅桌面形态可安装技能';
-  try {
-    await call<void>(`${SVC}.AgentConfig.SkillInstall`, file);
-    return null;
-  } catch (e) {
-    return String(e);
-  }
+export function skillInstall(file: string): Promise<string | null> {
+  return errStr('仅桌面形态可安装技能', `${SVC}.AgentConfig.SkillInstall`, file);
 }
 
 /** 启用/禁用技能(SKILL.md ↔ SKILL.md.disabled);返回错误信息或 null。 */
-export async function skillSetEnabled(name: string, enabled: boolean): Promise<string | null> {
-  if (!inWails()) return '仅桌面形态可操作';
-  try {
-    await call<void>(`${SVC}.AgentConfig.SkillSetEnabled`, name, enabled);
-    return null;
-  } catch (e) {
-    return String(e);
-  }
+export function skillSetEnabled(name: string, enabled: boolean): Promise<string | null> {
+  return errStr('仅桌面形态可操作', `${SVC}.AgentConfig.SkillSetEnabled`, name, enabled);
 }
 
 /** 从任意 URL 拉取 SKILL.md 安装为技能;返回错误信息或 null。 */
-export async function skillInstallFromURL(name: string, url: string): Promise<string | null> {
-  if (!inWails()) return '仅桌面形态可安装技能';
-  try {
-    await call<void>(`${SVC}.AgentConfig.SkillInstallFromURL`, name, url);
-    return null;
-  } catch (e) {
-    return String(e);
-  }
+export function skillInstallFromURL(name: string, url: string): Promise<string | null> {
+  return errStr('仅桌面形态可安装技能', `${SVC}.AgentConfig.SkillInstallFromURL`, name, url);
 }
 
 // ---------- server 托管(ServerManager service) ----------
@@ -338,13 +341,8 @@ export interface ServerStatusDTO {
   lastError: string;
 }
 
-export async function serverStatus(): Promise<ServerStatusDTO | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<ServerStatusDTO>(`${SVC}.ServerManager.Status`);
-  } catch {
-    return null;
-  }
+export function serverStatus(): Promise<ServerStatusDTO | null> {
+  return quiet<ServerStatusDTO>(`${SVC}.ServerManager.Status`);
 }
 
 export async function serverStart(): Promise<ServerStatusDTO | null> {
@@ -361,43 +359,22 @@ export async function serverStop(): Promise<ServerStatusDTO | null> {
 
 /** 原生目录选择器;返回所选目录,取消/非桌面态返回 null。 */
 export async function pickFolder(): Promise<string | null> {
-  if (!inWails()) return null;
-  try {
-    const p = await call<string>(`${SVC}.Desktop.PickFolder`);
-    return p || null;
-  } catch {
-    return null;
-  }
+  return (await quiet<string>(`${SVC}.Desktop.PickFolder`)) || null;
 }
 
 /** 在系统文件管理器中显示该路径(仅桌面态)。 */
-export async function revealPath(path: string): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.Desktop.Reveal`, path);
-  } catch {
-    /* 静默 */
-  }
+export function revealPath(path: string): Promise<void> {
+  return silent(`${SVC}.Desktop.Reveal`, path);
 }
 
 /** 当前系统用户名(左栏底部身份展示用);非桌面态返回空串。 */
 export async function desktopUserName(): Promise<string> {
-  if (!inWails()) return '';
-  try {
-    return (await call<string>(`${SVC}.Desktop.UserName`)) || '';
-  } catch {
-    return '';
-  }
+  return quietStr(`${SVC}.Desktop.UserName`);
 }
 
 /** 用户主目录(未选工作区时聊天/终端的默认目录);非桌面态返回空串。 */
 export async function desktopHomeDir(): Promise<string> {
-  if (!inWails()) return '';
-  try {
-    return (await call<string>(`${SVC}.Desktop.HomeDir`)) || '';
-  } catch {
-    return '';
-  }
+  return quietStr(`${SVC}.Desktop.HomeDir`);
 }
 
 // ---------- 目录浏览(左栏文件列表;仅桌面) ----------
@@ -410,13 +387,8 @@ export interface FileEntryDTO {
 }
 
 /** 列出目录一级条目(目录在前、名称升序,隐藏条目已滤除);非桌面态/失败返回 null。 */
-export async function listDir(path: string): Promise<FileEntryDTO[] | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<FileEntryDTO[]>(`${SVC}.Desktop.ListDir`, path);
-  } catch {
-    return null;
-  }
+export function listDir(path: string): Promise<FileEntryDTO[] | null> {
+  return quiet<FileEntryDTO[]>(`${SVC}.Desktop.ListDir`, path);
 }
 
 /** 读取文本文件内容(右栏预览,上限 2MB);失败抛带信息的 Error,非桌面态抛不支持。 */
@@ -444,33 +416,18 @@ export async function startTerm(cwd: string, cols: number, rows: number): Promis
 }
 
 /** 向终端会话写入键盘输入(会话已退出时静默)。 */
-export async function writeTerm(id: string, data: string): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.TerminalManager.WriteTerm`, id, data);
-  } catch {
-    /* 会话可能已退出 */
-  }
+export function writeTerm(id: string, data: string): Promise<void> {
+  return silent(`${SVC}.TerminalManager.WriteTerm`, id, data);
 }
 
 /** 调整终端会话尺寸。 */
-export async function resizeTerm(id: string, cols: number, rows: number): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.TerminalManager.ResizeTerm`, id, cols, rows);
-  } catch {
-    /* 静默 */
-  }
+export function resizeTerm(id: string, cols: number, rows: number): Promise<void> {
+  return silent(`${SVC}.TerminalManager.ResizeTerm`, id, cols, rows);
 }
 
 /** 终止终端会话。 */
-export async function killTerm(id: string): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.TerminalManager.KillTerm`, id);
-  } catch {
-    /* 静默 */
-  }
+export function killTerm(id: string): Promise<void> {
+  return silent(`${SVC}.TerminalManager.KillTerm`, id);
 }
 
 /** 终端输出增量读取结果(data 为 base64;from/to 为绝对字节游标)。 */
@@ -481,13 +438,8 @@ export interface TermReadDTO {
 }
 
 /** 增量读取终端会话输出(goder-console 智能体接管会话时回放缓冲)。 */
-export async function readTerm(id: string, from: number): Promise<TermReadDTO | null> {
-  if (!inWails()) return null;
-  try {
-    return await call<TermReadDTO>(`${SVC}.TerminalManager.ReadTerm`, id, from);
-  } catch {
-    return null;
-  }
+export function readTerm(id: string, from: number): Promise<TermReadDTO | null> {
+  return quiet<TermReadDTO>(`${SVC}.TerminalManager.ReadTerm`, id, from);
 }
 
 // ---------- goder-console 智能体控制面(ConsoleMCP service,仅桌面) ----------
@@ -500,36 +452,16 @@ export interface ConsoleUiPayload {
 
 /** 订阅智能体界面操作事件;返回取消订阅。非桌面态为 no-op。 */
 export function consoleUiListen(cb: (p: ConsoleUiPayload) => void): () => void {
-  if (!inWails()) return () => {};
-  let off: (() => void) | null = null;
-  let cancelled = false;
-  void (async () => {
-    try {
-      const mod = (await import('@wailsio/runtime')) as unknown as { Events: WailsEvents };
-      if (cancelled) return;
-      off = mod.Events.On('goder:console-ui', (ev) => {
-        const raw = ev?.data;
-        const v = Array.isArray(raw) ? raw[0] : raw;
-        if (v && typeof v === 'object') cb(v as ConsoleUiPayload);
-      });
-    } catch {
-      /* 桥不可达:保持 no-op */
-    }
-  })();
-  return () => {
-    cancelled = true;
-    off?.();
-  };
+  return wailsEvent<ConsoleUiPayload>(
+    'goder:console-ui',
+    (raw) => (raw && typeof raw === 'object' ? (raw as ConsoleUiPayload) : undefined),
+    cb,
+  );
 }
 
 /** 上报界面状态 JSON(goder_ui_state 工具读;非桌面态静默)。 */
-export async function consoleUiReport(state: string): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.ConsoleMCP.ReportUIState`, state);
-  } catch {
-    /* 静默:服务未就绪/会话关闭 */
-  }
+export function consoleUiReport(state: string): Promise<void> {
+  return silent(`${SVC}.ConsoleMCP.ReportUIState`, state);
 }
 
 interface WailsEvents {
@@ -538,29 +470,13 @@ interface WailsEvents {
 
 /** 订阅终端输出/退出事件(kind: data=base64 输出块 / exit=退出码);返回取消订阅。非桌面态为 no-op。 */
 export function onTermEvent(id: string, kind: 'data' | 'exit', cb: (payload: string) => void): () => void {
-  if (!inWails()) return () => {};
   // 事件名须与 Go 侧 terminal.go 的 Emit 一致(goder: 前缀;grf→goder
   // 更名时此处漏改,订阅名与发射名不匹配会让终端收不到任何输出)
-  const name = `goder:term-${kind}:${id}`;
-  let off: (() => void) | null = null;
-  let cancelled = false;
-  void (async () => {
-    try {
-      const mod = (await import('@wailsio/runtime')) as unknown as { Events: WailsEvents };
-      if (cancelled) return;
-      off = mod.Events.On(name, (ev) => {
-        const raw = ev?.data;
-        const v = Array.isArray(raw) ? raw[0] : raw;
-        cb(v === undefined || v === null ? '' : String(v));
-      });
-    } catch {
-      /* 桥不可达:保持 no-op */
-    }
-  })();
-  return () => {
-    cancelled = true;
-    off?.();
-  };
+  return wailsEvent<string>(
+    `goder:term-${kind}:${id}`,
+    (raw) => (raw === undefined || raw === null ? '' : String(raw)),
+    cb,
+  );
 }
 
 // ---------- 浏览器(BrowserManager service,仅桌面) ----------
@@ -569,92 +485,47 @@ export function onTermEvent(id: string, kind: 'data' | 'exit', cb: (payload: str
 // 返回 false、Navigate 返回 false,前端面板用 iframe 回退。
 
 /** 本平台能否内嵌原生 webview;非桌面态/失败返回 false(→ iframe)。 */
-export async function browserAvailable(): Promise<boolean> {
-  if (!inWails()) return false;
-  try {
-    return (await call<boolean>(`${SVC}.BrowserManager.Available`)) === true;
-  } catch {
-    return false;
-  }
+export function browserAvailable(): Promise<boolean> {
+  return quietBool(`${SVC}.BrowserManager.Available`);
 }
 
 /** 导航(必要时创建原生视图);空 url 仅确保视图存在。返回是否有原生
  * 内容可用(false = 平台不支持内嵌或创建失败,面板应回退 iframe)。 */
-export async function browserNavigate(url: string): Promise<boolean> {
-  if (!inWails()) return false;
-  try {
-    return (await call<boolean>(`${SVC}.BrowserManager.Navigate`, url)) === true;
-  } catch {
-    return false;
-  }
+export function browserNavigate(url: string): Promise<boolean> {
+  return quietBool(`${SVC}.BrowserManager.Navigate`, url);
 }
 
 /** 展示/隐藏原生内容(随面板激活状态)。 */
-export async function browserShow(): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.BrowserManager.Show`);
-  } catch {
-    /* 静默 */
-  }
+export function browserShow(): Promise<void> {
+  return silent(`${SVC}.BrowserManager.Show`);
 }
 
-export async function browserHide(): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.BrowserManager.Hide`);
-  } catch {
-    /* 静默 */
-  }
+export function browserHide(): Promise<void> {
+  return silent(`${SVC}.BrowserManager.Hide`);
 }
 
 /** 上报浏览器面板 rect(视口相对 CSS 像素,getBoundingClientRect)。 */
-export async function browserSetRect(x: number, y: number, w: number, h: number): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.BrowserManager.SetRect`, x, y, w, h);
-  } catch {
-    /* 静默 */
-  }
+export function browserSetRect(x: number, y: number, w: number, h: number): Promise<void> {
+  return silent(`${SVC}.BrowserManager.SetRect`, x, y, w, h);
 }
 
 /** 上报原生 webview 底色(CSS 颜色串,如 #13151b / rgb(...)):边缘发丝缝
  * 露出这个颜色而不是 WebKit 默认白。 */
-export async function browserSetBackground(color: string): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.BrowserManager.SetBackground`, color);
-  } catch {
-    /* 静默 */
-  }
+export function browserSetBackground(color: string): Promise<void> {
+  return silent(`${SVC}.BrowserManager.SetBackground`, color);
 }
 
 /** 后退/前进/刷新原生 webview 自身的导航历史。 */
-export async function browserBack(): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.BrowserManager.Back`);
-  } catch {
-    /* 静默 */
-  }
+export function browserBack(): Promise<void> {
+  return silent(`${SVC}.BrowserManager.Back`);
 }
 
-export async function browserForward(): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.BrowserManager.Forward`);
-  } catch {
-    /* 静默 */
-  }
+export function browserForward(): Promise<void> {
+  return silent(`${SVC}.BrowserManager.Forward`);
 }
 
-export async function browserReload(): Promise<void> {
-  if (!inWails()) return;
-  try {
-    await call<void>(`${SVC}.BrowserManager.Reload`);
-  } catch {
-    /* 静默 */
-  }
+export function browserReload(): Promise<void> {
+  return silent(`${SVC}.BrowserManager.Reload`);
 }
 
 // ---------- git(Desktop service,审查面板用;仅桌面) ----------
@@ -699,6 +570,11 @@ export async function ensureHomeDir(name: string): Promise<string | null> {
   if (!inWails()) return null;
   return call<string>(`${SVC}.Desktop.EnsureHomeDir`, name);
 }
+
+// 主目录通道注入 core 的 scope(模块加载即接线,GoderScope 构造器取到的
+// 就是桥实现,时序与此前直接 import 时一致);core 由此不再反向依赖
+// host/bridge,可整体拷出独立成包。inWails 的回落语义在两个函数内部。
+setHomeDirProvider({ homeDir: desktopHomeDir, ensureHomeDir });
 
 // ---------- 自动更新(Updater service,仅桌面) ----------
 // goder 自身与 gh(grf-harness)的更新检查/应用;进度经 goder:update-progress
@@ -756,26 +632,11 @@ export async function applyUpdate(which: 'goder' | 'gh'): Promise<string | null>
 
 /** 订阅更新进度事件;返回取消订阅。非桌面态为 no-op。 */
 export function onUpdateProgress(cb: (p: UpdateProgressDTO) => void): () => void {
-  if (!inWails()) return () => {};
-  let off: (() => void) | null = null;
-  let cancelled = false;
-  void (async () => {
-    try {
-      const mod = (await import('@wailsio/runtime')) as unknown as { Events: WailsEvents };
-      if (cancelled) return;
-      off = mod.Events.On('goder:update-progress', (ev) => {
-        const raw = ev?.data;
-        const v = Array.isArray(raw) ? raw[0] : raw;
-        if (v && typeof v === 'object') cb(v as UpdateProgressDTO);
-      });
-    } catch {
-      /* 桥不可达:保持 no-op */
-    }
-  })();
-  return () => {
-    cancelled = true;
-    off?.();
-  };
+  return wailsEvent<UpdateProgressDTO>(
+    'goder:update-progress',
+    (raw) => (raw && typeof raw === 'object' ? (raw as UpdateProgressDTO) : undefined),
+    cb,
+  );
 }
 
 // ---------- 桥初始化:桌面态把项目索引换成文件持久化 ----------

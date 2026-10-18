@@ -20,7 +20,7 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
   测试指导全文内嵌二进制、经 `/test-serve/guide` 端点分发(docs/
   testing.md 为源,响应头带版本/平台元数据)。AI/发布版 E2E 主战场;
   勿与桌面 App 同时运行(goder-console 烙写互踩)
-- 类型检查:`cd frontend && npx tsc --noEmit`;Go:`go build ./... && go vet ./...`
+- 类型检查:`cd frontend && npx tsc --noEmit`;Go:`go build ./... && go vet ./... && gofmt -l pkg cmd internal plugins`(gofmt 须无输出)
 - 单元测试:`cd frontend && npm test`(vitest,按模块拆分在 frontend/tests/:
   registry/markdown/chat-model 归约器/automation 协议块/i18n/storage/
   retry-policy/发送管线/工具词典/scope 生命周期/scripted-api 测试装具);
@@ -42,7 +42,9 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
   预发布后缀递进 alpha(内测)< beta(公测)< rc(候选);同基线本程序
   再发版追加 `.postN`(高于该基线,低于下一个 gh 基线);正式版为无后缀
   裸版本号,压过同号全部预发布与 post。排序有三处实现、必须同一套语义:
-  桌面端自动更新 `internal/desktop/ghdownload.go` 的 `compareVersion`、
+  桌面端自动更新 `internal/desktop/version.go` 的 `compareVersion`
+  (单一实现,包内所有择新排序共用;曾存在第四套语义相反的私有副本导致
+  正式版发布后插件仍选 alpha 目录,已删)、
   发版推算 `scripts/version.sh` 的 `ver_max`(awk)、CI 捆绑 gh 下载
   (调 `sh scripts/version.sh gh`)。不要用 `sort -V` 替代:它把正式版排
   在预发布之下且 postN 按字符串比。改比较规则时三处同改,并用矩阵用例
@@ -73,14 +75,21 @@ pkg/                     Go 公开层(三方 Go module 可 import 的基座面;
                          Bearer AdminToken)+ webhook + 请求日志
 internal/                Go 桌面专属层
   appcfg/                桌面配置与项目索引的文件持久化(原子写)
+  grfsettings/           gh 配置 settings.json 的读改写事务(互斥串行 +
+                         tmp/rename 原子落盘):桌面设置页保存与 goder-console
+                         启动烙写共用,杜绝三处手抄与非原子写的并发交错
   desktop/               桌面 wails 服务薄壳(AppConfig/ServerManager/
                          ModelConfig/AgentConfig/Desktop/TerminalManager/
                          BrowserManager/ConsoleMCP/Updater + rootHandler
                          /goder-api 反代与 /goder-api/token 冷启动端点;
+                         version.go 版本比较单一实现(三处同步之一,见
+                         版本号约定);dlserver.go 下载服务器客户端(gh 引导/
+                         自更新/插件技能安装共用);agentskills.go 技能面;
                          /goder-api/local-file 本地文件只读服务带目录
                          白名单(用户主目录/gh 数据目录/项目索引登记目录,
                          proxy.go 的 localFileAllowed——改允许面时同步);
-                         引用 internal/appcfg、pkg/ghserver)
+                         引用 internal/appcfg、internal/grfsettings、
+                         pkg/ghserver)
   browser/               右栏内嵌浏览器面板的原生 webview(macOS 自建
                          WKWebView 子视图/Windows WebView2 重父级子窗),
                          含 Eval/截图与 console/网络捕获钩子(eval.go:
@@ -236,7 +245,8 @@ frontend/src/
   不可删。工具命名带 `goder_` 前缀,避免与 grf-browser 插件的
   `browser_*` 撞名(gh 对重名工具取先连者并告警);全部工具的中文
   展示名在前端 `shell/console-ui.ts` 与接线同源注册
-  (registry.chat.addToolMeta,Go 侧 tools.go 增改工具时两边同步)。
+  (registry.chat.addToolMeta,Go 侧工具注册文件 tools_browser.go/
+  tools_terminal.go/tools_ui.go 增改工具时两边同步)。
   浏览器面板求值的平台机制(macOS callAsyncJavaScript 回调 /
   Windows fetch 回报)见 internal/browser/eval.go 头注释,改信封
   格式两边同步。

@@ -214,7 +214,11 @@ func (s *ssoResolver) hLogout(w http.ResponseWriter, r *http.Request) {
 func (s *ssoResolver) hMe(w http.ResponseWriter, r *http.Request) {
 	u, err := s.Resolve(r)
 	if err != nil {
-		http.Error(w, `{"error":{"message":"未登录或会话已过期","type":"unauthorized"}}`, http.StatusUnauthorized)
+		// 与 pkg/gateway 的 unauthorized 应答同风格:JSON 体 + 正确的
+		// Content-Type(http.Error 会写 text/plain,前端按 JSON 解析即失败)。
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"未登录或会话已过期","type":"unauthorized"}}`))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -222,6 +226,10 @@ func (s *ssoResolver) hMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- Casdoor 对接 ----------
+
+// casdoorHTTP 与 Casdoor 的全部出站请求共用:带超时,防上游挂起时把
+// 回调请求(乃至网关协程)无限期占死。http.DefaultClient 无超时,禁用。
+var casdoorHTTP = &http.Client{Timeout: 10 * time.Second}
 
 // exchange 授权码换 access_token。
 func (s *ssoResolver) exchange(code string) (string, error) {
@@ -237,7 +245,7 @@ func (s *ssoResolver) exchange(code string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := casdoorHTTP.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -262,7 +270,7 @@ func (s *ssoResolver) userinfo(accessToken string) (User, error) {
 		return User{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := casdoorHTTP.Do(req)
 	if err != nil {
 		return User{}, err
 	}

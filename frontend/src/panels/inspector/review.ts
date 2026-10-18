@@ -6,6 +6,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
+import { renderEmptyHint } from '../../util/empty-hint';
 import { inWails, gitStatus, gitDiff, type GitStatusDTO, type GitEntryDTO } from '../../host/bridge';
 
 /** 分组展示键(entry 归属):S=已暂存 W=未暂存 ?=未跟踪 */
@@ -187,6 +188,10 @@ export class GoderReview extends GoderPanel {
         height: 30px;
         opacity: 0.5;
       }
+      .hint .sub {
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
+      }
       .err {
         margin: 10px 12px;
         border: 1px solid var(--goder-error);
@@ -345,14 +350,10 @@ export class GoderReview extends GoderPanel {
     `;
   }
 
+  // 空态/错误态提示:结构走共用模板(util/empty-hint),视觉在本组件
+  // 的 .hint / .hint .sub 样式。
   private renderHint(text: string, sub?: string) {
-    return html`
-      <div class="hint">
-        ${unsafeHTML(icon.gitBranch)}
-        <div>${text}</div>
-        ${sub ? html`<div style="font-size:var(--goder-font-size-xs);color:var(--goder-text-faint)">${sub}</div>` : nothing}
-      </div>
-    `;
+    return renderEmptyHint(icon.gitBranch, text, sub);
   }
 }
 

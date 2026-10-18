@@ -185,7 +185,7 @@ func TestCORSWhitelist(t *testing.T) {
 	defer up.Close()
 	target, _ := url.Parse(up.URL)
 	_, srv := newTestGateway(t, Options{
-		CORSOrigins:  []string{"https://app.example.com"},
+		CORSOrigins:   []string{"https://app.example.com"},
 		FixedUpstream: target,
 	})
 

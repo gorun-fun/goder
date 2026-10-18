@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"git.gorun.fun/share/goder/internal/grfsettings"
 )
 
 // ProviderDTO 与前端 host/bridge.ts 的 ProviderDTO 对齐。
@@ -49,22 +51,15 @@ type ghProvider struct {
 // ModelConfig wails 服务。
 type ModelConfig struct{}
 
-// grfSettingsPath 解析 settings.json 路径(GRF_HOME 优先)。
+// grfSettingsPath 解析 settings.json 路径(GRF_HOME 优先,同 grfHome)。
 func grfSettingsPath() string {
-	if h := strings.TrimSpace(os.Getenv("GRF_HOME")); h != "" {
-		return filepath.Join(h, "settings.json")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "settings.json"
-	}
-	return filepath.Join(home, ".grf", "settings.json")
+	return filepath.Join(grfHome(), "settings.json")
 }
 
 // Load 读取供应商与默认模型;文件不存在或解析失败时返回空列表。
 func (m *ModelConfig) Load() ModelConfigDTO {
 	path := grfSettingsPath()
-	out := ModelConfigDTO{Path: path, Providers: []ProviderDTO{}, Writable: m.writable(path)}
+	out := ModelConfigDTO{Path: path, Providers: []ProviderDTO{}, Writable: settingsWritable(path)}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -126,19 +121,10 @@ func (m *ModelConfig) Load() ModelConfigDTO {
 	return out
 }
 
-// Save 写回 providers 与 default,其余键原样保留。
+// Save 写回 providers 与 default,其余键原样保留。走 grfsettings 原子
+// 事务:与插件保存、启动期 goder-console 烙写串行化,写盘中途被杀不
+// 损坏既有配置。
 func (m *ModelConfig) Save(cfg ModelConfigDTO) error {
-	path := grfSettingsPath()
-	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	all := map[string]json.RawMessage{}
-	if raw, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(raw, &all) // 损坏时按空文档处理,由本次写入修复
-	}
-
 	ps := map[string]ghProvider{}
 	for _, p := range cfg.Providers {
 		name := strings.TrimSpace(p.Name)
@@ -166,34 +152,31 @@ func (m *ModelConfig) Save(cfg ModelConfigDTO) error {
 	if err != nil {
 		return err
 	}
-	all["providers"] = provRaw
-	all["default"] = defRaw
-	// 常用项:显式设置了才写,空 policy 不落键(沿用原值或省略)
-	if cfg.MaxSteps != nil {
-		if raw, err := json.Marshal(*cfg.MaxSteps); err == nil {
-			all["max_steps"] = raw
+	return grfsettings.Update(grfSettingsPath(), func(all map[string]json.RawMessage, _ bool) error {
+		all["providers"] = provRaw
+		all["default"] = defRaw
+		// 常用项:显式设置了才写,空 policy 不落键(沿用原值或省略)
+		if cfg.MaxSteps != nil {
+			if raw, err := json.Marshal(*cfg.MaxSteps); err == nil {
+				all["max_steps"] = raw
+			}
 		}
-	}
-	if cfg.Mouse != nil {
-		if raw, err := json.Marshal(*cfg.Mouse); err == nil {
-			all["mouse"] = raw
+		if cfg.Mouse != nil {
+			if raw, err := json.Marshal(*cfg.Mouse); err == nil {
+				all["mouse"] = raw
+			}
 		}
-	}
-	if p := strings.TrimSpace(cfg.Policy); p != "" {
-		if raw, err := json.Marshal(p); err == nil {
-			all["policy"] = raw
+		if p := strings.TrimSpace(cfg.Policy); p != "" {
+			if raw, err := json.Marshal(p); err == nil {
+				all["policy"] = raw
+			}
 		}
-	}
-
-	data, err := json.MarshalIndent(all, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(data, '\n'), 0o600)
+		return nil
+	})
 }
 
-// writable 目标文件是否可写(不存在时看目录)。
-func (m *ModelConfig) writable(path string) bool {
+// settingsWritable 目标文件是否可写(不存在时看目录)。
+func settingsWritable(path string) bool {
 	if f, err := os.OpenFile(path, os.O_WRONLY, 0o600); err == nil {
 		f.Close()
 		return true

@@ -381,50 +381,63 @@ export interface ToolMetaDef {
 
 /** 状态浮窗(聊天列右上的自动化任务/git 概览/goal 卡)是 goder 特有的
  * 业务面板;不打算用自动化能力的嵌入方可整体隐藏,聊天区完全干净。 */
-const statusPopOff = new Set<string>();
-const statusPopListeners = new Set<Listener>();
+
+// ---------- 按 scope 的配置槽工厂(宿主钩子落点的同构样板) ----------
+
+/** scopeSlot 生成「Map 存储 + set/get/subscribe」三件套:registry 的九个
+ * 宿主钩子落点(statusPop/markdown/user/sideTop/settings/modelGuard/
+ * fileOpen/uiEvents/newProject)同构样板的收敛点,新增钩子一行声明,
+ * 不再手抄 Map + Set<Listener> + 逐处 notify 的舞步(漏 notify 是这类
+ * 样板的典型缺陷)。notify:true 的槽带变更订阅(展示方刷新用);
+ * 未开的槽(fileOpen/uiEvents/newProject)变更只发生在 configure 装配期,
+ * 无订阅方。set 语义统一:v undefined = 清除(恢复默认),一律通知。 */
+function scopeSlot<T>(opts?: { notify?: boolean }) {
+  const values = new Map<string, T>();
+  const listeners = new Set<Listener>();
+  const notify = opts?.notify === true;
+  return {
+    set(scope: string, v: T | undefined): void {
+      if (v === undefined) values.delete(scope);
+      else values.set(scope, v);
+      if (notify) for (const l of listeners) l();
+    },
+    get(scope: string): T | undefined {
+      return values.get(scope);
+    },
+    subscribe(fn: Listener): () => void {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+  };
+}
+
+// 关闭名单槽(true = 该 scope 关闭浮窗;get 取反即展示态)。
+const statusPopOffSlot = scopeSlot<true>({ notify: true });
 
 /** 开/关某 scope 的状态浮窗(默认开;false = 不渲染)。 */
 export function setStatusPop(scope: string, on: boolean): void {
-  if (on) statusPopOff.delete(scope);
-  else statusPopOff.add(scope);
-  for (const l of statusPopListeners) l();
+  statusPopOffSlot.set(scope, on ? undefined : true);
 }
 
 /** 某 scope 的状态浮窗是否展示。 */
 export function getStatusPop(scope: string): boolean {
-  return !statusPopOff.has(scope);
+  return !statusPopOffSlot.get(scope);
 }
 
 /** 订阅状态浮窗配置变更。 */
-export function onStatusPopChange(fn: Listener): () => void {
-  statusPopListeners.add(fn);
-  return () => statusPopListeners.delete(fn);
-}
+export const onStatusPopChange = statusPopOffSlot.subscribe;
 
 // ---------- 宿主 markdown 渲染覆写(embed.configure 的 markdown 落点) ----------
 
-const markdownOverlays = new Map<string, MarkdownRenderer>();
-const markdownListeners = new Set<Listener>();
+const markdownSlot = scopeSlot<MarkdownRenderer>({ notify: true });
 
 /** 覆写某 scope 的 markdown 渲染器(undefined = 清除,恢复内置)。
  *  只影响消息流内的渲染;宿主自用 renderMarkdown 不受影响。 */
-export function setMarkdownRenderer(scope: string, fn: MarkdownRenderer | undefined): void {
-  if (fn) markdownOverlays.set(scope, fn);
-  else markdownOverlays.delete(scope);
-  for (const l of markdownListeners) l();
-}
-
+export const setMarkdownRenderer = markdownSlot.set;
 /** 读取某 scope 的 markdown 渲染覆写。 */
-export function getMarkdownRenderer(scope: string): MarkdownRenderer | undefined {
-  return markdownOverlays.get(scope);
-}
-
+export const getMarkdownRenderer = markdownSlot.get;
 /** 订阅 markdown 覆写变更(消息流等消费方刷新用)。 */
-export function onMarkdownRendererChange(fn: Listener): () => void {
-  markdownListeners.add(fn);
-  return () => markdownListeners.delete(fn);
-}
+export const onMarkdownRendererChange = markdownSlot.subscribe;
 
 // ---------- 宿主身份注入(embed.configure 的 user 落点) ----------
 
@@ -445,26 +458,14 @@ export interface UserConfig {
   hit?: 'full' | 'content';
 }
 
-const userConfigs = new Map<string, UserConfig>();
-const userListeners = new Set<Listener>();
+const userSlot = scopeSlot<UserConfig>({ notify: true });
 
 /** 配置某 scope 的注入身份(undefined = 清除,回落默认身份)。 */
-export function setUser(scope: string, cfg: UserConfig | undefined): void {
-  if (cfg) userConfigs.set(scope, cfg);
-  else userConfigs.delete(scope);
-  for (const fn of userListeners) fn();
-}
-
+export const setUser = userSlot.set;
 /** 读取某 scope 的注入身份。 */
-export function getUser(scope: string): UserConfig | undefined {
-  return userConfigs.get(scope);
-}
-
+export const getUser = userSlot.get;
 /** 订阅注入身份变更(身份 chip 等展示方刷新用)。 */
-export function onUserChange(fn: Listener): () => void {
-  userListeners.add(fn);
-  return () => userListeners.delete(fn);
-}
+export const onUserChange = userSlot.subscribe;
 
 // ---------- 宿主左栏顶行注入(embed.configure 的 sideTop 落点) ----------
 
@@ -479,26 +480,14 @@ export interface SideTopConfig {
   trailing?: () => HTMLElement;
 }
 
-const sideTopConfigs = new Map<string, SideTopConfig>();
-const sideTopListeners = new Set<Listener>();
+const sideTopSlot = scopeSlot<SideTopConfig>({ notify: true });
 
 /** 配置某 scope 的左栏顶行注入(undefined = 清除)。 */
-export function setSideTop(scope: string, cfg: SideTopConfig | undefined): void {
-  if (cfg) sideTopConfigs.set(scope, cfg);
-  else sideTopConfigs.delete(scope);
-  for (const fn of sideTopListeners) fn();
-}
-
+export const setSideTop = sideTopSlot.set;
 /** 读取某 scope 的左栏顶行注入。 */
-export function getSideTop(scope: string): SideTopConfig | undefined {
-  return sideTopConfigs.get(scope);
-}
-
+export const getSideTop = sideTopSlot.get;
 /** 订阅左栏顶行注入变更(shell 等展示方刷新用)。 */
-export function onSideTopChange(fn: Listener): () => void {
-  sideTopListeners.add(fn);
-  return () => sideTopListeners.delete(fn);
-}
+export const onSideTopChange = sideTopSlot.subscribe;
 
 // ---------- 宿主设置页裁剪(embed.configure 的 settings 落点) ----------
 
@@ -511,26 +500,14 @@ export interface SettingsConfig {
   agentGroup?: boolean;
 }
 
-const settingsConfigs = new Map<string, SettingsConfig>();
-const settingsListeners = new Set<Listener>();
+const settingsSlot = scopeSlot<SettingsConfig>({ notify: true });
 
 /** 配置某 scope 的设置页裁剪(undefined = 清除,恢复默认全量分区)。 */
-export function setSettingsConfig(scope: string, cfg: SettingsConfig | undefined): void {
-  if (cfg) settingsConfigs.set(scope, cfg);
-  else settingsConfigs.delete(scope);
-  for (const fn of settingsListeners) fn();
-}
-
+export const setSettingsConfig = settingsSlot.set;
 /** 读取某 scope 的设置页裁剪。 */
-export function getSettingsConfig(scope: string): SettingsConfig | undefined {
-  return settingsConfigs.get(scope);
-}
-
+export const getSettingsConfig = settingsSlot.get;
 /** 订阅设置页裁剪变更(settings-nav 等展示方刷新用)。 */
-export function onSettingsChange(fn: Listener): () => void {
-  settingsListeners.add(fn);
-  return () => settingsListeners.delete(fn);
-}
+export const onSettingsChange = settingsSlot.subscribe;
 
 // ---------- 宿主模型守卫(embed.configure 的 modelGuard 落点) ----------
 
@@ -538,28 +515,22 @@ export function onSettingsChange(fn: Listener): () => void {
  * 开启后嵌入壳(app-shell)启动时检查 gh 侧可用模型,没有任何可用模型
  * 则自动进入设置-模型页引导完成配置。宿主经 configure 下发了 model 的
  * scope 不适用。默认关闭 —— 官方嵌入约定宿主自管配置,不打扰。 */
-const modelGuards = new Set<string>();
-const modelGuardListeners = new Set<Listener>();
+const modelGuardSlot = scopeSlot<true>({ notify: true });
 
 /** 开/关某 scope 的启动模型守卫。变更即通知(app-shell 守卫的唤醒源:
  * configure 可能晚于壳元素连接 —— 静态声明的 <goder-app-shell> 在嵌入库
  * 加载瞬间升级连接,而 embed.configure 在其之后才执行)。 */
 export function setModelGuard(scope: string, on: boolean): void {
-  if (on) modelGuards.add(scope);
-  else modelGuards.delete(scope);
-  for (const fn of modelGuardListeners) fn();
+  modelGuardSlot.set(scope, on ? true : undefined);
 }
 
 /** 读取某 scope 是否开启启动模型守卫。 */
 export function getModelGuard(scope: string): boolean {
-  return modelGuards.has(scope);
+  return modelGuardSlot.get(scope) === true;
 }
 
 /** 订阅 modelGuard 变更。 */
-export function onModelGuardChange(fn: Listener): () => void {
-  modelGuardListeners.add(fn);
-  return () => modelGuardListeners.delete(fn);
-}
+export const onModelGuardChange = modelGuardSlot.subscribe;
 
 // ---------- 宿主文件打开路由(embed.configure 的 fileOpen 落点) ----------
 
@@ -569,18 +540,12 @@ export function onModelGuardChange(fn: Listener): () => void {
  * 未配置则走内置行为。默认无钩子 —— 行为与原生完全一致。 */
 export type FileOpenHook = (f: { path: string; name?: string; rel?: string }) => boolean;
 
-const fileOpens = new Map<string, FileOpenHook>();
+const fileOpenSlot = scopeSlot<FileOpenHook>();
 
 /** 配置某 scope 的文件打开钩子(undefined = 清除,恢复内置路由)。 */
-export function setFileOpen(scope: string, fn: FileOpenHook | undefined): void {
-  if (fn) fileOpens.set(scope, fn);
-  else fileOpens.delete(scope);
-}
-
+export const setFileOpen = fileOpenSlot.set;
 /** 读取某 scope 的文件打开钩子。 */
-export function getFileOpen(scope: string): FileOpenHook | undefined {
-  return fileOpens.get(scope);
-}
+export const getFileOpen = fileOpenSlot.get;
 
 // ---------- UI 事件总线(embed.configure 的 uiEvents 落点) ----------
 
@@ -604,18 +569,12 @@ export type UiEvent =
  *  false/undefined = 放行,goder 按原生行为执行。 */
 export type UiEventHandler = (e: UiEvent) => boolean;
 
-const uiEventHandlers = new Map<string, UiEventHandler>();
+const uiEventSlot = scopeSlot<UiEventHandler>();
 
 /** 配置某 scope 的 UI 事件处理器(undefined = 清除,全部放行)。 */
-export function setUiEventHandler(scope: string, fn: UiEventHandler | undefined): void {
-  if (fn) uiEventHandlers.set(scope, fn);
-  else uiEventHandlers.delete(scope);
-}
-
+export const setUiEventHandler = uiEventSlot.set;
 /** 读取某 scope 的 UI 事件处理器。 */
-export function getUiEventHandler(scope: string): UiEventHandler | undefined {
-  return uiEventHandlers.get(scope);
-}
+export const getUiEventHandler = uiEventSlot.get;
 
 // ---------- 宿主新建项目路由(embed.configure 的 newProject 落点) ----------
 
@@ -626,15 +585,9 @@ export function getUiEventHandler(scope: string): UiEventHandler | undefined {
  *  (无 path 的裸项目嵌入方通常无法管理)。未配置走原生行为(裸项目)。 */
 export type NewProjectHook = (name: string) => Promise<string | null> | string | null;
 
-const newProjectHooks = new Map<string, NewProjectHook>();
+const newProjectSlot = scopeSlot<NewProjectHook>();
 
 /** 配置某 scope 的新建项目钩子(undefined = 清除,恢复原生行为)。 */
-export function setNewProject(scope: string, fn: NewProjectHook | undefined): void {
-  if (fn) newProjectHooks.set(scope, fn);
-  else newProjectHooks.delete(scope);
-}
-
+export const setNewProject = newProjectSlot.set;
 /** 读取某 scope 的新建项目钩子。 */
-export function getNewProject(scope: string): NewProjectHook | undefined {
-  return newProjectHooks.get(scope);
-}
+export const getNewProject = newProjectSlot.get;

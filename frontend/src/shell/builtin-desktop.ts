@@ -66,7 +66,9 @@ export function registerBuiltinDesktop(): void {
     id: 'terminal',
     label: '终端',
     icon: icon.terminal,
-    visible: () => inWails() && panelRegistered('goder-terminal'),
+    // ctx.desktop 已与 side-dock 同口径(bottom-dock refreshCtx),
+    // 按文档模式写守卫,不再绕开 ctx 直接探桥。
+    visible: (ctx) => ctx.desktop && panelRegistered('goder-terminal'),
     create: (ctx) => {
       const el = document.createElement('goder-terminal');
       el.setAttribute('scope', ctx.scope);

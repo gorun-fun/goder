@@ -56,10 +56,10 @@ type rpcErrorBody struct {
 }
 
 type rpcOut struct {
-	JSONRPC string         `json:"jsonrpc"`
-	ID      *int64         `json:"id"`
-	Result  any            `json:"result,omitempty"`
-	Error   *rpcErrorBody  `json:"error,omitempty"`
+	JSONRPC string        `json:"jsonrpc"`
+	ID      *int64        `json:"id"`
+	Result  any           `json:"result,omitempty"`
+	Error   *rpcErrorBody `json:"error,omitempty"`
 }
 
 // Handler 组装 HTTP 处理器:/mcp(JSON-RPC)+ /goder-eval-report(Windows

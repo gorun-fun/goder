@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+
+	"git.gorun.fun/share/goder/internal/grfsettings"
 )
 
 // pluginName gh 侧的插件名(工具描述里的归属展示)。
@@ -116,47 +118,42 @@ func writeWrapper(exe, pluginsDir, endpoint, token string) error {
 }
 
 // upsertSettings settings.json 有 plugins 键(显式列表模式)时,把
-// goder-console 命令项 upsert 进去;无键(自动发现)不动文件。
+// goder-console 命令项 upsert 进去;无键(自动发现)不动文件。走
+// grfsettings 原子事务:与设置页的模型/插件保存(同进程)串行化,
+// 烙写与用户保存并发交错时不再有写出半截文件的风险。
 func upsertSettings(exe, settingsPath, endpoint, token string) error {
-	raw, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return nil // 无 settings.json = 自动发现模式,不必写
-	}
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &all); err != nil {
-		return nil // 损坏文件不碰(由别的路径修复)
-	}
-	cur, has := all["plugins"]
-	if !has {
-		return nil // 自动发现模式
-	}
-	var list []map[string]any
-	if err := json.Unmarshal(cur, &list); err != nil {
-		return fmt.Errorf("settings.json plugins 数组解析失败: %w", err)
-	}
-	entry := map[string]any{
-		"name":    pluginName,
-		"command": []string{exe, "console-shim", endpoint, token},
-	}
-	replaced := false
-	for i, p := range list {
-		if name, _ := p["name"].(string); name == pluginName {
-			list[i] = entry
-			replaced = true
-			break
+	return grfsettings.Update(settingsPath, func(all map[string]json.RawMessage, existed bool) error {
+		if !existed {
+			return grfsettings.ErrSkip // 无/损坏文件 = 自动发现模式或留待修复,不碰
 		}
-	}
-	if !replaced {
-		list = append(list, entry)
-	}
-	data, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	all["plugins"] = data
-	out, err := json.MarshalIndent(all, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(settingsPath, append(out, '\n'), 0o600)
+		cur, has := all["plugins"]
+		if !has {
+			return grfsettings.ErrSkip // 自动发现模式
+		}
+		var list []map[string]any
+		if err := json.Unmarshal(cur, &list); err != nil {
+			return fmt.Errorf("settings.json plugins 数组解析失败: %w", err)
+		}
+		entry := map[string]any{
+			"name":    pluginName,
+			"command": []string{exe, "console-shim", endpoint, token},
+		}
+		replaced := false
+		for i, p := range list {
+			if name, _ := p["name"].(string); name == pluginName {
+				list[i] = entry
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			list = append(list, entry)
+		}
+		data, err := json.Marshal(list)
+		if err != nil {
+			return err
+		}
+		all["plugins"] = data
+		return nil
+	})
 }

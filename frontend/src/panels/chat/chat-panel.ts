@@ -8,13 +8,14 @@ import { css, html, nothing , type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme, controls } from '../../ui/panel';
-import { modelContextWindow } from '../../util/modelctx';
+import { markdownCss } from '../../ui/markdown-css';
 import { icon } from '../../util/icons';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
-import { inWails, gitStatus, saveSkill, type GitStatusDTO } from '../../host/bridge';
+import { inWails, saveSkill } from '../../host/bridge';
 import { usageTotals, type AskItem } from '../../core/model/chat-model';
 import { settingsStore, displayFullModel } from '../../core/settings/settings-store';
-import { registry, getStatusPop, onStatusPopChange, type PanelContext, type SideTabInstance } from '../../registry/registry';
+import { modelMenuOf, contextWindowDenominator } from '../../util/model-menu';
+import { registry, getStatusPop, onStatusPopChange, type PanelContext } from '../../registry/registry';
 import './composer';
 import './status-pop';
 import { renderItem, renderChatNav, cnavWave, cnavReset, type MessageViewProps } from './messages';
@@ -37,8 +38,6 @@ export class GoderChat extends GoderPanel {
   @property({ type: Boolean }) bottomOn = false;
   /** 右栏当前展开态(收起时右栏隐藏,内部 tab 会话保活) */
   @property({ type: Boolean }) sidebarOn = false;
-  /** 右栏已打开的 tab 实例(有序;空 = 显示类型入口页) */
-  @property({ type: Array }) sideTabs: SideTabInstance[] = [];
   /** 左栏收起时头部左上角显示左边栏开关(展开时开关在左栏顶行) */
   @property({ type: Boolean, attribute: 'left-toggle' }) leftToggle = false;
   /** 左栏当前展开态 */
@@ -68,8 +67,6 @@ export class GoderChat extends GoderPanel {
   private static readonly NARROW_AT = 560;
   /** 聊天列宽度观察(浮窗自动收缩用) */
   private colRo: ResizeObserver | null = null;
-  /** 当前项目 git 状态(状态浮窗用;null = 未取到/不适用) */
-  @state() private git: GitStatusDTO | null = null;
   /** 编辑中的用户消息 id 与草稿(编辑后重新发送) */
   @state() private editingId?: string;
   @state() private editDraft = '';
@@ -89,14 +86,14 @@ export class GoderChat extends GoderPanel {
 
   /** 头部空白区为窗口拖拽区(移动/双击缩放;非桌面态静默) */
   private tdrag: TitleDrag | null = null;
-  /** git 状态轮询计时器;仅桌面态请求 */
-  private gitTimer?: number;
-  /** 上次取 git 状态的项目目录(cwd 变化即重取) */
-  private gitCwd = '';
 
   static styles = [
     theme,
     controls,
+    // markdown 输出元素样式走 ui/markdown-css.ts 的单一维护点(full 档,
+    // 作用域默认 .md 与原手工副本的选择器一致);.msg-assistant .md 容器
+    // 行为(行高/断词/首尾去距)仍是本文件局部规则。
+    markdownCss('full'),
     css`
       :host {
         display: flex;
@@ -482,86 +479,6 @@ export class GoderChat extends GoderPanel {
       .msg-assistant .md > :last-child {
         margin-bottom: 0;
       }
-      .md .md-p {
-        margin: 0 0 8px;
-      }
-      .md .md-h {
-        margin: 14px 0 7px;
-        font-weight: 650;
-        line-height: 1.4;
-      }
-      .md h1.md-h, .md h2.md-h {
-        font-size: 16px;
-        border-bottom: 1px solid var(--goder-border-soft);
-        padding-bottom: 4px;
-      }
-      .md h3.md-h { font-size: 14.5px; }
-      .md h4.md-h, .md h5.md-h, .md h6.md-h { font-size: 13.5px; }
-      .md code {
-        font-family: var(--goder-mono);
-        font-size: 0.9em;
-        background: var(--goder-bg-hover);
-        border-radius: 4px;
-        padding: 1px 5px;
-      }
-      .md pre.md-code {
-        background: #131418;
-        border: 1px solid var(--goder-border-soft);
-        border-radius: var(--goder-radius-sm);
-        padding: 10px 12px;
-        overflow: auto;
-        margin: 0 0 8px;
-      }
-      .md pre.md-code code {
-        background: none;
-        padding: 0;
-        font-size: var(--goder-font-size-xs);
-        line-height: 1.6;
-        color: #c6cad2;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-      .md ul, .md ol {
-        margin: 0 0 8px;
-        padding-left: 22px;
-      }
-      .md li {
-        margin: 2px 0;
-      }
-      .md a {
-        color: var(--goder-accent-text);
-      }
-      .md blockquote.md-quote {
-        margin: 0 0 8px;
-        padding: 2px 12px;
-        border-left: 3px solid var(--goder-border);
-        color: var(--goder-text-dim);
-      }
-      .md hr.md-hr {
-        border: none;
-        border-top: 1px solid var(--goder-border);
-        margin: 12px 0;
-      }
-      .md table.md-table {
-        display: block;
-        overflow-x: auto;
-        max-width: 100%;
-        border-collapse: collapse;
-        margin: 0 0 8px;
-      }
-      .md table.md-table th,
-      .md table.md-table td {
-        border: 1px solid var(--goder-border);
-        padding: 4px 10px;
-        font-size: var(--goder-font-size-sm);
-        vertical-align: top;
-        text-align: left;
-      }
-      .md table.md-table th {
-        background: var(--goder-bg-hover);
-        font-weight: 650;
-        white-space: nowrap;
-      }
       .cursor {
         display: inline-block;
         width: 7px;
@@ -722,7 +639,6 @@ export class GoderChat extends GoderPanel {
       guardDraft = null;
       void this.updateComplete.then(() => this.restoreDraft(d));
     }
-    this.gitTimer = window.setInterval(() => void this.pollGit(), 8000);
     // 模型选择下拉的数据源(桌面态 gh settings.json;幂等,已加载则跳过)
     this.settingsUnsub = settingsStore.subscribe(() => this.requestUpdate());
     void settingsStore.loadModelCfg();
@@ -773,8 +689,6 @@ export class GoderChat extends GoderPanel {
     this.colRo = null;
     this.stickRo?.disconnect();
     this.stickRo = null;
-    if (this.gitTimer) window.clearInterval(this.gitTimer);
-    this.gitTimer = undefined;
     this.settingsUnsub?.();
     this.settingsUnsub = undefined;
     this.regUnsub?.();
@@ -782,22 +696,6 @@ export class GoderChat extends GoderPanel {
     this.statusPopOff?.();
     this.statusPopOff = undefined;
     super.disconnectedCallback();
-  }
-
-  // pollGit 状态浮窗的 git 区块:桌面态轮询当前项目仓库状态(浮窗自动
-  // 显示,不依赖任何开关;无项目目录时清空)。
-  private async pollGit(): Promise<void> {
-    if (!inWails()) return;
-    const cwd = this.store?.activeProjectPath();
-    if (!cwd) {
-      this.git = null;
-      return;
-    }
-    try {
-      this.git = await gitStatus(cwd);
-    } catch {
-      this.git = null;
-    }
   }
 
   /** 底部吸附滚动:仅吸附态执行;流式高频调用必须用即时滚动(instant),
@@ -848,30 +746,21 @@ export class GoderChat extends GoderPanel {
     const policyImmediate = !!sid && !sid.startsWith('draft:');
     // 模型按钮显示"下一回合将使用的模型":本机选择优先(刚切换就能看到),
     // 会话尚未发过消息时回落服务端回报(goder 无默认模型概念,不从 gh
-    // default 兜底 —— 未选择时按钮显示「选择模型」并由发送守卫拦截)
+    // default 兜底 —— 未选择时按钮显示「选择模型」并由发送守卫拦截)。
+    // 菜单分组与圆环分母的推导在 util/model-menu.ts(纯函数,含
+    // provider/ 前缀与 models 判空的踩坑说明)。
     const curModel = s?.model || rt?.model || '';
     const activeModel = curModel;
-    const providers = (settingsStore.modelCfg?.providers ?? []).map((p) => ({
-      name: p.name,
-      // models 判空:Go 侧 nil 切片序列化为 null,直接展开会抛 TypeError
-      // 冻结整个聊天面板(会话点不开/三栏开关失效)。
-      // 菜单项必须带 provider/ 前缀:gh server 的 trySwitchModel 只认
-      // "provider/model" 全名,裸模型名会被忽略(切换不生效)
-      models: (p.models ?? []).map((m) => `${p.name}/${m}`),
-    }));
+    const providers = modelMenuOf(curModel);
     // 服务端回报的 model 是裸名(含九天式自带 / 的裸名),统一补 provider
     // 前缀对齐菜单项(勾选态匹配);表未加载/未命中原样保留
     const curFull = displayFullModel(curModel);
     const activeFull = displayFullModel(activeModel);
-    if (curFull && !providers.some((g) => g.models.includes(curFull))) {
-      providers.push({ name: '当前模型', models: [curFull] });
-    }
     // 上下文窗口取会话实际模型(圆环分母):优先供应商 /models 接口回报的
-    // 真实值(token-hub / OpenRouter 等网关);查不到暂用按名估算并后台
-    // 探测一次,成功后 store bump 触发重渲染换上真实值
+    // 真实值;查不到暂用按名估算并后台探测一次,成功后 store bump 触发
+    // 重渲染换上真实值
     const ctxModel = rt?.model || curModel || '';
-    const ctxExact = settingsStore.providerCtxWindow(ctxModel);
-    const contextWindow = ctxExact ?? modelContextWindow(ctxModel || undefined);
+    const { exact: ctxExact, value: contextWindow } = contextWindowDenominator(ctxModel);
     if (ctxExact == null) settingsStore.probeProviderCtx(ctxModel);
     // 头部开关:装配开启且确有可用条目才显示
     const bottomDefs = registry.bottom.visible(ctx);
@@ -912,7 +801,7 @@ export class GoderChat extends GoderPanel {
           `}
       <div class="msgs-wrap">
             ${getStatusPop(this.scope)
-              ? html`<goder-status-pop scope=${this.scope} .git=${this.git} .narrow=${this.colNarrow}></goder-status-pop>`
+              ? html`<goder-status-pop scope=${this.scope} .narrow=${this.colNarrow}></goder-status-pop>`
               : nothing}
             <div class="msgs" @scroll=${this.onScroll}>
               <div class="inner">

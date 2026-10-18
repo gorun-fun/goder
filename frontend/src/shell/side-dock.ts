@@ -16,6 +16,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme } from '../ui/panel';
 import { icon } from '../util/icons';
 import { inWails } from '../host/bridge';
+import { makeSessionAlive, closeDockMenuOnOutside, dockMenuTpl, dockMenuCss, dockTabCss } from './dock-shared';
 import { makeTitleDrag, type TitleDrag } from '../util/titledrag';
 import { registry, sideTabId, type PanelContext, type SideTabDef, type SideTabInstance } from '../registry/registry';
 
@@ -51,6 +52,7 @@ export class GoderSideDock extends GoderPanel {
 
   static styles = [
     theme,
+    dockTabCss,
     css`
       :host {
         display: flex;
@@ -149,15 +151,10 @@ export class GoderSideDock extends GoderPanel {
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      /* tab chip 基态(display/字号/配色/关闭钮)在 dockTabCss 的
+       * .dock-tab 标记类;此处只留本栏差异项(padding/圆角) */
       .stab {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
         padding: 4px 8px;
-        font-size: var(--goder-font-size-xs);
-        color: var(--goder-text-dim);
-        border-bottom: 2px solid transparent;
-        cursor: pointer;
         border-radius: 4px 4px 0 0;
       }
       .stab:hover {
@@ -174,67 +171,14 @@ export class GoderSideDock extends GoderPanel {
         height: 12px;
         flex: none;
       }
-      .stab .x {
-        display: none;
-        border: none;
-        background: transparent;
-        padding: 0 0 0 2px;
-        color: var(--goder-text-faint);
-        cursor: pointer;
-      }
-      .stab .x svg {
-        width: 10px;
-        height: 10px;
-      }
-      .stab:hover .x {
-        display: inline-flex;
-      }
-      .stab .x:hover {
-        color: var(--goder-error);
-      }
       .stab.add {
         color: var(--goder-text-faint);
         border-bottom-color: transparent;
       }
-      .side-menu {
-        position: absolute;
-        top: 100%;
+      /* 菜单本体在 dockMenuCss(.dock-menu);实际定位经内联 left 对齐
+       * 加号,这里的 left:0 只是兜底 */
+      .tabs-head .dock-menu {
         left: 0;
-        z-index: 30;
-        background: var(--goder-bg-raise);
-        border: 1px solid var(--goder-border);
-        border-radius: var(--goder-radius);
-        box-shadow: var(--goder-shadow);
-        padding: 4px;
-        min-width: 160px;
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-      }
-      .side-menu .mi {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 8px;
-        font-size: var(--goder-font-size-xs);
-        color: var(--goder-text-dim);
-        border-radius: var(--goder-radius-sm);
-        cursor: pointer;
-        user-select: none;
-      }
-      .side-menu .mi:hover {
-        background: var(--goder-bg-hover);
-        color: var(--goder-text);
-      }
-      .side-menu .mi svg {
-        width: 12px;
-        height: 12px;
-        flex: none;
-      }
-      .side-menu .mitag {
-        margin-left: auto;
-        color: var(--goder-text-faint);
-        font-size: 10px;
       }
       /* 右栏空态:居中类型入口 */
       .side-empty {
@@ -309,12 +253,13 @@ export class GoderSideDock extends GoderPanel {
         border-left: none;
       }
     `,
+    dockMenuCss,
   ];
 
   connectedCallback(): void {
     super.connectedCallback();
     // 排除项:tab 本体/关闭键/「+」与下拉菜单(button 兜底未来新增控件)
-    this.tdrag = makeTitleDrag('button, .stab, .side-menu');
+    this.tdrag = makeTitleDrag('button, .stab, .dock-menu');
     window.addEventListener('pointermove', this.onDrag);
     window.addEventListener('pointerup', this.stopDrag);
     window.addEventListener('pointerdown', this.onWinPointerDown);
@@ -352,13 +297,11 @@ export class GoderSideDock extends GoderPanel {
     this.classList.remove('dragging');
   };
 
-  // "+" 菜单:点击菜单外任意处关闭
+  // "+" 菜单:点击菜单外任意处关闭(dock 共享逻辑,见 dock-shared)
   private onWinPointerDown = (e: PointerEvent): void => {
-    if (!this.menuOpen) return;
-    const path = e.composedPath();
-    const inMenu = [...this.renderRoot.querySelectorAll('.side-menu')].some((m) => path.includes(m));
-    const inAdd = [...this.renderRoot.querySelectorAll('.stab.add')].some((m) => path.includes(m));
-    if (!inMenu && !inAdd) this.menuOpen = false;
+    closeDockMenuOnOutside(e, this.renderRoot, this.menuOpen, ['.dock-menu', '.stab.add'], () => {
+      this.menuOpen = false;
+    });
   };
 
   /** 面板渲染上下文(registry 条目渲染用)。 */
@@ -384,8 +327,7 @@ export class GoderSideDock extends GoderPanel {
   private prunePools(): void {
     const s = this.store;
     if (!s) return;
-    const alive = (sid: string) =>
-      sid.startsWith('draft:') ? s.drafts.has(sid) : !!s.index.sessions[sid];
+    const alive = makeSessionAlive(s);
     // 注意结构差异:elPool 外层键是 tab id('terminal'/'file:<路径>'…),
     // 会话 id 在内层 map —— 判活必须遍历内层,否则会把 tab id 当会话 id
     // 误判为已死,每次渲染清空侧栏元素池(终端 PTY 随之被杀重启)。
@@ -562,7 +504,7 @@ export class GoderSideDock extends GoderPanel {
             const tid = sideTabId(t);
             const label = this.tabLabel(t, defs);
             return html`
-              <span class="stab ${this.activeTab === tid ? 'on' : ''}" title=${label} @click=${() => this.fire('goder-side-tab-activate', tid)}>
+              <span class="stab dock-tab ${this.activeTab === tid ? 'on' : ''}" title=${label} @click=${() => this.fire('goder-side-tab-activate', tid)}>
                 ${unsafeHTML(def.icon)}
                 <span class="stab-t">${label}</span>
                 <button
@@ -578,28 +520,21 @@ export class GoderSideDock extends GoderPanel {
               </span>
             `;
           })}
-          <span class="stab add" title=${this.t('打开其他面板')} @click=${() => this.toggleMenu()}>${unsafeHTML(icon.plus)}</span>
+          <span class="stab dock-tab add" title=${this.t('打开其他面板')} @click=${() => this.toggleMenu()}>${unsafeHTML(icon.plus)}</span>
         </div>
         ${this.menuOpen
-          ? html`
-              <div class="side-menu" style=${`left:${this.menuLeft}px`}>
-                ${openable.map(
-                  (d) => html`
-                    <div
-                      class="mi"
-                      @click=${() => {
-                        this.menuOpen = false;
-                        this.fire('goder-side-tab-open', { defId: d.id } satisfies SideTabInstance);
-                      }}
-                    >
-                      ${unsafeHTML(d.icon)}
-                      <span>${d.label}</span>
-                      ${tabs.some((t) => t.defId === d.id && !d.multi) ? html`<span class="mitag">${this.t('已打开')}</span>` : nothing}
-                    </div>
-                  `,
-                )}
-              </div>
-            `
+          ? dockMenuTpl(
+              openable.map((d) => ({
+                icon: d.icon,
+                label: d.label,
+                tag: tabs.some((t) => t.defId === d.id && !d.multi) ? this.t('已打开') : undefined,
+                pick: () => {
+                  this.menuOpen = false;
+                  this.fire('goder-side-tab-open', { defId: d.id } satisfies SideTabInstance);
+                },
+              })),
+              `left:${this.menuLeft}px`,
+            )
           : nothing}
       </div>
     `;

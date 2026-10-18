@@ -18,6 +18,8 @@ import { repeat } from 'lit/directives/repeat.js';
 import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
 import { fmtRelative } from '../../util/fmt';
+import { useArmedConfirm, armedBtnCss } from '../../util/armed';
+import { renderSpinner, spinnerCss } from '../../util/spinner';
 import { UNGROUPED, ungroupedAllowed } from '../../core/store/scope';
 import { getNewProject } from '../../registry/registry';
 import type { ProjectRecord } from '../../core/store/persistence';
@@ -35,13 +37,10 @@ export class GoderSessionList extends GoderPanel {
   /** 桌面态新建操作员的内联输入(操作员名 = 主目录下工作区目录名) */
   @state() private newOperator = false;
   @state() private operatorName = '';
-  /** 两段式删除确认:已进入待确认态的会话 id */
-  @state() private armedDelete?: string;
-  /** 待确认态自动退出计时器 */
-  private disarmTimer?: number;
-  /** 两段式删除确认:已进入待确认态的项目 id(与会话各自独立) */
-  @state() private armedProjectDelete?: string;
-  private disarmProjTimer?: number;
+  /** 两段式删除确认(会话 `sess:`/项目 `proj:` 两类 key 共用一个
+   * controller,同屏只保留一个待确认态;3s 自动退出与断开清理见
+   * util/armed) */
+  private armed = useArmedConfirm(this);
 
   /** 相对时间(刚刚/n分钟…)每分钟自刷新 */
   private minuteTick?: number;
@@ -171,16 +170,6 @@ export class GoderSessionList extends GoderPanel {
         color: var(--goder-text);
         background: var(--goder-bg-active);
       }
-      /* 项目删除待确认态:垃圾桶换为红色「确认」文字(与会话删除同语义) */
-      .op button.armed {
-        color: var(--goder-error);
-        font-size: var(--goder-font-size-xs);
-        font-weight: 650;
-        line-height: 1;
-      }
-      .op button.armed:hover {
-        color: var(--goder-error);
-      }
       .op svg {
         width: 12px;
         height: 12px;
@@ -233,18 +222,12 @@ export class GoderSessionList extends GoderPanel {
         background: var(--goder-accent);
         flex: none;
       }
-      /* 运行中:旋转小圆环(SVG 弧线,border 画弧在小尺寸下弧长随角度抖动,
-       * 看起来像"转到一半重新开始") */
-      .sess .spin {
+      /* 运行中:旋转小圆环(util/spinner 共用件;动画在 spinnerCss,
+       * 此处只定尺寸;不用 border 画弧的原因见该文件头注释) */
+      .sess .goder-spin {
         width: 10px;
         height: 10px;
         flex: none;
-        animation: spin 0.9s linear infinite;
-      }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
       }
       .sess .at {
         flex: none;
@@ -274,16 +257,6 @@ export class GoderSessionList extends GoderPanel {
       }
       .sess .del:hover {
         color: var(--goder-error);
-        background: var(--goder-bg-active);
-      }
-      /* 待确认态:垃圾桶换为红色「确认」文字,再次点击才真正删除 */
-      .sess .del.armed {
-        color: var(--goder-error);
-        font-size: var(--goder-font-size-xs);
-        font-weight: 650;
-        line-height: 1;
-      }
-      .sess .del.armed:hover {
         background: var(--goder-bg-active);
       }
       .sess:hover .at {
@@ -329,6 +302,10 @@ export class GoderSessionList extends GoderPanel {
         padding: 4px 6px;
       }
     `,
+    /* 两段式删除待确认态(垃圾桶换红色「确认」文字);放数组末尾以
+     * 压过上方两类名基态规则,详见 util/armed 的 armedBtnCss 注释 */
+    armedBtnCss,
+    spinnerCss,
   ];
 
   connectedCallback(): void {
@@ -339,10 +316,6 @@ export class GoderSessionList extends GoderPanel {
   disconnectedCallback(): void {
     if (this.minuteTick) window.clearInterval(this.minuteTick);
     this.minuteTick = undefined;
-    if (this.disarmTimer) window.clearTimeout(this.disarmTimer);
-    this.disarmTimer = undefined;
-    if (this.disarmProjTimer) window.clearTimeout(this.disarmProjTimer);
-    this.disarmProjTimer = undefined;
     super.disconnectedCallback();
   }
 
@@ -472,8 +445,8 @@ export class GoderSessionList extends GoderPanel {
                     ${unsafeHTML(icon.plus)}
                   </button>
                   <button
-                    class=${this.armedProjectDelete === pid ? 'armed' : ''}
-                    title=${this.armedProjectDelete === pid
+                    class=${this.armed.isArmed(`proj:${pid}`) ? 'armed' : ''}
+                    title=${this.armed.isArmed(`proj:${pid}`)
                       ? operator
                         ? '再次点击确认:删除操作员及其全部会话'
                         : '再次点击确认:删除项目及其全部会话'
@@ -485,7 +458,7 @@ export class GoderSessionList extends GoderPanel {
                       this.onProjectDeleteClick(pid);
                     }}
                   >
-                    ${this.armedProjectDelete === pid ? '确认' : unsafeHTML(icon.trash)}
+                    ${this.armed.isArmed(`proj:${pid}`) ? '确认' : unsafeHTML(icon.trash)}
                   </button>`
               : nothing}
           </span>
@@ -513,7 +486,7 @@ export class GoderSessionList extends GoderPanel {
     const active = s.activeSessionId === sid;
     const running = s.isRunning(sid);
     const unread = !running && s.needsAttention(sid);
-    const armed = this.armedDelete === sid;
+    const armed = this.armed.isArmed(`sess:${sid}`);
 
     return html`
       <div
@@ -522,23 +495,7 @@ export class GoderSessionList extends GoderPanel {
         title=${title}
       >
         <span class="ic">
-          ${running
-            ? html`<svg class="spin" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="var(--goder-border-hover)" stroke-width="2" />
-                <circle
-                  cx="8"
-                  cy="8"
-                  r="6"
-                  fill="none"
-                  stroke="var(--goder-accent)"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-dasharray="16 38"
-                />
-              </svg>`
-            : unread
-              ? html`<span class="dot"></span>`
-              : nothing}
+          ${running ? renderSpinner() : unread ? html`<span class="dot"></span>` : nothing}
         </span>
         <span class="t">${title}</span>
         ${sid.startsWith('draft:')
@@ -558,45 +515,19 @@ export class GoderSessionList extends GoderPanel {
     `;
   }
 
-  // onDeleteClick 两段式行内确认:首击进入待确认态(按钮变红色「确认」,
-  // 3 秒未跟击自动退出),再击才真正归档。不用 window.confirm——wails 桌面
-  // 的 WKWebView 未实现 JS 弹窗宿主委托,confirm() 恒为 false,删除会静默失效。
+  // onDeleteClick 会话删除的两段式行内确认(controller 语义与
+  // window.confirm 不可用的原因见 util/armed 头注释):首击进入待确认态
+  // (按钮变红色「确认」,3 秒未跟击自动退出),再击才真正归档。
   private onDeleteClick(sid: string): void {
-    if (this.armedDelete === sid) {
-      this.disarmDelete();
-      void this.store.archiveSession(sid);
-      return;
-    }
-    this.armedDelete = sid;
-    if (this.disarmTimer) window.clearTimeout(this.disarmTimer);
-    this.disarmTimer = window.setTimeout(() => this.disarmDelete(), 3000);
-  }
-
-  private disarmDelete(): void {
-    if (this.disarmTimer) window.clearTimeout(this.disarmTimer);
-    this.disarmTimer = undefined;
-    this.armedDelete = undefined;
+    if (this.armed.click(`sess:${sid}`)) void this.store.archiveSession(sid);
   }
 
   // onProjectDeleteClick 项目删除的两段式行内确认(与会话删除同模式):
   // 删除会连带归档该项目全部会话,误触代价更高,故按钮 title 点名后果;
-  // 首击只进入待确认态,再击才真正执行。同屏同时只保留一个待确认态。
+  // 首击只进入待确认态,再击才真正执行。同屏同时只保留一个待确认态
+  // (controller 布防新 key 自动解除旧 key,含会话删除的布防)。
   private onProjectDeleteClick(pid: string): void {
-    if (this.armedProjectDelete === pid) {
-      this.disarmProjectDelete();
-      this.store.deleteProject(pid, true);
-      return;
-    }
-    this.disarmDelete();
-    this.disarmProjectDelete();
-    this.armedProjectDelete = pid;
-    this.disarmProjTimer = window.setTimeout(() => this.disarmProjectDelete(), 3000);
-  }
-
-  private disarmProjectDelete(): void {
-    if (this.disarmProjTimer) window.clearTimeout(this.disarmProjTimer);
-    this.disarmProjTimer = undefined;
-    this.armedProjectDelete = undefined;
+    if (this.armed.click(`proj:${pid}`)) this.store.deleteProject(pid, true);
   }
 
   private startNewProject(): void {

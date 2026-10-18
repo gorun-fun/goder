@@ -14,12 +14,12 @@ import (
 // 注:defaultModel 已移除(默认模型是 gh 侧概念,goder 按会话记录继承,
 // 不落配置);旧 config.json 里的同名字段读取时被忽略、下次保存自然清除。
 type Config struct {
-	Scope      string `json:"scope"`
-	ServerMode string `json:"serverMode"` // managed | remote
-	RemoteURL  string `json:"remoteUrl"`
+	Scope       string `json:"scope"`
+	ServerMode  string `json:"serverMode"` // managed | remote
+	RemoteURL   string `json:"remoteUrl"`
 	RemoteToken string `json:"remoteToken"`
-	GhBinary   string `json:"ghBinary"`
-	ServerAddr string `json:"serverAddr"`
+	GhBinary    string `json:"ghBinary"`
+	ServerAddr  string `json:"serverAddr"`
 }
 
 // Default 默认配置。

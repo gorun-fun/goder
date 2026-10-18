@@ -293,11 +293,14 @@ func scrollExpr(direction string, amount float64, refSel string) string {
 }
 
 // keyParams 具名按键 → {key, code, keyCode}(合成 KeyboardEvent 用)。
-var keyParams = map[string]struct{ key, code string; kc int }{
+var keyParams = map[string]struct {
+	key, code string
+	kc        int
+}{
 	"enter": {"Enter", "Enter", 13}, "return": {"Enter", "Enter", 13},
 	"tab": {"Tab", "Tab", 9}, "escape": {"Escape", "Escape", 27}, "esc": {"Escape", "Escape", 27},
 	"backspace": {"Backspace", "Backspace", 8}, "delete": {"Delete", "Delete", 46},
-	"space": {" ", "Space", 32},
+	"space":   {" ", "Space", 32},
 	"arrowup": {"ArrowUp", "ArrowUp", 38}, "arrowdown": {"ArrowDown", "ArrowDown", 40},
 	"arrowleft": {"ArrowLeft", "ArrowLeft", 37}, "arrowright": {"ArrowRight", "ArrowRight", 39},
 	"up": {"ArrowUp", "ArrowUp", 38}, "down": {"ArrowDown", "ArrowDown", 40},

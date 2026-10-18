@@ -60,9 +60,9 @@ func main() {
 	ghBin := env("GODER_BIN", "gh")
 
 	opts := gateway.Options{
-		APIPrefix: "/goder-api",
-		StaticDir: staticDir,
-		CORS:      envBool("GODER_CORS", true),
+		APIPrefix:  "/goder-api",
+		StaticDir:  staticDir,
+		CORS:       envBool("GODER_CORS", true),
 		AdminToken: env("GODER_ADMIN_TOKEN", ""),
 		WebhookURL: env("GODER_WEBHOOK_URL", ""),
 		// 事件回调 HMAC-SHA256 签名密钥(公网/跨信任域回调必配;接收方
@@ -97,13 +97,13 @@ func main() {
 			log.Printf("身份模式: single(自托管单进程,数据 %s)", dataDir)
 		}
 	case "header":
+		uidHeader := env("GODER_UID_HEADER", "X-GRF-UID")
 		opts.Resolver = identity.NewHeader(identity.HeaderConfig{
-			UIDHeader:  env("GODER_UID_HEADER", "X-GRF-UID"),
+			UIDHeader:  uidHeader,
 			NameHeader: env("GODER_NAME_HEADER", "X-GRF-Name"),
 		})
 		opts.Manager = managerFromEnv(ghBin, dataDir)
-		log.Printf("身份模式: header(uid 头 %s;仅接受可信上级反代的流量)",
-			env("GODER_UID_HEADER", "X-GRF-UID"))
+		log.Printf("身份模式: header(uid 头 %s;仅接受可信上级反代的流量)", uidHeader)
 	case "sso":
 		cfg := identity.SSOConfig{
 			Endpoint:     env("SSO_ENDPOINT", ""),
@@ -130,7 +130,7 @@ func main() {
 
 	gw := gateway.New(opts)
 	server := &http.Server{
-		Addr: addr,
+		Addr:    addr,
 		Handler: gw.Handler(),
 		// 慢连接防护:头/体读取设限,空闲连接回收;WriteTimeout 不设
 		// —— SSE 长响应会被它掐断(流式聊天的主链路)。
@@ -225,29 +225,36 @@ func env(k, def string) string {
 	return def
 }
 
+// envBool 读布尔环境变量;设了但解析失败记警告并回落默认(不静默吞掉
+// 配置错误,便于部署方发现拼错的值)。
 func envBool(k string, def bool) bool {
 	if v := os.Getenv(k); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
 		}
+		log.Printf("环境变量 %s=%q 不是合法布尔值,回落默认 %v", k, v, def)
 	}
 	return def
 }
 
+// envInt 读整数环境变量;解析失败同样警告并回落默认。
 func envInt(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}
+		log.Printf("环境变量 %s=%q 不是合法整数,回落默认 %d", k, v, def)
 	}
 	return def
 }
 
+// envDur 读时长环境变量(如 30m / 15s);解析失败同样警告并回落默认。
 func envDur(k string, def time.Duration) time.Duration {
 	if v := os.Getenv(k); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}
+		log.Printf("环境变量 %s=%q 不是合法时长,回落默认 %s", k, v, def)
 	}
 	return def
 }

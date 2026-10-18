@@ -9,6 +9,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { theme, controls } from '../../ui/panel';
+import { fireCompact } from '../../ui/fire';
 import { icon } from '../../util/icons';
 import { fmtTokens } from '../../util/fmt';
 import type { AskItem } from '../../core/model/chat-model';
@@ -583,7 +584,7 @@ export class GoderComposer extends LitElement {
                           <div class="queue-item">
                             <span class="badge">排队 ${i + 1}</span>
                             <span class="txt">${m.text || (m.images?.length ? `[${m.images.length} 张图片]` : '')}</span>
-                            <button title="删除这条排队消息" @click=${() => this.fire('queue-remove', { index: i })}>
+                            <button title="删除这条排队消息" @click=${() => fireCompact(this, 'queue-remove', { index: i })}>
                               <svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
                             </button>
                           </div>
@@ -846,7 +847,7 @@ export class GoderComposer extends LitElement {
 
   private pickEffort(v: string): void {
     this.effortPos = null;
-    this.fire('effort-change', v);
+    fireCompact(this, 'effort-change', v);
   }
 
   // 上下文占用圆环 + 悬停详情
@@ -1005,12 +1006,12 @@ export class GoderComposer extends LitElement {
 
   private pickPolicy(v: DraftPolicy): void {
     this.policyPos = null;
-    this.fire('policy-change', v);
+    fireCompact(this, 'policy-change', v);
   }
 
   private pickModel(v: string): void {
     this.modelPos = null;
-    this.fire('model-change', v);
+    fireCompact(this, 'model-change', v);
   }
 
   private hint(): string {
@@ -1150,11 +1151,7 @@ export class GoderComposer extends LitElement {
   }
 
   private stop(): void {
-    this.fire('stop', {});
-  }
-
-  private fire(type: string, detail: unknown): void {
-    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+    fireCompact(this, 'stop', {});
   }
 }
 

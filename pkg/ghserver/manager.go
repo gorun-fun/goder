@@ -140,75 +140,110 @@ func (m *Manager) UserAddr(uid string) string {
 
 // Get 取(必要时懒启动)某用户的进程。错误类型化:ErrTooManyUsers(429,
 // 触发方提示扩容)/ ErrStartCooling(503,崩溃重启冷却中)/ *StartError
-// (503,启动失败明细)/ ErrPortExhausted(503)。
+// (503,启动失败明细,含「启动期间被并发 Stop 摘除」的回滚)/
+// ErrPortExhausted(503)。
 func (m *Manager) Get(uid string) (*Proc, error) {
-	m.mu.Lock()
-	p := m.procs[uid]
-	cooling := false
-	if p != nil {
-		cooling = m.coolingLocked(uid)
-	}
-	m.mu.Unlock()
-	if p != nil {
-		p.Touch()
-		if p.Status().Running {
-			return p, nil
+	for {
+		m.mu.Lock()
+		p := m.procs[uid]
+		cooling := false
+		if p != nil {
+			cooling = m.coolingLocked(uid)
+		} else if m.cfg.MaxUsers > 0 && len(m.procs) >= m.cfg.MaxUsers {
+			// 容量预检放锁内:超限直接拒绝,连 PerUserHome 目录也不建
+			// (权威判定仍在下方注册段,预检与注册之间的空档由注册段兜底)。
+			m.mu.Unlock()
+			return nil, &tooManyUsersError{max: m.cfg.MaxUsers}
 		}
-		// 崩溃/被杀:原地重启(复用已分配端口与目录)。冷却窗口内不再
-		// 触发 Start —— 坏二进制 + 大流量会反复 spawn 打满 CPU;窗口
-		// 过后自动恢复尝试。
-		if cooling {
-			return p, ErrStartCooling
+		m.mu.Unlock()
+		if p != nil {
+			return m.ensureStarted(uid, p, cooling)
 		}
-		st := p.Start()
-		if st.Running {
-			m.clearFail(uid)
-			m.hookStart(uid, st.Addr)
-			return p, nil
-		}
-		m.markFail(uid)
-		m.hookCrash(uid)
-		return p, &StartError{LastError: st.LastError}
-	}
-	m.mu.Lock()
-	if m.cfg.MaxUsers > 0 && len(m.procs) >= m.cfg.MaxUsers {
-		m.mu.Unlock()
-		return nil, &tooManyUsersError{max: m.cfg.MaxUsers}
-	}
-	port, err := m.allocPort()
-	if err != nil {
-		m.mu.Unlock()
-		return nil, err
-	}
-	grfHome, err := m.prepareUserHome(uid)
-	if err != nil {
-		m.mu.Unlock()
-		return nil, err
-	}
-	addr := fmt.Sprintf("%s:%d", m.cfg.AddrBase, port)
-	p = NewProc(ProcConfig{
-		GhBin:        m.cfg.GhBin,
-		Addr:         addr,
-		DataDir:      m.UserDir(uid),
-		ReadyTimeout: m.cfg.ReadyTimeout,
-		GrfHome:      grfHome,
-		ExtraEnv:     m.cfg.ExtraEnv,
-	})
-	m.procs[uid] = p
-	m.ports[port] = uid
-	delete(m.lastFailAt, uid)
-	m.mu.Unlock()
 
-	if err := os.MkdirAll(p.Config().DataDir, 0o755); err != nil {
-		return p, err
+		// 未注册:PerUserHome 的文件 IO(建目录 + 种子复制)在锁外完成,
+		// 持锁路径不碰磁盘;prepareUserHome 幂等(MkdirAll + 目标不存在才
+		// 播种),IO 期间并发 Get 同 uid 重复执行结果一致。
+		grfHome, err := m.prepareUserHome(uid)
+		if err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		if cur := m.procs[uid]; cur != nil {
+			// IO 期间并发 Get 已抢先注册:丢弃本次准备,重走既有项路径。
+			m.mu.Unlock()
+			continue
+		}
+		if m.cfg.MaxUsers > 0 && len(m.procs) >= m.cfg.MaxUsers {
+			m.mu.Unlock()
+			return nil, &tooManyUsersError{max: m.cfg.MaxUsers}
+		}
+		port, err := m.allocPort()
+		if err != nil {
+			m.mu.Unlock()
+			return nil, err
+		}
+		addr := fmt.Sprintf("%s:%d", m.cfg.AddrBase, port)
+		p = NewProc(ProcConfig{
+			GhBin:        m.cfg.GhBin,
+			Addr:         addr,
+			DataDir:      m.UserDir(uid),
+			ReadyTimeout: m.cfg.ReadyTimeout,
+			GrfHome:      grfHome,
+			ExtraEnv:     m.cfg.ExtraEnv,
+		})
+		m.procs[uid] = p
+		m.ports[port] = uid
+		delete(m.lastFailAt, uid)
+		m.mu.Unlock()
+
+		if err := os.MkdirAll(p.Config().DataDir, 0o755); err != nil {
+			return p, err
+		}
+		return m.ensureStarted(uid, p, false)
 	}
-	if st := p.Start(); !st.Running {
+}
+
+// ensureStarted 让已注册的 p 进入运行态:已在跑直接返回;崩溃/未启动则
+// (重)启动,冷却窗口内拒绝(崩溃/被杀的原地重启复用已分配端口与目录;
+// 坏二进制 + 大流量会反复 spawn 打满 CPU,窗口过后自动恢复尝试)。
+// Start 在锁外执行,期间并发 Stop 可能已摘除本项 —— 收尾交给 confirmStart
+// 复查注册表成员资格并处理回滚。
+func (m *Manager) ensureStarted(uid string, p *Proc, cooling bool) (*Proc, error) {
+	p.Touch()
+	if p.Status().Running {
+		return p, nil
+	}
+	if cooling {
+		return p, ErrStartCooling
+	}
+	st := p.Start()
+	if !st.Running {
 		m.markFail(uid)
 		m.hookCrash(uid)
 		return p, &StartError{LastError: st.LastError}
 	}
-	m.hookStart(uid, addr)
+	return m.confirmStart(uid, p, st)
+}
+
+// confirmStart Get/ensureStarted 在 p.Start() 成功后的收尾:复查注册表
+// 成员资格 —— Start 在锁外执行,期间并发 Stop 可能已摘除本项,脱离注册
+// 表的进程 Manager 不再追踪/回收(会一直跑到自然退出),必须回滚停止并
+// 按 StartError(503 语义)上报,调用方稍后重试即走全新流程。
+func (m *Manager) confirmStart(uid string, p *Proc, st Status) (*Proc, error) {
+	if !m.stillRegistered(uid, p) {
+		p.Stop()
+		return p, &StartError{LastError: "启动完成前进程已被并发 Stop 摘除,已回滚"}
+	}
+	m.clearFail(uid)
+	m.hookStart(uid, st.Addr)
 	return p, nil
+}
+
+// stillRegistered uid 的注册项当前是否仍是 p(Get 启动后的成员资格复查)。
+func (m *Manager) stillRegistered(uid string, p *Proc) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.procs[uid] == p
 }
 
 // coolingLocked 冷却窗口判定(需持 mu)。

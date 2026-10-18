@@ -3,9 +3,11 @@
 // scheme 请求不带长度,直接转发会丢 POST body,见 Go#16036)。桌面壳与
 // 多用户网关共用。
 //
-// 工程化:ReverseProxy 实例按上游(地址+令牌)缓存复用,Transport 全局
-// 共享(连接池按目标主机复用,不再每请求新建);无长度请求体的缓冲加
-// MaxBytesReader 上限,多用户网关上堵住内存 DoS 面。
+// 工程化:ReverseProxy 实例按上游(地址+令牌)在 handler 实例内缓存
+// 复用(缓存随 handler 走,不跨实例共享、不全局常驻 —— 旧实现为包级
+// sync.Map,键含令牌且永不淘汰,多租户网关长期运行会无界增长);
+// Transport 全局共享(连接池按目标主机复用,不再每请求新建);无长度
+// 请求体的缓冲加 MaxBytesReader 上限,多用户网关上堵住内存 DoS 面。
 package ghserver
 
 import (
@@ -43,41 +45,41 @@ var sharedTransport = &http.Transport{
 	DisableCompression: true,
 }
 
-// proxyCache 按「地址|令牌」缓存 ReverseProxy(令牌随进程重启变化,
-// 变化即新键,旧实例自然淘汰;数量与用户进程数同量级)。
-var proxyCache sync.Map // key string → *httputil.ReverseProxy
-
-func proxyFor(up Upstream, prefix string) *httputil.ReverseProxy {
-	key := up.Target.String() + "|" + up.Token
-	if v, ok := proxyCache.Load(key); ok {
-		return v.(*httputil.ReverseProxy)
-	}
-	target := *up.Target // 每上游拷贝,ReverseProxy 只读
-	rp := &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(&target)
-			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, prefix)
-			if pr.Out.URL.Path == "" {
-				pr.Out.URL.Path = "/"
-			}
-			pr.SetXForwarded()
-			if up.Token != "" {
-				// 用户级令牌由网关/桌面壳注入,浏览器侧凭证一律覆盖。
-				pr.Out.Header.Set("Authorization", "Bearer "+up.Token)
-			}
-		},
-		FlushInterval: -1, // SSE 流式即时下发
-		Transport:     sharedTransport,
-	}
-	actual, _ := proxyCache.LoadOrStore(key, rp)
-	return actual.(*httputil.ReverseProxy)
-}
-
-// NewProxy 构建 gh server 反代处理器(代理实例按上游缓存复用)。
+// NewProxy 构建 gh server 反代处理器。代理实例按「地址|令牌」在本
+// handler 内缓存复用(令牌随进程重启变化,变化即新键;数量与上游数
+// 同量级,handler 丢弃时缓存随之释放,不产生全局累积)。
 func NewProxy(opts ProxyOptions) http.Handler {
 	maxBody := opts.MaxBodyBytes
 	if maxBody <= 0 {
 		maxBody = 64 << 20
+	}
+	// proxyCache 本 handler 私有:同一 handler 内的重复上游复用已构建的
+	// ReverseProxy,跨 handler 不共享(见文件头「工程化」说明)。
+	var proxyCache sync.Map // key string(地址|令牌)→ *httputil.ReverseProxy
+	proxyFor := func(up Upstream) *httputil.ReverseProxy {
+		key := up.Target.String() + "|" + up.Token
+		if v, ok := proxyCache.Load(key); ok {
+			return v.(*httputil.ReverseProxy)
+		}
+		target := *up.Target // 每上游拷贝,ReverseProxy 只读
+		rp := &httputil.ReverseProxy{
+			Rewrite: func(pr *httputil.ProxyRequest) {
+				pr.SetURL(&target)
+				pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, opts.Prefix)
+				if pr.Out.URL.Path == "" {
+					pr.Out.URL.Path = "/"
+				}
+				pr.SetXForwarded()
+				if up.Token != "" {
+					// 用户级令牌由网关/桌面壳注入,浏览器侧凭证一律覆盖。
+					pr.Out.Header.Set("Authorization", "Bearer "+up.Token)
+				}
+			},
+			FlushInterval: -1, // SSE 流式即时下发
+			Transport:     sharedTransport,
+		}
+		actual, _ := proxyCache.LoadOrStore(key, rp)
+		return actual.(*httputil.ReverseProxy)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// WKWebView 的自定义 scheme 请求不带 Content-Length,wails 合成的
@@ -101,6 +103,6 @@ func NewProxy(opts ProxyOptions) http.Handler {
 			http.Error(w, "bad upstream: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		proxyFor(up, opts.Prefix).ServeHTTP(w, r)
+		proxyFor(up).ServeHTTP(w, r)
 	})
 }

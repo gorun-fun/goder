@@ -149,9 +149,9 @@ func (a termAdapter) KillTerm(id string) error { return a.t.KillTerm(id) }
 // unsupportedBrowser 浏览器管理器未就绪时的兜底(工具调用返回明确错误)。
 type unsupportedBrowser struct{}
 
-func (unsupportedBrowser) Navigate(string) bool                { return false }
-func (unsupportedBrowser) Eval(string) (string, error)         { return "", browser.ErrUnsupported }
-func (unsupportedBrowser) SnapshotPNG() ([]byte, error)        { return nil, browser.ErrUnsupported }
-func (unsupportedBrowser) Back()                               {}
-func (unsupportedBrowser) Forward()                            {}
-func (unsupportedBrowser) Reload()                             {}
+func (unsupportedBrowser) Navigate(string) bool         { return false }
+func (unsupportedBrowser) Eval(string) (string, error)  { return "", browser.ErrUnsupported }
+func (unsupportedBrowser) SnapshotPNG() ([]byte, error) { return nil, browser.ErrUnsupported }
+func (unsupportedBrowser) Back()                        {}
+func (unsupportedBrowser) Forward()                     {}
+func (unsupportedBrowser) Reload()                      {}

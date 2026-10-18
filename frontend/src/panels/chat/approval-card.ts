@@ -3,6 +3,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { theme, controls } from '../../ui/panel';
+import { fireCompact } from '../../ui/fire';
 import { toolArgSummary, toolLabel } from '../../util/fmt';
 import type { ApprovalItem } from '../../core/model/chat-model';
 
@@ -110,7 +111,7 @@ export class GoderApprovalCard extends LitElement {
             ${this.showFeedback ? '收起反馈' : '附拒绝反馈'}
           </button>
           <button class="danger" @click=${this.reject}>拒绝</button>
-          <button class="primary" @click=${() => this.fire('approve', { callId: it.callId, approved: true })}>批准</button>
+          <button class="primary" @click=${() => fireCompact(this, 'approve', { callId: it.callId, approved: true })}>批准</button>
         </div>
       </div>
     `;
@@ -127,14 +128,10 @@ export class GoderApprovalCard extends LitElement {
   private reject(): void {
     if (this.showFeedback) {
       const ta = this.renderRoot.querySelector<HTMLTextAreaElement>('.feedback');
-      this.fire('approve', { callId: this.item.callId, approved: false, feedback: ta?.value ?? '' });
+      fireCompact(this, 'approve', { callId: this.item.callId, approved: false, feedback: ta?.value ?? '' });
     } else {
-      this.fire('approve', { callId: this.item.callId, approved: false, feedback: '' });
+      fireCompact(this, 'approve', { callId: this.item.callId, approved: false, feedback: '' });
     }
-  }
-
-  private fire(type: string, detail: unknown): void {
-    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
   }
 }
 

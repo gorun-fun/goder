@@ -9,6 +9,7 @@ import { css } from 'lit';
 import { state } from 'lit/decorators.js';
 import { GoderPanel, theme, controls } from '../../../ui/panel';
 import { settingsStore } from '../../../core/settings/settings-store';
+import { useArmedConfirm } from '../../../util/armed';
 
 /** 分区组件共享样式:区块标题/表单/分段按钮/提示行 + 平铺卡片
  * (插件/技能)+ 卡片式详情(models/mcp 共用的 .prov 系)。 */
@@ -247,8 +248,6 @@ export class SettingsSectionPanel extends GoderPanel {
   disconnectedCallback(): void {
     this.storeUnsub?.();
     this.storeUnsub = undefined;
-    if (this.deleteTimer) clearTimeout(this.deleteTimer);
-    this.deleteTimer = undefined;
     super.disconnectedCallback();
   }
 
@@ -265,26 +264,24 @@ export class SettingsSectionPanel extends GoderPanel {
       : `正在读取${what}…(长时间无响应请检查上方服务连接)`;
   }
 
-  /** 二次确认删除:首次点击布防(3s 内再点才算确认)。
-   * 返回 true = 已确认,调用方执行删除;false = 刚布防,仅重渲染。 */
-  @state() protected pendingDelete: string | null = null;
-  private deleteTimer?: ReturnType<typeof setTimeout>;
+  /** 二次确认删除(3s 内再点才算确认,断开自动清理,详见 util/armed):
+   * controller 的视图 accessor。子类读 this.pendingDelete 判断当前待删除
+   * 项;赋 null 手动解除(条目改名/安装完成等场景,models/plugins/mcp
+   * 在用)。渲染侧按钮形态是文字钮(.ghost.danger「确认删除」),与
+   * session-list/status-pop 的图标钮不同,不消费 armedBtnCss。 */
+  private armedCtl = useArmedConfirm(this);
 
+  protected get pendingDelete(): string | null {
+    return this.armedCtl.key ?? null;
+  }
+  protected set pendingDelete(v: string | null) {
+    if (v === null) this.armedCtl.disarm();
+    else this.armedCtl.arm(v);
+  }
+
+  /** 首击布防返回 false(仅重渲染),再击返回 true(调用方执行删除)。 */
   protected armDelete(name: string): boolean {
-    if (this.pendingDelete !== name) {
-      this.pendingDelete = name;
-      this.requestUpdate();
-      if (this.deleteTimer) clearTimeout(this.deleteTimer);
-      this.deleteTimer = setTimeout(() => {
-        this.pendingDelete = null;
-        this.requestUpdate();
-      }, 3000);
-      return false;
-    }
-    this.pendingDelete = null;
-    if (this.deleteTimer) clearTimeout(this.deleteTimer);
-    this.deleteTimer = undefined;
-    return true;
+    return this.armedCtl.click(name);
   }
 
   /** 智能体扩展操作(安装/删除)忙碌态与结果提示(插件/技能分区)。 */

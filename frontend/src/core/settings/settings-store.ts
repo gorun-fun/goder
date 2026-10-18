@@ -6,6 +6,11 @@
 //   桌面与浏览器两种形态重启后都能即刻恢复;
 // - 模型:供应商配置读写(gh settings.json;默认模型是 gh 侧概念,goder
 //   不设不用 —— 会话模型按"同项目最近会话 → 全局最近会话"继承)。
+// 桌面形态通道:host/bridge 的 wails 服务(纯 web 态 no-op 回退)。
+// 说明:这是 core 内已知的唯一 host 依赖点——设置页的数据装配层,30+
+// 个服务符号按「桥 vs /v1/agent 远程」双形态分派,整体注入改造收益
+// 不成比例,按装配层定位保留(「core 可整体拷出」对 settings 目录
+// 需连 host/bridge 一起评估;store/scope 等其余 core 已无 host 依赖)。
 import {
   inWails,
   initHostBridge,
@@ -56,92 +61,13 @@ import {
   AgentApiUnsupportedError,
 } from './agent-api';
 
-export type ThemeMode = 'dark' | 'light';
-/** 强调色:预设 key 或 "#rrggbb" 自定义色值 */
-export type AccentValue = string;
-
-/** 强调色预设:text 为深色主题文字变体,textOnLight 为浅色主题文字变体 */
-export const ACCENTS = {
-  blue: { label: '蓝', accent: '#4c8dff', text: '#7faeff', textOnLight: '#2563eb', soft: 'rgba(76, 141, 255, 0.16)' },
-  violet: { label: '紫', accent: '#8d7ce8', text: '#ab9df0', textOnLight: '#6d3fd4', soft: 'rgba(141, 124, 232, 0.18)' },
-  green: { label: '绿', accent: '#3fb96f', text: '#6ed598', textOnLight: '#15803d', soft: 'rgba(63, 185, 111, 0.16)' },
-  orange: { label: '橙', accent: '#e08a3c', text: '#f0a765', textOnLight: '#b45309', soft: 'rgba(224, 138, 60, 0.18)' },
-  rose: { label: '玫红', accent: '#e5637a', text: '#f2899b', textOnLight: '#be3455', soft: 'rgba(229, 99, 122, 0.16)' },
-} as const;
-
-/** 旧版字号档位 → 基准像素(迁移用) */
-const FONT_MODE_PX: Record<string, number> = { compact: 12.5, standard: 13.5, relaxed: 14.5 };
-export const FONT_MIN = 11;
-export const FONT_MAX = 20;
-
-// ---------- 自定义强调色派生(hex → 各主题变体) ----------
-
-function hexToRgb(hex: string): [number, number, number] | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return null;
-  const n = parseInt(m[1], 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function clampByte(v: number): number {
-  return Math.max(0, Math.min(255, Math.round(v)));
-}
-
-/** 向白色(t>0)或黑色(t<0)方向插值 */
-function mixRgb(rgb: [number, number, number], t: number): string {
-  const [r, g, b] = rgb;
-  const to = t > 0 ? 255 : 0;
-  const k = Math.abs(t);
-  const c = (x: number) => clampByte(x + (to - x) * k);
-  return `#${[c(r), c(g), c(b)].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
-}
-
-/** 解析强调色取值:预设 key 或自定义 hex;非法时回退默认蓝。 */
-function resolveAccent(v: string): { accent: string; text: string; textOnLight: string; soft: string } {
-  if (v in ACCENTS) return ACCENTS[v as keyof typeof ACCENTS];
-  const rgb = hexToRgb(v);
-  if (rgb) {
-    return {
-      accent: `#${rgb.map((x) => x.toString(16).padStart(2, '0')).join('')}`,
-      text: mixRgb(rgb, 0.28),
-      textOnLight: mixRgb(rgb, -0.35),
-      soft: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.16)`,
-    };
-  }
-  return ACCENTS.blue;
-}
-
-/** 浅色主题 skin 挂钩取值(深色为默认值,无需覆写) */
-const LIGHT_SKIN: Record<string, string> = {
-  '--goder-skin-bg': '#f4f5f7',
-  '--goder-skin-bg-raise': '#ffffff',
-  '--goder-skin-bg-hover': '#eceef1',
-  '--goder-skin-bg-active': '#e3e6ea',
-  '--goder-skin-border': '#d5d8de',
-  '--goder-skin-border-soft': '#e4e6eb',
-  '--goder-skin-border-hover': '#bfc4cc',
-  '--goder-skin-text': '#26292f',
-  '--goder-skin-text-dim': '#5d636e',
-  '--goder-skin-text-faint': '#9096a0',
-  '--goder-skin-user-bubble': '#e8ecf2',
-  '--goder-skin-shadow': '0 8px 28px rgba(20, 24, 32, 0.12)',
-  '--goder-skin-card': '#ffffff',
-  '--goder-skin-scroll-thumb': '#c6cad2',
-};
-
-/** 字号:基准像素(sm = 基准 -1.5,xs = 基准 -2.5) */
-function fontVars(base: number): [string, string, string] {
-  return [`${base}px`, `${base - 1.5}px`, `${base - 2.5}px`];
-}
-
-export interface Appearance {
-  theme: ThemeMode;
-  accent: AccentValue;
-  fontSize: number;
-}
-
-const DEFAULT_APPEARANCE: Appearance = { theme: 'dark', accent: 'blue', fontSize: 13.5 };
-const LS_KEY = 'goder-appearance-v1';
+// 外观(主题/强调色/字号)的纯计算——预设色表、自定义强调色派生、
+// 浅色皮肤常量与 CSS 变量表生成——已外移 appearance.ts(无 DOM 依赖,
+// node 环境可独立单测);此处 re-export 维持原导出面(设置页分区与
+// 嵌入库在消费),DOM 应用留在下方 applyAppearanceVars。
+export { ACCENTS, FONT_MIN, FONT_MAX } from './appearance';
+export type { Appearance, ThemeMode, AccentValue } from './appearance';
+import { DEFAULT_APPEARANCE, LS_KEY, loadAppearanceLocal, appearanceCssVars, type Appearance } from './appearance';
 
 // ---------- 供应商模型上下文窗口(探测缓存) ----------
 // OpenAI 兼容网关(token-hub / OpenRouter / SiliconFlow / vLLM 等)会在
@@ -180,23 +106,6 @@ function bareModelName(model: string): string {
 }
 
 type Listener = () => void;
-
-function loadAppearanceLocal(): Appearance {
-  const p = kvGet<Partial<Appearance> & { fontSize?: number | string }>(LS_KEY);
-  if (!p) return { ...DEFAULT_APPEARANCE };
-  // 旧档位名(compact/standard/relaxed)迁移为基准像素
-  const fontSize =
-    typeof p.fontSize === 'number'
-      ? p.fontSize
-      : typeof p.fontSize === 'string' && p.fontSize in FONT_MODE_PX
-        ? FONT_MODE_PX[p.fontSize]
-        : DEFAULT_APPEARANCE.fontSize;
-  return {
-    theme: p.theme === 'light' ? 'light' : 'dark',
-    accent: typeof p.accent === 'string' && p.accent ? p.accent : 'blue',
-    fontSize: Math.max(FONT_MIN, Math.min(FONT_MAX, fontSize)),
-  };
-}
 
 class SettingsStore {
   cfg: AppConfigDTO = {
@@ -269,29 +178,15 @@ class SettingsStore {
     this.bump();
   }
 
-  /** 把外观写到 documentElement 的 skin 挂钩上;深色主题 + 默认蓝/标准字号时清除覆写走默认值 */
+  /** 把外观写到 documentElement 的 skin 挂钩上(穿透全部 shadow DOM
+   * 即时生效);变量表由 appearance.ts 的 appearanceCssVars 纯计算,
+   * 这里只做 DOM 应用,null = 清除覆写走 ui/theme.ts 默认值,键序即应用序。 */
   private applyAppearanceVars(): void {
     const root = document.documentElement.style;
-    const a = this.appearance;
-    const setOrClear = (name: string, value: string | null) => {
+    for (const [name, value] of Object.entries(appearanceCssVars(this.appearance))) {
       if (value === null) root.removeProperty(name);
       else root.setProperty(name, value);
-    };
-    // 主题:深色走默认值,浅色整体覆写
-    for (const [k, v] of Object.entries(LIGHT_SKIN)) setOrClear(k, a.theme === 'light' ? v : null);
-    // 强调色:浅色主题文字用加深变体保证对比度
-    const onLight = a.theme === 'light';
-    const accent = resolveAccent(a.accent);
-    const isDefaultBlue = a.accent === 'blue';
-    setOrClear('--goder-skin-accent', isDefaultBlue ? null : accent.accent);
-    setOrClear('--goder-skin-accent-soft', isDefaultBlue ? null : accent.soft);
-    setOrClear('--goder-skin-accent-text', isDefaultBlue && !onLight ? null : onLight ? accent.textOnLight : accent.text);
-    // 字号:13.5px 基准走默认值
-    const [fs, fss, fsxs] = fontVars(a.fontSize);
-    const std = a.fontSize === 13.5;
-    setOrClear('--goder-skin-font-size', std ? null : fs);
-    setOrClear('--goder-skin-font-size-sm', std ? null : fss);
-    setOrClear('--goder-skin-font-size-xs', std ? null : fsxs);
+    }
   }
 
   patchCfg(patch: Partial<AppConfigDTO>): void {
@@ -320,46 +215,89 @@ class SettingsStore {
     });
   }
 
-  // ---------- 模型供应商(gh settings.json;桌面走桥,网页走 agent API) ----------
+  // ---------- 双形态分派收敛(桌面 wails 桥 vs 网页 /v1/agent 远程通道) ----------
 
-  /** 进入模型设置时拉取;force 用于保存后或外部改动后的强制刷新。 */
-  async loadModelCfg(force = false): Promise<void> {
-    if (this.modelCfg && !force) return;
+  /**
+   * 智能体配置读取收敛模板:网页形态走 gh server /v1/agent API(网关按
+   * 用户注入 GRF_HOME,读到的就是登录用户自己的配置;密钥掩码,apiKey
+   * 恒空 + hasKey),成功置 agentApi = 'ok',404(gh 过旧)置
+   * 'unsupported' 供设置页回落引导,其余失败静默——但无论成败都 bump()
+   * 驱动界面进回落态。桌面形态走 wails 桥,失败(null)不置位不 bump。
+   * remote/bridge 适配器各自带归一化(网页 DTO 的可缺省字段补默认),
+   * set 只做置位;每次网页路径调用都会重新探测可用性(与收敛前一致)。
+   */
+  private async loadAgentCfg<T>(remote: () => Promise<T>, bridge: () => Promise<T | null>, set: (v: T) => void): Promise<void> {
     if (!inWails()) {
-      // 网页形态:gh server /v1/agent API(网关按用户注入 GRF_HOME,
-      // 读到的就是登录用户自己的配置;密钥掩码,apiKey 恒空 + hasKey)
       try {
-        const cfg = await fetchModelCfg(this.conn.baseUrl, this.conn.token);
+        const cfg = await remote();
         this.agentApi = 'ok';
-        this.modelCfg = cfg;
+        set(cfg);
       } catch (e) {
         if (e instanceof AgentApiUnsupportedError) this.agentApi = 'unsupported';
       }
       this.bump();
       return;
     }
-    const cfg = await loadModelConfig().catch(() => null);
+    const cfg = await bridge().catch(() => null);
     if (cfg) {
-      this.modelCfg = cfg;
+      set(cfg);
       this.bump();
     }
+  }
+
+  /**
+   * 智能体配置保存收敛模板:remote/bridge 适配器自带各自的落盘
+   * (.catch 静默,失败不阻断后续)与回读刷新(网页形态保存后回读刷新
+   * 掩码标记;桌面形态按分区各自需要回读);桌面桥通道完成后统一做
+   * 「托管且运行中则重启使其生效」(gh server 只在启动时读 settings.json,
+   * 桌面 scope 恒为 'app'),网页分支不做重启判定(与收敛前一致)。
+   */
+  private async saveAgentCfg(remote: () => Promise<void>, bridge: () => Promise<void>): Promise<void> {
+    if (!inWails()) {
+      await remote();
+      return;
+    }
+    await bridge();
+    if (this.cfg.serverMode === 'managed' && this.srv?.running) {
+      await this.applyManaged('app').catch(() => undefined);
+    }
+  }
+
+  /** 在线安装/删除收敛模板:执行桥操作,成功(无错误串)后刷新插件与
+   * 技能列表并按需重启托管服务(见 afterAgentChange);失败原样返回错误。 */
+  private async agentMutate(op: () => Promise<string | null>): Promise<string | null> {
+    const err = await op();
+    if (!err) await this.afterAgentChange();
+    return err;
+  }
+
+  // ---------- 模型供应商(gh settings.json;桌面走桥,网页走 agent API) ----------
+
+  /** 进入模型设置时拉取;force 用于保存后或外部改动后的强制刷新。 */
+  async loadModelCfg(force = false): Promise<void> {
+    if (this.modelCfg && !force) return;
+    await this.loadAgentCfg(
+      () => fetchModelCfg(this.conn.baseUrl, this.conn.token),
+      () => loadModelConfig(),
+      (cfg) => {
+        this.modelCfg = cfg;
+      },
+    );
   }
 
   /** 把当前内存中的供应商配置写回 settings.json。 */
   async saveModelCfg(): Promise<void> {
     if (!this.modelCfg) return;
-    if (!inWails()) {
-      // gh server 每会话现读 settings.json,无需重启;保存后回读刷新掩码标记
-      await putModelCfg(this.conn.baseUrl, this.conn.token, this.modelCfg).catch(() => undefined);
-      await this.loadModelCfg(true);
-      return;
-    }
-    await saveModelConfig(this.modelCfg).catch(() => undefined);
-    // gh server 只在启动时读 settings.json:本地托管且运行中时自动重启使其生效
-    // (桌面 scope 恒为 'app')。
-    if (this.cfg.serverMode === 'managed' && this.srv?.running) {
-      await this.applyManaged('app').catch(() => undefined);
-    }
+    const cfg = this.modelCfg;
+    await this.saveAgentCfg(
+      async () => {
+        // gh server 每会话现读 settings.json,无需重启;保存后回读刷新掩码标记
+        await putModelCfg(this.conn.baseUrl, this.conn.token, cfg).catch(() => undefined);
+        await this.loadModelCfg(true);
+      },
+      // 桌面桥通道不回读(与收敛前一致),仅托管且运行中时重启生效
+      () => saveModelConfig(cfg).catch(() => undefined),
+    );
   }
 
   private patchProviders(fn: (list: ProviderDTO[]) => ProviderDTO[]): void {
@@ -551,37 +489,36 @@ class SettingsStore {
   /** 进入插件/MCP/技能分区时拉取;force 用于保存后的强制刷新。 */
   async loadPluginsCfg(force = false): Promise<void> {
     if (this.pluginsCfg && !force) return;
-    if (!inWails()) {
-      try {
+    await this.loadAgentCfg(
+      async () => {
+        // 网页 DTO 的 command 可缺省,补空数组(界面按数组消费)
         const cfg = await fetchPlugins(this.conn.baseUrl, this.conn.token);
-        this.agentApi = 'ok';
-        this.pluginsCfg = { ...cfg, plugins: (cfg.plugins ?? []).map((p) => ({ ...p, command: p.command ?? [] })) };
-      } catch (e) {
-        if (e instanceof AgentApiUnsupportedError) this.agentApi = 'unsupported';
-      }
-      this.bump();
-      return;
-    }
-    const cfg = await loadPlugins().catch(() => null);
-    if (cfg) {
-      this.pluginsCfg = { ...cfg, plugins: cfg.plugins ?? [] };
-      this.bump();
-    }
+        return { ...cfg, plugins: (cfg.plugins ?? []).map((p) => ({ ...p, command: p.command ?? [] })) };
+      },
+      async () => {
+        const cfg = await loadPlugins();
+        return cfg ? { ...cfg, plugins: cfg.plugins ?? [] } : null;
+      },
+      (cfg) => {
+        this.pluginsCfg = cfg;
+      },
+    );
   }
 
   /** 把插件/MCP 列表写回 settings.json 并按需重启托管 gh server。 */
   async savePluginsCfg(): Promise<void> {
     if (!this.pluginsCfg) return;
-    if (!inWails()) {
-      await putPlugins(this.conn.baseUrl, this.conn.token, this.pluginsCfg).catch(() => undefined);
-      await this.loadPluginsCfg(true);
-      return;
-    }
-    await savePlugins(this.pluginsCfg).catch(() => undefined);
-    await this.loadPluginsCfg(true);
-    if (this.cfg.serverMode === 'managed' && this.srv?.running) {
-      await this.applyManaged('app').catch(() => undefined);
-    }
+    const cfg = this.pluginsCfg;
+    await this.saveAgentCfg(
+      async () => {
+        await putPlugins(this.conn.baseUrl, this.conn.token, cfg).catch(() => undefined);
+        await this.loadPluginsCfg(true);
+      },
+      async () => {
+        await savePlugins(cfg).catch(() => undefined);
+        await this.loadPluginsCfg(true);
+      },
+    );
   }
 
   private patchPlugins(fn: (cfg: PluginsDTO) => PluginsDTO): void {
@@ -673,22 +610,17 @@ class SettingsStore {
 
   async loadSkillsCfg(force = false): Promise<void> {
     if (this.skillsCfg && !force) return;
-    if (!inWails()) {
-      try {
-        const cfg = await fetchSkills(this.conn.baseUrl, this.conn.token);
-        this.agentApi = 'ok';
-        this.skillsCfg = { ...cfg, skills: cfg.skills ?? [] };
-      } catch (e) {
-        if (e instanceof AgentApiUnsupportedError) this.agentApi = 'unsupported';
-      }
-      this.bump();
-      return;
-    }
-    const cfg = await loadSkills().catch(() => null);
-    if (cfg) {
-      this.skillsCfg = { ...cfg, skills: cfg.skills ?? [] };
-      this.bump();
-    }
+    const norm = (cfg: SkillsDTO): SkillsDTO => ({ ...cfg, skills: cfg.skills ?? [] });
+    await this.loadAgentCfg(
+      async () => norm(await fetchSkills(this.conn.baseUrl, this.conn.token)),
+      async () => {
+        const cfg = await loadSkills();
+        return cfg ? norm(cfg) : null;
+      },
+      (cfg) => {
+        this.skillsCfg = cfg;
+      },
+    );
   }
 
   readSkill(name: string): Promise<string | null> {
@@ -730,15 +662,11 @@ class SettingsStore {
   }
 
   async installPlugin(name: string): Promise<string | null> {
-    const err = await pluginInstall(name);
-    if (!err) await this.afterAgentChange();
-    return err;
+    return this.agentMutate(() => pluginInstall(name));
   }
 
   async removePluginOnline(name: string): Promise<string | null> {
-    const err = await pluginDelete(name);
-    if (!err) await this.afterAgentChange();
-    return err;
+    return this.agentMutate(() => pluginDelete(name));
   }
 
   async loadRemoteSkills(): Promise<void> {
@@ -748,15 +676,11 @@ class SettingsStore {
   }
 
   async installSkillFile(file: string): Promise<string | null> {
-    const err = await skillInstall(file);
-    if (!err) await this.afterAgentChange();
-    return err;
+    return this.agentMutate(() => skillInstall(file));
   }
 
   async installSkillFromURL(name: string, url: string): Promise<string | null> {
-    const err = await skillInstallFromURL(name, url);
-    if (!err) await this.afterAgentChange();
-    return err;
+    return this.agentMutate(() => skillInstallFromURL(name, url));
   }
 
   /** 启用/禁用技能(SKILL.md ↔ SKILL.md.disabled);返回错误信息或 null。 */

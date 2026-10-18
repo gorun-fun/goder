@@ -7,6 +7,7 @@ import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme, controls } from '../../ui/panel';
+import { markdownCss } from '../../ui/markdown-css';
 import type { PropertyValues } from 'lit';
 import { icon } from '../../util/icons';
 import { renderMarkdown } from '../../util/markdown';
@@ -241,7 +242,7 @@ export class GoderFileView extends GoderPanel {
         border-radius: var(--goder-radius-sm);
         border: 1px solid var(--goder-border-soft);
       }
-      /* markdown 渲染预览 */
+      /* markdown 渲染预览(容器;元素样式在下方 markdownCss) */
       .md {
         flex: 1;
         min-height: 0;
@@ -251,99 +252,6 @@ export class GoderFileView extends GoderPanel {
         overflow-wrap: anywhere;
         word-break: break-word;
       }
-      .md > :first-child {
-        margin-top: 0;
-      }
-      .md > :last-child {
-        margin-bottom: 0;
-      }
-      .md .md-p {
-        margin: 0 0 8px;
-      }
-      .md .md-h {
-        margin: 14px 0 7px;
-        font-weight: 650;
-        line-height: 1.4;
-      }
-      .md h1.md-h,
-      .md h2.md-h {
-        font-size: 16px;
-        border-bottom: 1px solid var(--goder-border-soft);
-        padding-bottom: 4px;
-      }
-      .md h3.md-h {
-        font-size: 14.5px;
-      }
-      .md h4.md-h,
-      .md h5.md-h,
-      .md h6.md-h {
-        font-size: 13.5px;
-      }
-      .md code {
-        font-family: var(--goder-mono);
-        font-size: 0.9em;
-        background: var(--goder-bg-hover);
-        border-radius: 4px;
-        padding: 1px 5px;
-      }
-      .md pre.md-code {
-        background: var(--goder-bg-raise);
-        border: 1px solid var(--goder-border-soft);
-        border-radius: var(--goder-radius-sm);
-        padding: 10px 12px;
-        overflow: auto;
-        margin: 0 0 8px;
-      }
-      .md pre.md-code code {
-        background: none;
-        padding: 0;
-        font-size: var(--goder-font-size-xs);
-        line-height: 1.6;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-      .md ul,
-      .md ol {
-        margin: 0 0 8px;
-        padding-left: 22px;
-      }
-      .md li {
-        margin: 2px 0;
-      }
-      .md a {
-        color: var(--goder-accent-text);
-      }
-      .md blockquote.md-quote {
-        margin: 0 0 8px;
-        padding: 2px 12px;
-        border-left: 3px solid var(--goder-border);
-        color: var(--goder-text-dim);
-      }
-      .md hr.md-hr {
-        border: none;
-        border-top: 1px solid var(--goder-border);
-        margin: 12px 0;
-      }
-      .md table {
-        display: block;
-        overflow-x: auto;
-        max-width: 100%;
-        border-collapse: collapse;
-        margin: 0 0 8px;
-        font-size: var(--goder-font-size-sm);
-      }
-      .md th,
-      .md td {
-        border: 1px solid var(--goder-border-soft);
-        padding: 4px 9px;
-        text-align: left;
-        vertical-align: top;
-      }
-      .md th {
-        background: var(--goder-bg-hover);
-        font-weight: 650;
-        white-space: nowrap;
-      }
       .empty {
         padding: 40px 16px;
         text-align: center;
@@ -352,6 +260,23 @@ export class GoderFileView extends GoderPanel {
       }
       .empty.err {
         color: var(--goder-error);
+      }
+    `,
+    /* markdown 输出元素样式与消息正文同款(full 档,单一维护点) */
+    markdownCss('full'),
+    css`
+      /* 与消息正文的两处本地差异:代码块亮色底(消息区为深色底)、
+       * 表格边框更柔和且单元格稍窄;选择器与 markdownCss 同形以保证覆写 */
+      .md pre.md-code {
+        background: var(--goder-bg-raise);
+      }
+      .md pre.md-code code {
+        color: inherit;
+      }
+      .md table.md-table th,
+      .md table.md-table td {
+        border-color: var(--goder-border-soft);
+        padding: 4px 9px;
       }
     `,
   ];

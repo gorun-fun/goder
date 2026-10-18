@@ -61,10 +61,10 @@ type termSession struct {
 	// exited:shell 已退出(退出后缓冲保留,供智能体读最终输出)。
 	exited bool
 	// 输出环形缓冲:buf[start..wseq](绝对字节序号),丢最旧保 cap。
-	bufMu  sync.Mutex
-	buf    []byte
-	start  int64
-	wseq   int64
+	bufMu sync.Mutex
+	buf   []byte
+	start int64
+	wseq  int64
 }
 
 // appendBuf 追加输出到环形缓冲(读循环调用)。

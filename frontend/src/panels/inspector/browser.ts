@@ -15,6 +15,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
+import { renderEmptyHint } from '../../util/empty-hint';
 import { kvGet, kvSet } from '../../core/store/storage';
 import {
   inWails,
@@ -358,17 +359,13 @@ export class GoderBrowser extends GoderPanel {
           ? this.native
             ? html`<!-- 原生 webview 由 Go 侧覆盖在本区域上 -->`
             : html`<iframe src=${this.frameSrc} referrerpolicy="no-referrer"></iframe>`
-          : html`
-              <div class="hint">
-                ${unsafeHTML(icon.globe)}
-                <div>输入网址开始浏览</div>
-                <div class="sub">
-                  ${this.native
-                    ? '页面由系统浏览器内核渲染,登录状态与 Safari 独立且持久保存。'
-                    : '部分站点(如 Google/银行)禁止被内嵌框架显示,属站点安全策略。'}
-                </div>
-              </div>
-            `}
+          : renderEmptyHint(
+              icon.globe,
+              '输入网址开始浏览',
+              this.native
+                ? '页面由系统浏览器内核渲染,登录状态与 Safari 独立且持久保存。'
+                : '部分站点(如 Google/银行)禁止被内嵌框架显示,属站点安全策略。',
+            )}
       </div>
     `;
   }

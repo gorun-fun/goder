@@ -11,7 +11,7 @@ import type {
   TodoItem,
   Usage,
 } from '../api/types';
-import { friendlyError } from '../../util/fmt';
+import { friendlyError } from '../api/errors';
 import { kvGet, kvSet } from '../store/storage';
 
 export type ToolStatus = 'running' | 'done' | 'error' | 'denied';

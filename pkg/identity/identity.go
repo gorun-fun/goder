@@ -17,10 +17,10 @@ import (
 // User 解析出的用户身份。UID 是 gh server 进程与数据目录的隔离键,
 // 必须稳定且对同一用户唯一。
 type User struct {
-	UID    string `json:"uid"`
-	Name   string `json:"name,omitempty"`
-	Email  string `json:"email,omitempty"`
-	Admin  bool   `json:"admin,omitempty"`
+	UID   string `json:"uid"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
+	Admin bool   `json:"admin,omitempty"`
 }
 
 // ErrUnauthorized 请求未通过身份解析(应答 401)。

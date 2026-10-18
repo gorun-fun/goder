@@ -701,7 +701,6 @@ export class GoderAppShell extends GoderPanel {
                         .sidebarToggle=${hasSidebar}
                         .bottomOn=${this.showBottom}
                         .sidebarOn=${this.showSidebar}
-                        .sideTabs=${this.sideTabs}
                         .leftToggle=${hasSessions}
                         .leftOn=${this.showSessions}
                         .leftLights=${this.nativeLights}

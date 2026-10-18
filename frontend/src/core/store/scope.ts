@@ -5,7 +5,7 @@
 // 按 scope 注入;恢复策略(重试判定)经 retry-policy.ts 可注入;轻量持久化
 // 统一走 storage.ts 的可注入键值存储。
 import { GoderApiError, GoderClient } from '../api/client';
-import { friendlyError } from '../../util/fmt';
+import { friendlyError } from '../api/errors';
 import { tFor } from '../i18n';
 import type {
   Conversation,
@@ -39,7 +39,6 @@ import {
 import { emptyIndex, persistence, type AutomationTask, type ProjectsIndex, type ProjectRecord } from './persistence';
 import { operatorSystemPrompt, runnerSystemPrompt, runnerMessage } from './automation';
 import { goderSessionPrompt } from './session-prompt';
-import { desktopHomeDir, ensureHomeDir } from '../../host/bridge';
 import { Emitter } from './emitter';
 import {
   defaultPromptDisabled,
@@ -52,6 +51,28 @@ export { errText } from './send-pipeline';
 import { keyValueStorage, kvGet, kvSet } from './storage';
 
 export const UNGROUPED = '__ungrouped';
+
+// 宿主主目录通道:桌面态经 host/bridge 注入(未选工作区时新会话 workspace
+// 的默认值、自动化操作员的工作区目录创建);纯 web 态保持 no-op 默认。
+// core 不直接 import host/bridge(那边动态引 @wailsio/runtime 且反向依赖
+// core/store/persistence,会成环)——core 可整体拷出独立成包的前提。
+export interface HomeDirProvider {
+  /** 用户主目录;非桌面态返回空串。 */
+  homeDir(): Promise<string>;
+  /** 在用户主目录下确保存在同名子目录,返回绝对路径;非桌面态返回 null。 */
+  ensureHomeDir(name: string): Promise<string | null>;
+}
+
+let homeDirProvider: HomeDirProvider = {
+  homeDir: async () => '',
+  ensureHomeDir: async () => null,
+};
+
+/** 注入宿主主目录通道(桌面入口/桥装载时调用一次)。 */
+export function setHomeDirProvider(p: HomeDirProvider): void {
+  homeDirProvider = p;
+}
+
 
 // 嵌入方配置入口重新导出(嵌入库 embed.ts 与既有调用方的稳定 import 路径)
 export {
@@ -108,6 +129,36 @@ export interface DraftInfo {
   variant?: 'run';
 }
 
+/** 排队待发的一条消息(回合运行中入队,回合结束按 FIFO 自动发出)。 */
+interface QueuedSend {
+  text: string;
+  images?: string[];
+  resumeCallOutputs?: { call_id: string; output: string }[];
+}
+
+/** 每会话运行簿记:八张按 sid 平行索引的表(inflightSends/activeAborts/
+ * streamDoneAt/watchdogHits/stopRequested/stopRetries/sendQueues/
+ * pauseRepaired)收敛为一,清理点集中在 beginRound/endRound/rekeyRun,
+ * 不再靠每个调用处手工对齐多张表。字段语义:
+ * - inflight:当前本地发送流的中断器;非空 = 流在跑(send/submitInputResult
+ *   的 try 期间,beginRound 置入、endRound 清除);
+ * - streamDoneAt:服务器已结束而本地流未收的时刻(看门狗计时基准);
+ * - watchdog:本回合曾被看门狗掐断(非用户取消,收尾走终态对账);
+ * - stopRequested/stopRetries:僵尸停止的有界重发(见 STOP_RETRY_MAX):
+ *   cancel 未必真能停掉回合(首抢时 respId 过时被 404 静默吞掉、服务端
+ *   工具执行阻塞无视取消),syncRunningState 据此有界重发 cancel;
+ * - queue:回合运行中排队的消息;
+ * - pauseRepaired:暂停卡死自动修复已做过(每会话一次,防循环吞掉新暂停)。 */
+interface SessionRun {
+  inflight?: AbortController;
+  streamDoneAt?: number;
+  watchdog?: boolean;
+  stopRequested?: boolean;
+  stopRetries?: number;
+  queue?: QueuedSend[];
+  pauseRepaired?: boolean;
+}
+
 export class GoderScope extends Emitter {
   readonly name: string;
   client: GoderClient;
@@ -137,26 +188,10 @@ export class GoderScope extends Emitter {
   private consoleMax = 800;
 
   private refreshTimer?: ReturnType<typeof setInterval>;
-  private inflightSends = new Set<string>(); // 运行中的 sid
-  private activeAborts = new Map<string, AbortController>(); // sid → 当前流的中断器
-  private streamDoneAt = new Map<string, number>(); // sid → 服务器已结束的时刻
-  private watchdogHits = new Set<string>(); // 看门狗掐断的 sid(非用户取消)
-  /** 用户已点停止、但服务器可能仍在跑的 sid(停止重试机制用)。
-   * cancel 未必真能停掉回合:首抢时 respId 可能过时(回合尚未建立)被
-   * 404 静默吞掉,或服务端工具执行阻塞无视取消(老 gh 的 job_output),
-   * 会话就此进入"僵尸运行"——本地 inflight 已清而服务器 running 恒真,
-   * 后续消息全部排队、界面永远转圈。syncRunningState 据此标记有界重发
-   * cancel,直到服务器归假或重试上限。 */
-  private stopRequested = new Set<string>();
-  private stopRetries = new Map<string, number>(); // sid → 已重发停止的次数
-  private static STOP_RETRY_MAX = 12; // ≈1 分钟(每次 sync 间隔约 5s)
-  /** sid → 排队待发消息(回合运行中用户发送的,回合结束自动发出) */
-  private sendQueues = new Map<
-    string,
-    { text: string; images?: string[]; resumeCallOutputs?: { call_id: string; output: string }[] }[]
-  >();
-  /** 已做过"暂停卡死自动修复"的会话(每会话只修一次,防循环吞掉新暂停) */
-  private pauseRepaired = new Set<string>();
+  /** 每会话运行簿记(原八张按 sid 平行索引的表收敛为一,见 SessionRun)。 */
+  private runs = new Map<string, SessionRun>();
+  /** 停止重试上限。≈1 分钟(每次 sync 间隔约 5s)。 */
+  private static STOP_RETRY_MAX = 12;
 
   private authCfg?: AuthConfig;
   /** 连接副本落盘是否连带 token(见 ConnectionConfig.persistToken)。 */
@@ -187,7 +222,7 @@ export class GoderScope extends Emitter {
     });
     // 桌面态的用户主目录:未选工作区时新会话 workspace 的默认值
     // (纯 web 态为空串,workspace 保持 undefined 走服务端默认)。
-    void desktopHomeDir().then((h) => (this.homeDir = h));
+    void homeDirProvider.homeDir().then((h) => (this.homeDir = h));
   }
 
   /** 发送/恢复管线(send-pipeline.ts;send/submitInputResult 经它出站)。 */
@@ -195,6 +230,89 @@ export class GoderScope extends Emitter {
 
   /** 用户主目录(桌面态;未选工作区时新会话的默认 workspace)。 */
   private homeDir = '';
+
+  // ---------- 运行簿记原语(SessionRun 的唯一进出通道) ----------
+
+  private runOf(sid: string): SessionRun | undefined {
+    return this.runs.get(sid);
+  }
+
+  private ensureRun(sid: string): SessionRun {
+    let r = this.runs.get(sid);
+    if (!r) {
+      r = {};
+      this.runs.set(sid, r);
+    }
+    return r;
+  }
+
+  /** 全字段空即摘除条目(簿记表不随会话数泄漏)。 */
+  private pruneRun(sid: string): void {
+    const r = this.runs.get(sid);
+    if (
+      r &&
+      r.inflight === undefined &&
+      r.streamDoneAt === undefined &&
+      r.watchdog === undefined &&
+      r.stopRequested === undefined &&
+      r.stopRetries === undefined &&
+      !r.queue?.length &&
+      r.pauseRepaired === undefined
+    ) {
+      this.runs.delete(sid);
+    }
+  }
+
+  /** 本地发送流是否在跑(sid 上有活跃的 AbortController)。 */
+  private isInflight(sid: string): boolean {
+    return this.runs.get(sid)?.inflight !== undefined;
+  }
+
+  /** 任一会话有本地流在跑(tick 空闲判据)。 */
+  private anyInflight(): boolean {
+    for (const r of this.runs.values()) if (r.inflight) return true;
+    return false;
+  }
+
+  /** 回合开始:置入当前流的中断器并清看门狗计时基准。 */
+  private beginRound(sid: string, ac: AbortController): void {
+    const r = this.ensureRun(sid);
+    r.inflight = ac;
+    r.streamDoneAt = undefined;
+  }
+
+  /** 回合收尾:清除流标记/看门狗计时/掐断标记并按需摘条目。草稿转正的
+   * 双 sid(旧草稿 id + realSid)各调一次,与原双清语义一致。 */
+  private endRound(sid: string): void {
+    const r = this.runs.get(sid);
+    if (!r) return;
+    r.inflight = undefined;
+    r.streamDoneAt = undefined;
+    r.watchdog = undefined;
+    this.pruneRun(sid);
+  }
+
+  /** 簿记整体改键(草稿转正):排队消息、停止标记等跟随会话 id 迁移,
+   * 进行中流的收尾由 endRound(新 id) 完成。 */
+  private rekeyRun(from: string, to: string): void {
+    const r = this.runs.get(from);
+    if (r) {
+      this.runs.set(to, r);
+      this.runs.delete(from);
+    }
+  }
+
+  /** 连接副本落盘(baseUrl/token + 模型/思考强度;是否连带 token 由
+   * persistToken 决定)。setModel/setReasoningEffort/setConnection/
+   * inheritProjectPrefs/selectSession 共用的单一落点。 */
+  private persistConnSnapshot(): void {
+    saveConnLocal(this.name, this.persistToken, {
+      baseUrl: this.client.config.baseUrl,
+      token: this.client.config.token,
+      ...(this.model ? { model: this.model } : {}),
+      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
+    });
+  }
 
   /** 设置新会话策略偏好并持久化(localStorage,双形态通用)。 */
   setDraftPolicy(p: string): void {
@@ -214,12 +332,7 @@ export class GoderScope extends Emitter {
    * 不动连接状态。 */
   setModel(m: string): void {
     this.model = fullModelName(m);
-    saveConnLocal(this.name, this.persistToken, {
-      baseUrl: this.client.config.baseUrl,
-      token: this.client.config.token,
-      ...(this.model ? { model: this.model } : {}),
-      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
-    });
+    this.persistConnSnapshot();
     this.notify();
   }
 
@@ -228,12 +341,7 @@ export class GoderScope extends Emitter {
   reasoningEffort?: string;
   setReasoningEffort(e: string): void {
     this.reasoningEffort = e || undefined;
-    saveConnLocal(this.name, this.persistToken, {
-      baseUrl: this.client.config.baseUrl,
-      token: this.client.config.token,
-      ...(this.model ? { model: this.model } : {}),
-      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
-    });
+    this.persistConnSnapshot();
     this.notify();
   }
 
@@ -280,7 +388,8 @@ export class GoderScope extends Emitter {
   // tick 周期对齐:空闲时同步会话列表;运行中时探测服务器终态,
   // 发现流挂死(server 已结束而本地仍在等)则主动中断触发自愈。
   private async tick(): Promise<void> {
-    for (const sid of [...this.inflightSends]) {
+    for (const [sid, r] of [...this.runs]) {
+      if (!r.inflight) continue;
       try {
         const detail = await this.client.getConversation(sid);
         // 运行中也让统计(速度/缓存命中率/上下文占用)跟着服务器走,
@@ -295,21 +404,21 @@ export class GoderScope extends Emitter {
         }
         if (!detail.running) {
           // 服务器已结束:给流一点收尾时间,仍挂着就掐断走对账。
-          const since = Date.now() - (this.streamDoneAt.get(sid) ?? 0);
-          if (!this.streamDoneAt.has(sid)) this.streamDoneAt.set(sid, Date.now());
-          else if (since > 4000 && this.activeAborts.has(sid)) {
+          const since = Date.now() - (r.streamDoneAt ?? 0);
+          if (r.streamDoneAt === undefined) r.streamDoneAt = Date.now();
+          else if (since > 4000 && r.inflight) {
             this.log('warn', this.t('检测到事件流挂死,从服务器终态恢复'));
-            this.watchdogHits.add(sid);
-            this.activeAborts.get(sid)?.abort();
+            r.watchdog = true;
+            r.inflight.abort();
           }
         } else {
-          this.streamDoneAt.delete(sid);
+          r.streamDoneAt = undefined;
         }
       } catch {
         /* 探测失败忽略 */
       }
     }
-    if (this.inflightSends.size === 0) this.refreshConversations().catch(() => {});
+    if (!this.anyInflight()) this.refreshConversations().catch(() => {});
   }
 
   stop(): void {
@@ -360,12 +469,7 @@ export class GoderScope extends Emitter {
       this.authCfg = cfg.auth;
       this.authPrompted = false; // 换了鉴权配置后重新允许触发
     }
-    saveConnLocal(this.name, this.persistToken, {
-      baseUrl: this.client.config.baseUrl,
-      token: this.client.config.token,
-      ...(this.model ? { model: this.model } : {}),
-      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
-    });
+    this.persistConnSnapshot();
     this.setConnState('unknown');
     this.notify();
     void this.probeHealth();
@@ -460,7 +564,7 @@ export class GoderScope extends Emitter {
 
     // 运行态里的 lastResponseId 与运行标记跟服务器对齐(跨窗口/重启场景)。
     for (const [sid, rt] of this.runtimes) {
-      if (!this.inflightSends.has(sid) && rt.loaded) {
+      if (!this.isInflight(sid) && rt.loaded) {
         void this.syncRunningState(sid);
       }
     }
@@ -479,27 +583,31 @@ export class GoderScope extends Emitter {
         // 停掉回合(respId 过时被 404 吞掉/服务端工具阻塞无视取消),有界
         // 重发 cancel——否则会话僵尸运行,新消息永远排队转圈。
         // 本地仍有在途流时不动作(取消刚发出、收尾未完成的窗口,保留标记)。
-        if (!this.inflightSends.has(sid) && this.stopRequested.has(sid)) {
+        if (!this.isInflight(sid) && this.runOf(sid)?.stopRequested) {
           this.retryStop(sid, detail.last_response_id);
         }
       } else {
-        this.stopRequested.delete(sid);
-        this.stopRetries.delete(sid);
+        const r = this.runOf(sid);
+        if (r) {
+          r.stopRequested = undefined;
+          r.stopRetries = undefined;
+          this.pruneRun(sid);
+        }
         // 服务器已结束而本地还有排队消息(多窗口结束/挂死自愈后):自动发出。
-        if (!this.inflightSends.has(sid)) this.flushSendQueue(sid);
+        if (!this.isInflight(sid)) this.flushSendQueue(sid);
       }
       // 会话累计统计(速度/缓存命中率)与当前访问策略(composer 圆环/策略按钮用)
       if (detail.stats) rt.stats = detail.stats;
       if (detail.policy) rt.policy = detail.policy;
       // 暂停中(等待交互):物化待答卡片(重开会话/多窗口场景)。
-      if (detail.paused && !this.inflightSends.has(sid)) {
+      if (detail.paused && !this.isInflight(sid)) {
         if (detail.last_response_id) rt.lastResponseId = detail.last_response_id;
         await this.materializePaused(rt, sid);
       }
       if (detail.last_response_id) {
         // 服务器终态比本地新(流中断/多窗口/重启):按快照对账自愈。
         if (
-          !this.inflightSends.has(sid) &&
+          !this.isInflight(sid) &&
           rt.lastResponseId &&
           detail.last_response_id !== rt.lastResponseId
         ) {
@@ -601,7 +709,7 @@ export class GoderScope extends Emitter {
     if (!trimmed) return undefined;
     let path: string;
     try {
-      const dir = await ensureHomeDir(trimmed);
+      const dir = await homeDirProvider.ensureHomeDir(trimmed);
       if (!dir) {
         this.log('warn', this.t('操作员仅桌面态支持(需要在主目录创建工作区)'));
         return undefined;
@@ -818,12 +926,7 @@ export class GoderScope extends Emitter {
     if (latest.model !== undefined) this.model = fullModelName(latest.model);
     // effort 空串 = 旧版本记录未选(现恒有值),视同无可继承回落默认高
     this.reasoningEffort = latest.effort !== undefined ? latest.effort || 'high' : this.reasoningEffort ?? 'high';
-    saveConnLocal(this.name, this.persistToken, {
-      baseUrl: this.client.config.baseUrl,
-      token: this.client.config.token,
-      ...(this.model ? { model: this.model } : {}),
-      ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
-    });
+    this.persistConnSnapshot();
   }
 
   selectSession(sid: string): void {
@@ -842,12 +945,7 @@ export class GoderScope extends Emitter {
     if (rec?.model !== undefined) {
       this.model = fullModelName(rec.model);
       this.reasoningEffort = rec.effort !== undefined ? rec.effort || 'high' : this.reasoningEffort ?? 'high';
-      saveConnLocal(this.name, this.persistToken, {
-        baseUrl: this.client.config.baseUrl,
-        token: this.client.config.token,
-        ...(this.model ? { model: this.model } : {}),
-        ...(this.reasoningEffort ? { reasoningEffort: this.reasoningEffort } : {}),
-      });
+      this.persistConnSnapshot();
     }
     if (!sid.startsWith('draft:')) {
       this.index.lastActiveSessionId = sid; // 记住上次所在会话(启动恢复用)
@@ -982,9 +1080,7 @@ export class GoderScope extends Emitter {
     }
     delete this.index.sessions[sid];
     this.runtimes.delete(sid);
-    this.sendQueues.delete(sid);
-    this.stopRequested.delete(sid);
-    this.stopRetries.delete(sid);
+    this.runs.delete(sid); // 排队消息/停止重试等簿记随会话清理
     forgetUsage(sid); // 前端 usage 累计随会话清理
     if (this.index.lastActiveSessionId === sid) this.index.lastActiveSessionId = undefined;
     if (this.activeSessionId === sid) this.activeSessionId = undefined;
@@ -1001,7 +1097,7 @@ export class GoderScope extends Emitter {
 
   isRunning(sid: string): boolean {
     const rt = this.runtimes.get(sid);
-    return !!rt?.running || this.inflightSends.has(sid);
+    return !!rt?.running || this.isInflight(sid);
   }
 
   /** 当前项目的本地目录路径(桌面态新建项目时选择;web 项目可能没有)。 */
@@ -1073,7 +1169,7 @@ export class GoderScope extends Emitter {
       sid = this.newDraft(this.newSessionProjectId());
     }
     const rt = this.ensureRuntime(sid);
-    if (this.inflightSends.has(sid) || rt.running) {
+    if (this.isInflight(sid) || rt.running) {
       // 回合进行中:入队等本回合结束自动发出,不打断也不丢弃。
       this.enqueueSend(sid, text, images);
       return;
@@ -1093,36 +1189,7 @@ export class GoderScope extends Emitter {
 
     // 编辑重发:本地视图截断到被编辑消息之前,并取服务端历史同位置
     // 前缀随请求下发(grf:history),服务端校验后替换历史。
-    let grfHistory: HistMessage[] | undefined;
-    if (opts?.editOf && !sid.startsWith('draft:')) {
-      const idx = rt.items.findIndex((i) => i.id === opts.editOf);
-      if (idx >= 0) {
-        try {
-          const hist = await this.client.conversationItems(sid);
-          // 被编辑消息 = 视图里第 nth 条用户消息 → 截到服务端历史同一条之前。
-          // "[tool result]" 伪 user 消息不是用户输入(视图侧折叠进工具卡),
-          // 计入对位会让截断点向前漂移、把截断落在工具调用序列中间。
-          let nth = 0;
-          for (let i = 0; i < idx; i++) if (rt.items[i].kind === 'user') nth++;
-          let seen = 0;
-          let cut = hist.length;
-          for (let i = 0; i < hist.length; i++) {
-            if (hist[i].role !== 'user') continue;
-            if (TOOL_RESULT_RE.test(textOfContent(hist[i].content))) continue;
-            if (seen === nth) {
-              cut = i;
-              break;
-            }
-            seen++;
-          }
-          grfHistory = hist.slice(0, cut);
-          rt.items = rt.items.slice(0, idx);
-        } catch {
-          grfHistory = undefined;
-          this.log('warn', this.t('读取会话历史失败,本次编辑重发退化为追加发送'));
-        }
-      }
-    }
+    const grfHistory = await this.editResendHistory(rt, sid, opts?.editOf);
 
     const parts: InputItem = {
       type: 'message',
@@ -1151,73 +1218,20 @@ export class GoderScope extends Emitter {
     let realSid = sid;
     const isDraft = sid.startsWith('draft:');
     const draftInfo = isDraft ? this.drafts.get(sid) : undefined;
-    const projectId = isDraft ? (draftInfo?.projectId ?? UNGROUPED) : this.index.sessions[sid]?.projectId;
-    const draftProject = this.index.projects.find((p) => p.id === projectId);
+    const { grfSession, projectId } = isDraft
+      ? this.buildDraftSession(draftInfo)
+      : { grfSession: undefined as GrfSessionConfig | undefined, projectId: this.index.sessions[sid]?.projectId ?? '' };
     const previous = isDraft ? undefined : rt.lastResponseId ?? this.index.sessions[sid]?.lastResponseId;
-    // 首条消息携带 grf:session:项目默认配置 + 工作区(项目根目录,
-    // 让 agent 的文件/终端工具直接落在项目里;未选工作区时默认用户
-    // 主目录 —— 直接聊天不必先建项目)。
-    // composer 的策略选择(draftPolicy)优先于项目默认。
-    // system_prompt 是 custom 段(身份+工作方式;gh 的内置工具说明段
-    // 恒定追加,不受它影响):操作员项目注入操作员/执行版提示词,
-    // 其余项目 defaults 未自带 system_prompt 时兜底 goder 默认提示词。
-    // defaults 亦可带 default_skill(默认技能全文注入,如 grf-play 的
-    // grf-start)——经下方展开直接透传,无需在此特判。host_context
-    // (宿主环境简报)同理:sessionDefaults 注入后逐字段透传给全部新
-    // 会话(项目 defaults 不含该字段;gh 侧独立拼段,不与 system_prompt
-    // 抢占)。嵌入方另可经 configure 的 sessionDefaults 给「无 defaults
-    // 项目/未分组」会话兜底(展开在项目 defaults 之前,逐字段被其覆盖;
-    // workspace 优先级为项目路径 > homeDir > sessionDefaults.workspace)。
-    let grfSession: GrfSessionConfig | undefined;
-    if (isDraft) {
-      const sd = getSessionDefaults(this.name);
-      grfSession = {
-        ...(sd ?? {}),
-        workspace: draftProject?.path || this.homeDir || sd?.workspace,
-        ...draftProject?.defaults,
-        ...(this.draftPolicy ? { policy: this.draftPolicy } : {}),
-      };
-      if (draftProject?.kind === 'operator') {
-        grfSession.system_prompt =
-          draftInfo?.variant === 'run'
-            ? runnerSystemPrompt()
-            : operatorSystemPrompt(this.automationTasksOf(draftProject.id));
-      } else if (!grfSession.system_prompt?.trim() && !defaultPromptDisabled(this.name)) {
-        // 嵌入方经 configure({ disableDefaultPrompt: true }) 可完全关闭
-        // goder 默认身份(项目 defaults 与 sessionDefaults 均未给
-        // system_prompt 时留空,由 gh 服务端默认接管)。
-        grfSession.system_prompt = goderSessionPrompt();
-      }
-    }
 
     const ac = new AbortController();
-    this.inflightSends.add(sid);
-    this.activeAborts.set(sid, ac);
-    this.streamDoneAt.delete(sid);
+    this.beginRound(sid, ac);
     let migrated = false;
     let roundOk = false;
     const migrate = (newSid: string) => {
       if (migrated || !isDraft) return;
       migrated = true;
       realSid = newSid;
-      this.drafts.delete(sid);
-      this.runtimes.delete(sid);
-      this.runtimes.set(newSid, rt);
-      // 排队消息跟随迁移(入队时用的还是草稿 id 的极端竞态)
-      const queued = this.sendQueues.get(sid);
-      if (queued) {
-        this.sendQueues.set(newSid, queued);
-        this.sendQueues.delete(sid);
-      }
-      this.index.sessions[newSid] = {
-        projectId,
-        title: deriveTitle(trimmed),
-        createdAt: new Date().toISOString(),
-        lastResponseId: undefined,
-      };
-      this.activeSessionId = newSid;
-      this.index.lastActiveSessionId = newSid; // 草稿转正:接管"上次会话"
-      this.persistIndex();
+      this.migrateDraftRun(sid, newSid, rt, deriveTitle(trimmed), projectId);
     };
 
     const onEvent = (ev: SSEEvent) => {
@@ -1291,13 +1305,13 @@ export class GoderScope extends Emitter {
         err instanceof GoderApiError &&
         /paused awaiting interaction/i.test(err.message) &&
         !opts?.resumeCallOutputs &&
-        !this.pauseRepaired.has(realSid)
+        !this.runOf(realSid)?.pauseRepaired
       ) {
         const detail = await this.client.getConversation(realSid).catch(() => null);
         if (detail?.paused) {
           const ids = await this.danglingToolCallIds(realSid);
           if (ids.length) {
-            this.pauseRepaired.add(realSid);
+            this.ensureRun(realSid).pauseRepaired = true;
             this.log('warn', `会话暂停且有 ${ids.length} 个未闭合工具调用,自动补结果解锁`);
             rt.items = rt.items.filter((i) => i.id !== localUserId);
             this.enqueueSend(realSid, '', undefined, [
@@ -1311,9 +1325,7 @@ export class GoderScope extends Emitter {
           }
         }
       }
-      const watchdog = this.watchdogHits.has(realSid) || this.watchdogHits.has(sid);
-      this.watchdogHits.delete(sid);
-      this.watchdogHits.delete(realSid);
+      const watchdog = !!this.runOf(realSid)?.watchdog || !!this.runOf(sid)?.watchdog;
       if (ac.signal.aborted && !watchdog) {
         rt.items.push({ kind: 'status', id: genId('s'), text: '已请求中断…' });
       } else {
@@ -1332,19 +1344,10 @@ export class GoderScope extends Emitter {
         await this.loadHistoryFresh(realSid);
       }
     } finally {
-      this.inflightSends.delete(sid);
-      this.inflightSends.delete(realSid);
-      this.activeAborts.delete(sid);
-      this.activeAborts.delete(realSid);
-      this.streamDoneAt.delete(sid);
-      this.streamDoneAt.delete(realSid);
+      this.endRound(sid);
+      this.endRound(realSid);
       rt.running = false;
-      // 流结束后短暂等待服务器落定,再同步一次状态。
-      setTimeout(() => {
-        void this.syncRunningState(realSid);
-        this.flushSendQueue(realSid);
-        void this.attachScreenshotImages(rt, realSid);
-      }, 300);
+      this.finalizeRound(realSid, rt, { flushAutoDecisions: true });
       this.notify();
       // 回合终态对外事件(成功/失败/中断一律派发,宿主与 AI 测试的标准
       // 等待点:监听它即可等流式收口,无需轮询 store)。
@@ -1352,48 +1355,174 @@ export class GoderScope extends Emitter {
     }
   }
 
+  /** 编辑重发的历史前缀:本地视图截断到被编辑消息之前,并取服务端历史
+   * 同位置前缀(grf:history)随请求下发,服务端校验后替换历史。读历史
+   * 失败时返回 undefined(退化为追加发送)且不截断视图。 */
+  private async editResendHistory(rt: SessionRuntime, sid: string, editOf?: string): Promise<HistMessage[] | undefined> {
+    if (!editOf || sid.startsWith('draft:')) return undefined;
+    const idx = rt.items.findIndex((i) => i.id === editOf);
+    if (idx < 0) return undefined;
+    try {
+      const hist = await this.client.conversationItems(sid);
+      // 被编辑消息 = 视图里第 nth 条用户消息 → 截到服务端历史同一条之前。
+      // "[tool result]" 伪 user 消息不是用户输入(视图侧折叠进工具卡),
+      // 计入对位会让截断点向前漂移、把截断落在工具调用序列中间。
+      let nth = 0;
+      for (let i = 0; i < idx; i++) if (rt.items[i].kind === 'user') nth++;
+      let seen = 0;
+      let cut = hist.length;
+      for (let i = 0; i < hist.length; i++) {
+        if (hist[i].role !== 'user') continue;
+        if (TOOL_RESULT_RE.test(textOfContent(hist[i].content))) continue;
+        if (seen === nth) {
+          cut = i;
+          break;
+        }
+        seen++;
+      }
+      const grfHistory = hist.slice(0, cut);
+      rt.items = rt.items.slice(0, idx);
+      return grfHistory;
+    } catch {
+      this.log('warn', this.t('读取会话历史失败,本次编辑重发退化为追加发送'));
+      return undefined;
+    }
+  }
+
+  /** 草稿会话的首条 grf:session 组装:项目默认配置 + 工作区(项目根
+   * 目录,让 agent 的文件/终端工具直接落在项目里;未选工作区时默认用户
+   * 主目录 —— 直接聊天不必先建项目)。
+   * composer 的策略选择(draftPolicy)优先于项目默认。
+   * system_prompt 是 custom 段(身份+工作方式;gh 的内置工具说明段
+   * 恒定追加,不受它影响):操作员项目注入操作员/执行版提示词,
+   * 其余项目 defaults 未自带 system_prompt 时兜底 goder 默认提示词。
+   * defaults 亦可带 default_skill(默认技能全文注入,如 grf-play 的
+   * grf-start)——经下方展开直接透传,无需在此特判。host_context
+   * (宿主环境简报)同理:sessionDefaults 注入后逐字段透传给全部新
+   * 会话(项目 defaults 不含该字段;gh 侧独立拼段,不与 system_prompt
+   * 抢占)。嵌入方另可经 configure 的 sessionDefaults 给「无 defaults
+   * 项目/未分组」会话兜底(展开在项目 defaults 之前,逐字段被其覆盖;
+   * workspace 优先级为项目路径 > homeDir > sessionDefaults.workspace)。 */
+  private buildDraftSession(draftInfo: DraftInfo | undefined): { grfSession: GrfSessionConfig; projectId: string } {
+    const projectId = draftInfo?.projectId ?? UNGROUPED;
+    const draftProject = this.index.projects.find((p) => p.id === projectId);
+    const sd = getSessionDefaults(this.name);
+    const grfSession: GrfSessionConfig = {
+      ...(sd ?? {}),
+      workspace: draftProject?.path || this.homeDir || sd?.workspace,
+      ...draftProject?.defaults,
+      ...(this.draftPolicy ? { policy: this.draftPolicy } : {}),
+    };
+    if (draftProject?.kind === 'operator') {
+      grfSession.system_prompt =
+        draftInfo?.variant === 'run'
+          ? runnerSystemPrompt()
+          : operatorSystemPrompt(this.automationTasksOf(draftProject.id));
+    } else if (!grfSession.system_prompt?.trim() && !defaultPromptDisabled(this.name)) {
+      // 嵌入方经 configure({ disableDefaultPrompt: true }) 可完全关闭
+      // goder 默认身份(项目 defaults 与 sessionDefaults 均未给
+      // system_prompt 时留空,由 gh 服务端默认接管)。
+      grfSession.system_prompt = goderSessionPrompt();
+    }
+    return { grfSession, projectId };
+  }
+
+  /** 草稿转正:运行时/簿记/索引条目改键到真实会话 id,接管活动会话与
+   * 「上次会话」。排队消息与进行中流的簿记一并迁移(收尾由 endRound
+   * 按新 id 完成)。 */
+  private migrateDraftRun(sid: string, newSid: string, rt: SessionRuntime, title: string, projectId: string): void {
+    this.drafts.delete(sid);
+    this.runtimes.delete(sid);
+    this.runtimes.set(newSid, rt);
+    this.rekeyRun(sid, newSid);
+    this.index.sessions[newSid] = {
+      projectId,
+      title,
+      createdAt: new Date().toISOString(),
+      lastResponseId: undefined,
+    };
+    this.activeSessionId = newSid;
+    this.index.lastActiveSessionId = newSid; // 草稿转正:接管"上次会话"
+    this.persistIndex();
+  }
+
+  /** 回合收口(send/submitInputResult 的 finally 共用):本地流标记清除
+   * 后延迟一拍,等服务器落定再同步终态、续跑排队消息、补截图回填。
+   * flushAutoDecisions:提交已达的嵌入方审批自动决策 —— 两种回合统一
+   * 开启(旧实现只在应答回合收口后提交,发送回合期间产生的自动决策
+   * 会滞留到下一次应答,属遗漏而非语义)。 */
+  private finalizeRound(realSid: string, rt: SessionRuntime, opts?: { flushAutoDecisions?: boolean }): void {
+    setTimeout(() => {
+      void this.syncRunningState(realSid);
+      this.flushSendQueue(realSid);
+      void this.attachScreenshotImages(rt, realSid);
+      if (opts?.flushAutoDecisions) this.tryFlushAutoDecisions(realSid);
+    }, 300);
+  }
+
+  /** 取消回合并采纳链尾(fire-and-forget,cancelActive/retryStop 共用):
+   * 取消成功则被取消回合即服务器链尾,立即采纳(否则重发带旧
+   * previous_response_id 会被 gh 拒绝)。404 = 回合刚好结束,静默;
+   * 其余失败 quiet=true 时也静默(重试路径交由下一次 sync 再试),
+   * 否则告警。 */
+  private cancelAndAdopt(sid: string, respId: string, quiet = false): void {
+    void this.client
+      .cancelResponse(respId)
+      .then((snap) => {
+        if (snap) this.adoptChainTail(sid, respId);
+      })
+      .catch((err: unknown) => {
+        if (quiet || (err instanceof GoderApiError && err.status === 404)) return;
+        this.log('warn', `中断请求失败:${errText(err, this.t)}`);
+      });
+  }
+
   // ---------- 发送队列(回合运行中的输入排队,结束后自动发出) ----------
 
   /** 入队:消息显示在输入框上方的排队区(composer 渲染),回合结束后按 FIFO 发出。 */
-  private enqueueSend(
-    sid: string,
-    text: string,
-    images?: string[],
-    resumeCallOutputs?: { call_id: string; output: string }[],
-  ): void {
+  private enqueueSend(sid: string, text: string, images?: string[], resumeCallOutputs?: QueuedSend['resumeCallOutputs']): void {
     const trimmed = text.trim();
     if (!trimmed && !images?.length && !resumeCallOutputs?.length) return;
-    const q = this.sendQueues.get(sid) ?? [];
-    q.push({ text: trimmed, images, resumeCallOutputs });
-    this.sendQueues.set(sid, q);
-    this.log('info', `会话运行中,消息已排队(第 ${q.length} 条),回合结束后自动发送`);
+    const r = this.ensureRun(sid);
+    (r.queue ??= []).push({ text: trimmed, images, resumeCallOutputs });
+    this.log('info', `会话运行中,消息已排队(第 ${r.queue.length} 条),回合结束后自动发送`);
     this.notify();
   }
 
   /** 排队中的消息(composer 输入框上方排队区用)。 */
   queuedSends(sid: string): { text: string; images?: string[] }[] {
-    return this.sendQueues.get(sid) ?? [];
+    return this.runOf(sid)?.queue ?? [];
   }
 
   /** 删除一条排队消息(发送前用户可撤销);返回被删的消息或 null。 */
   removeQueuedSend(sid: string, index: number): { text: string; images?: string[] } | null {
-    const q = this.sendQueues.get(sid);
+    const q = this.runOf(sid)?.queue;
     if (!q || index < 0 || index >= q.length) return null;
     const [removed] = q.splice(index, 1);
-    if (!q.length) this.sendQueues.delete(sid);
+    if (!q.length) {
+      const r = this.runOf(sid);
+      if (r) {
+        r.queue = undefined;
+        this.pruneRun(sid);
+      }
+    }
     this.notify();
     return removed ?? null;
   }
 
   /** 出队一条并发送;无队列或会话仍在跑时跳过(finally 路径串行调用)。 */
   private flushSendQueue(sid: string): void {
-    const q = this.sendQueues.get(sid);
+    const r = this.runOf(sid);
+    const q = r?.queue;
     if (!q?.length) return;
     if (sid.startsWith('draft:')) return; // 草稿不会是运行态,防御
     const rt = this.runtimes.get(sid);
-    if (!rt || this.inflightSends.has(sid) || rt.running) return;
+    if (!rt || this.isInflight(sid) || rt.running) return;
     const { text, images, resumeCallOutputs } = q.shift()!;
-    if (!q.length) this.sendQueues.delete(sid);
+    if (!q.length) {
+      r!.queue = undefined;
+      this.pruneRun(sid);
+    }
     // 发出时才进消息流视图;sid 指定目标会话,切走后仍按原会话发出
     void this.send(text, images, { sid, resumeCallOutputs });
   }
@@ -1505,7 +1634,7 @@ export class GoderScope extends Emitter {
 
   /** 提交已达的自动决策;回合仍在跑时留待收口后再试。 */
   private tryFlushAutoDecisions(sid: string): void {
-    if (this.inflightSends.has(sid) || this.autoDecisions.size === 0) return;
+    if (this.isInflight(sid) || this.autoDecisions.size === 0) return;
     for (const [callId, d] of [...this.autoDecisions]) {
       if (d.sid !== sid) continue;
       this.autoDecisions.delete(callId);
@@ -1521,14 +1650,12 @@ export class GoderScope extends Emitter {
     const sid = sidOverride ?? this.activeSessionId;
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
-    if (this.inflightSends.has(sid) || rt.running) return;
+    if (this.isInflight(sid) || rt.running) return;
     markRequestAnswered(rt, callId, payload);
     rt.running = true;
     this.notify();
-    this.inflightSends.add(sid);
     const ac = new AbortController();
-    this.activeAborts.set(sid, ac);
-    this.streamDoneAt.delete(sid);
+    this.beginRound(sid, ac);
     const input: InputItem = { type: 'grf:input_result', call_id: callId, ...payload };
     try {
       const final = await this.pipeline.requestWithChainHeal(rt, sid, {
@@ -1554,8 +1681,7 @@ export class GoderScope extends Emitter {
       }
       if (this.activeSessionId === sid) this.markSessionSeen(sid);
     } catch (err) {
-      const watchdog = this.watchdogHits.has(sid);
-      this.watchdogHits.delete(sid);
+      const watchdog = !!this.runOf(sid)?.watchdog;
       const msg = errText(err, this.t);
       if (/no paused tool calls/i.test(msg)) {
         // 回合已不在暂停态(被新输入顶掉/多窗口已应答):静默收尾,
@@ -1570,16 +1696,9 @@ export class GoderScope extends Emitter {
         }
       }
     } finally {
-      this.inflightSends.delete(sid);
-      this.activeAborts.delete(sid);
-      this.streamDoneAt.delete(sid);
+      this.endRound(sid);
       rt.running = false;
-      setTimeout(() => {
-        void this.syncRunningState(sid);
-        this.flushSendQueue(sid);
-        void this.attachScreenshotImages(rt, sid);
-        this.tryFlushAutoDecisions(sid);
-      }, 300);
+      this.finalizeRound(sid, rt, { flushAutoDecisions: true });
       this.notify();
     }
   }
@@ -1592,26 +1711,20 @@ export class GoderScope extends Emitter {
    * 会被一并取消——同会话多窗口本就是竞态使用,且有界重试把窗口压到最小。 */
   private retryStop(sid: string, respId?: string): void {
     if (!respId) return;
-    const n = (this.stopRetries.get(sid) ?? 0) + 1;
-    this.stopRetries.set(sid, n);
-    if (n > GoderScope.STOP_RETRY_MAX) {
-      this.stopRequested.delete(sid);
+    const r = this.ensureRun(sid);
+    r.stopRetries = (r.stopRetries ?? 0) + 1;
+    if (r.stopRetries > GoderScope.STOP_RETRY_MAX) {
+      r.stopRequested = undefined;
+      this.pruneRun(sid);
       this.log(
         'error',
         '停止未生效:服务端仍有阻塞中的工具执行,本会话暂时无法接收新消息;该回合结束后自动恢复(升级 gh 可根治)',
       );
       return;
     }
-    if (n === 1) this.log('warn', this.t('回合未能立即停止,正在重试…'));
-    void this.client
-      .cancelResponse(respId)
-      .then((snap) => {
-        // 取消成功:被取消回合即链尾,立即采纳(与 cancelActive 同由)。
-        if (snap) this.adoptChainTail(sid, respId);
-      })
-      .catch(() => {
-        /* 404 = 回合刚好结束;其余失败交由下一次 sync 再试 */
-      });
+    if (r.stopRetries === 1) this.log('warn', this.t('回合未能立即停止,正在重试…'));
+    // 静默重试:404 = 回合刚好结束,其余失败交由下一次 sync 再试。
+    this.cancelAndAdopt(sid, respId, true);
   }
 
   /** 停止会话的当前回合(默认活动会话;多会话编排可显式指定 sid)。 */
@@ -1620,16 +1733,17 @@ export class GoderScope extends Emitter {
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
     // 记录停止意图并清零重试计数(再次点击停止 = 重新开始有界重试)。
-    this.stopRequested.add(sid);
-    this.stopRetries.delete(sid);
-    if (this.inflightSends.has(sid)) {
+    const run = this.ensureRun(sid);
+    run.stopRequested = true;
+    run.stopRetries = undefined;
+    if (this.isInflight(sid)) {
       // 回合进行中 lastResponseId 还停留在上一回合(当前回合的 id 要等
       // 回合结束才写入),优先用当前流的 response id(curRespId,SSE 事件
       // 随到随记)。
       const respId = rt.curRespId ?? rt.lastResponseId;
       if (!respId) {
         this.log('info', this.t('回合尚未建立,已中断本地事件流'));
-        this.activeAborts.get(sid)?.abort();
+        this.runOf(sid)?.inflight?.abort();
         return;
       }
       // 停止必须立即生效:cancel 端点最长会阻塞 5s 等服务端落终态,若把
@@ -1638,27 +1752,16 @@ export class GoderScope extends Emitter {
       // 终态由 send() 收尾里的 syncRunningState 对账补齐:取消成功则
       // running 归假;取消没送达(仍 running)则停止按钮仍在,可再点一次。
       // 排队消息一并丢弃:停止后再被排队消息顶上新回合,观感上就是停不下来。
-      const queued = this.sendQueues.get(sid)?.length ?? 0;
+      const queued = run.queue?.length ?? 0;
       if (queued > 0) {
-        this.sendQueues.delete(sid);
+        run.queue = undefined;
+        this.pruneRun(sid);
         this.log('info', `已停止本回合(丢弃 ${queued} 条排队消息)`);
       } else {
         this.log('info', this.t('已停止本回合'));
       }
-      void this.client
-        .cancelResponse(respId)
-        .then((snap) => {
-          // 取消成功:被取消回合即成为服务器链尾,立即采纳(否则重发带旧
-          // previous_response_id 会被 gh 拒绝,见 requestWithChainHeal)。
-          if (snap) this.adoptChainTail(sid, respId);
-        })
-        .catch((err: unknown) => {
-          // 404 = 回合已结束;其余失败交由 syncRunningState 对账兜底。
-          if (!(err instanceof GoderApiError && err.status === 404)) {
-            this.log('warn', `中断请求失败:${errText(err, this.t)}`);
-          }
-        });
-      this.activeAborts.get(sid)?.abort();
+      this.cancelAndAdopt(sid, respId);
+      this.runOf(sid)?.inflight?.abort();
       return;
     }
     // 本地没有在跑的流,但 rt.running 可能仍为真(跨窗口/重载/本地流已断,

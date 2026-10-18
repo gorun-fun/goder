@@ -32,6 +32,33 @@ func TestSplitGhDevSuffix(t *testing.T) {
 	}
 }
 
+// TestCompareVersion 直接锁定发布版排序矩阵(语义详见 version.go 头注释)。
+// 其中「正式版 > 同基线预发布」曾是 agentconfig 私有 cmpVersion 的反例:
+// 插件/技能的"最新版本目录"按它择新,发布稳定版后仍会选中 alpha 目录。
+func TestCompareVersion(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int // a 相对 b:1 新 / 0 相等 / -1 旧
+	}{
+		{"0.0.1", "0.0.1", 0},
+		{"0.0.1", "0.0.1-alpha.14", 1},                 // 正式版 > 同基线内测
+		{"0.0.1", "0.0.1-beta.1", 1},                   // 正式版 > 同基线公测
+		{"0.0.1", "0.0.1-rc.1", 1},                     // 正式版 > 同基线候选
+		{"0.0.1-beta.1", "0.0.1-alpha.14", 1},          // 预发布递进
+		{"0.0.1-alpha.14.post11", "0.0.1-alpha.14", 1}, // postN 高于同基线
+		{"0.0.1-alpha.14.post11", "0.0.1-beta.1", -1},  // postN 低于下一预发布
+		{"0.0.1-alpha.14.post11", "0.0.1", -1},         // postN 低于正式版
+		{"0.0.2-alpha.1", "0.0.1", 1},                  // 跨基线
+		{"v1.2.3", "1.2.3", 0},                         // v 前缀 tolerated
+		{"1", "1.0", 0},                                // 缺段补零
+	}
+	for _, c := range cases {
+		if got := compareVersion(c.a, c.b); got != c.want {
+			t.Errorf("compareVersion(%q,%q) = %d,期望 %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 func TestCompareGhVersion(t *testing.T) {
 	cases := []struct {
 		a, b string

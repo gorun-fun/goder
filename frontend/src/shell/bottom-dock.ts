@@ -10,6 +10,8 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme } from '../ui/panel';
 import { icon } from '../util/icons';
 import { registry, type PanelContext, type BottomTabDef } from '../registry/registry';
+import { inWails } from '../host/bridge';
+import { makeSessionAlive, closeDockMenuOnOutside, dockMenuTpl, dockMenuCss, dockTabCss } from './dock-shared';
 
 /** 底栏 tab 实例(每个 tab 一个独立元素,按会话分组常驻保活) */
 interface BottomTabInstance {
@@ -42,6 +44,7 @@ export class GoderBottomDock extends GoderPanel {
 
   static styles = [
     theme,
+    dockTabCss,
     css`
       :host {
         display: flex;
@@ -94,15 +97,10 @@ export class GoderBottomDock extends GoderPanel {
         overflow-x: auto;
         position: relative;
       }
+      /* tab chip 基态(display/字号/配色/关闭钮)在 dockTabCss 的
+       * .dock-tab 标记类;此处只留本栏差异项(padding/不换行) */
       .bt-tab {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
         padding: 3px 9px;
-        font-size: var(--goder-font-size-xs);
-        color: var(--goder-text-dim);
-        border-bottom: 2px solid transparent;
-        cursor: pointer;
         white-space: nowrap;
       }
       .bt-tab:hover {
@@ -117,24 +115,6 @@ export class GoderBottomDock extends GoderPanel {
         width: 11px;
         height: 11px;
         flex: none;
-      }
-      .bt-tab .x {
-        display: none;
-        border: none;
-        background: transparent;
-        padding: 0 0 0 2px;
-        color: var(--goder-text-faint);
-        cursor: pointer;
-      }
-      .bt-tab .x svg {
-        width: 10px;
-        height: 10px;
-      }
-      .bt-tab:hover .x {
-        display: inline-flex;
-      }
-      .bt-tab .x:hover {
-        color: var(--goder-error);
       }
       .bt-ops {
         margin-left: auto;
@@ -161,41 +141,11 @@ export class GoderBottomDock extends GoderPanel {
         width: 12px;
         height: 12px;
       }
-      /* 底栏 "+" 菜单(可用条目 >1 时) */
-      .bt-menu {
-        position: absolute;
-        top: 100%;
+      /* 底栏 "+" 菜单本体在 dockMenuCss(.dock-menu);此处只留本栏差异:
+       * 右对齐操作区、窄于右栏菜单 */
+      .bt-bar .dock-menu {
         right: 6px;
-        z-index: 30;
-        background: var(--goder-bg-raise);
-        border: 1px solid var(--goder-border);
-        border-radius: var(--goder-radius);
-        box-shadow: var(--goder-shadow);
-        padding: 4px;
         min-width: 140px;
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-      }
-      .bt-menu .mi {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 8px;
-        font-size: var(--goder-font-size-xs);
-        color: var(--goder-text-dim);
-        border-radius: var(--goder-radius-sm);
-        cursor: pointer;
-        user-select: none;
-      }
-      .bt-menu .mi:hover {
-        background: var(--goder-bg-hover);
-        color: var(--goder-text);
-      }
-      .bt-menu .mi svg {
-        width: 12px;
-        height: 12px;
-        flex: none;
       }
       .bt-body {
         flex: 1;
@@ -218,6 +168,7 @@ export class GoderBottomDock extends GoderPanel {
         background: transparent;
       }
     `,
+    dockMenuCss,
   ];
 
   connectedCallback(): void {
@@ -251,22 +202,24 @@ export class GoderBottomDock extends GoderPanel {
     this.classList.remove('dragging');
   };
 
+  // "+" 菜单:点击菜单外任意处关闭(dock 共享逻辑,见 dock-shared)
   private onWinPointerDown = (e: PointerEvent): void => {
-    if (!this.menuOpen) return;
-    const path = e.composedPath();
-    const inMenu = [...this.renderRoot.querySelectorAll('.bt-menu')].some((m) => path.includes(m));
-    const inAdd = [...this.renderRoot.querySelectorAll('.bt-ops .op')].some((m) => path.includes(m));
-    if (!inMenu && !inAdd) this.menuOpen = false;
+    closeDockMenuOnOutside(e, this.renderRoot, this.menuOpen, ['.dock-menu', '.bt-ops .op'], () => {
+      this.menuOpen = false;
+    });
   };
 
   private _ctx?: PanelContext;
 
   private refreshCtx(): PanelContext {
+    // desktop 与 side-dock 同口径(inWails):条目的 visible(ctx) 按文档
+    // 写 ctx.desktop 时,底栏在桌面态必须同样可见(曾硬编码 false,导致
+    // 三方底栏条目在桌面态永久不可见)。
     this._ctx = {
       scope: this.scope,
       store: this.store,
       sessionId: this.store?.activeSessionId,
-      desktop: false,
+      desktop: inWails(),
     };
     return this._ctx;
   }
@@ -292,8 +245,7 @@ export class GoderBottomDock extends GoderPanel {
   private prunePools(): void {
     const s = this.store;
     if (!s) return;
-    const alive = (sid: string) =>
-      sid.startsWith('draft:') ? s.drafts.has(sid) : !!s.index.sessions[sid];
+    const alive = makeSessionAlive(s);
     for (const sid of this.tabsBySid.keys()) {
       if (alive(sid) || sid === this.poolSid) continue;
       this.tabsBySid.delete(sid);
@@ -371,7 +323,7 @@ export class GoderBottomDock extends GoderPanel {
             const label = def.titleFor?.(n) ?? `${def.label} ${n}`;
             return html`
               <span
-                class="bt-tab ${this.activeId === t.uid ? 'on' : ''}"
+                class="bt-tab dock-tab ${this.activeId === t.uid ? 'on' : ''}"
                 title=${label}
                 @click=${() => {
                   this.activeId = t.uid;
@@ -399,24 +351,16 @@ export class GoderBottomDock extends GoderPanel {
             <button class="op" title=${this.t('收起底栏')} @click=${() => this.fire('goder-toggle-bottom')}>${unsafeHTML(icon.close)}</button>
           </span>
           ${this.menuOpen
-            ? html`
-                <div class="bt-menu">
-                  ${defs.map(
-                    (d) => html`
-                      <div
-                        class="mi"
-                        @click=${() => {
-                          this.menuOpen = false;
-                          this.addTab(d.id);
-                        }}
-                      >
-                        ${unsafeHTML(d.icon)}
-                        <span>${d.label}</span>
-                      </div>
-                    `,
-                  )}
-                </div>
-              `
+            ? dockMenuTpl(
+                defs.map((d) => ({
+                  icon: d.icon,
+                  label: d.label,
+                  pick: () => {
+                    this.menuOpen = false;
+                    this.addTab(d.id);
+                  },
+                })),
+              )
             : nothing}
         </div>
         <div class="bt-body">

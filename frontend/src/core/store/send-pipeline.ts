@@ -4,7 +4,7 @@
 // 瞬时 400 有限重试)→ sendWithStreamRetry(断流/连接类失败退避重发,
 // 重发前先 tryRecoverFinal 终态对账)。幂等性由 lastResponseId 链保证。
 import { GoderApiError, type GoderClient } from '../api/client';
-import { friendlyError, isToolChoiceUnsupported } from '../../util/fmt';
+import { friendlyError, isToolChoiceUnsupported } from '../api/errors';
 import type { ResponseResource, SendOptions } from '../api/types';
 import { applyResponseSnapshot, type SessionRuntime } from '../model/chat-model';
 import { getRetryPolicy } from './retry-policy';

@@ -6,6 +6,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { theme, controls } from '../../ui/panel';
+import { fireCompact } from '../../ui/fire';
 import type { AskItem } from '../../core/model/chat-model';
 import type { AskQuestion } from '../../core/api/types';
 
@@ -265,7 +266,7 @@ export class GoderAskForm extends LitElement {
             ? html`<span class="hint">每题选择后自动提交</span>`
             : html`<span class="hint">逐题选择/填写后点"提交回答"</span>`}
           ${this.showDismiss
-            ? html`<button class="ghost" @click=${() => this.fire('dismiss', { callId: it.callId })}>取消提问</button>`
+            ? html`<button class="ghost" @click=${() => fireCompact(this, 'dismiss', { callId: it.callId })}>取消提问</button>`
             : nothing}
           ${allOptions && !hasOther
             ? nothing
@@ -418,7 +419,7 @@ export class GoderAskForm extends LitElement {
         answers[q.id] = input?.value ?? '';
       }
     }
-    this.fire('answer', { callId: this.item.callId, answers });
+    fireCompact(this, 'answer', { callId: this.item.callId, answers });
   }
 
   // otherText 读取某题展开的自定义输入框内容(未展开/空白返回空串)。
@@ -428,10 +429,6 @@ export class GoderAskForm extends LitElement {
       `textarea[data-other="${CSS.escape(qid)}"]`,
     );
     return ta?.value.trim() ?? '';
-  }
-
-  private fire(type: string, detail: unknown): void {
-    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
   }
 }
 

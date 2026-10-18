@@ -4,19 +4,25 @@
 // 默认收起为单行,用户手动展开/收起的状态跨会话持久化(localStorage);
 // 非 git 内容(任务列表/目标/自动化任务数)发生变化时自动展开。聊天列
 // 过窄时强制单行(narrow 属性)。todos/goal/自动化任务自行订阅 scope
-// 数据域;git 状态由宿主(chat 面板)轮询后经属性传入。
+// 数据域;git 状态自持轮询(桌面态 8s 一次当前项目仓库,浮窗随
+// configure({statusPop:false}) 裁掉即停止轮询,不寄生在 chat 面板)。
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { GoderPanel, theme, controls } from '../../ui/panel';
 import { icon } from '../../util/icons';
-import type { GitStatusDTO } from '../../host/bridge';
+import { useArmedConfirm, armedBtnCss } from '../../util/armed';
+import { renderSpinner, spinnerCss } from '../../util/spinner';
+import { inWails, gitStatus, type GitStatusDTO } from '../../host/bridge';
 import type { AutomationTask } from '../../core/store/persistence';
 
 @customElement('goder-status-pop')
 export class GoderStatusPop extends GoderPanel {
-  /** 当前项目 git 状态(null = 未取到/不适用) */
-  @property({ type: Object }) git: GitStatusDTO | null = null;
+  /** 当前项目 git 状态(null = 未取到/不适用;桌面态自持轮询) */
+  @state() private git: GitStatusDTO | null = null;
+  /** git 轮询计时器与上次取值的项目目录(cwd 变化即重取) */
+  private gitTimer?: number;
+  private gitCwd = '';
   /** 聊天列过窄:强制单行,避免盖住对话内容 */
   @property({ type: Boolean }) narrow = false;
 
@@ -25,9 +31,9 @@ export class GoderStatusPop extends GoderPanel {
   @state() private open = loadOpen();
   /** 上次观测到的任务/目标快照(会话 id + 内容),用于检测变化触发自动展开 */
   private snap: { sid: string; key: string } | null = null;
-  /** 两段式删除确认:已进入待确认态的任务 id */
-  @state() private armedTaskDelete?: string;
-  private disarmTaskTimer?: number;
+  /** 两段式删除确认:已进入待确认态的任务 id(3s 自动退出与断开清理
+   * 见 util/armed) */
+  private armed = useArmedConfirm(this);
 
   protected willUpdate(): void {
     // 检测非 git 内容(任务列表/目标/自动化任务数)变化:会话切换只重置
@@ -263,15 +269,11 @@ export class GoderStatusPop extends GoderPanel {
         width: 13px;
         height: 13px;
       }
-      .sp-task .spin {
+      /* 运行中:旋转小圆环(util/spinner 共用件;动画在 spinnerCss,
+       * 此处只定尺寸) */
+      .sp-task .goder-spin {
         width: 12px;
         height: 12px;
-        animation: sp-spin 0.9s linear infinite;
-      }
-      @keyframes sp-spin {
-        to {
-          transform: rotate(360deg);
-        }
       }
       .sp-task .sp-tname {
         flex: 1;
@@ -309,12 +311,6 @@ export class GoderStatusPop extends GoderPanel {
         color: var(--goder-error);
         background: var(--goder-bg-active);
       }
-      .sp-task .sp-tdel.armed {
-        color: var(--goder-error);
-        font-size: var(--goder-font-size-xs);
-        font-weight: 650;
-        line-height: 1;
-      }
       .sp-task:hover .sp-towner {
         display: none;
       }
@@ -322,6 +318,10 @@ export class GoderStatusPop extends GoderPanel {
         display: inline-flex;
       }
     `,
+    /* 两段式删除待确认态(垃圾桶换红色「确认」文字),放数组末尾压过
+     * 两类名基态规则,详见 util/armed 的 armedBtnCss 注释 */
+    armedBtnCss,
+    spinnerCss,
   ];
 
   render() {
@@ -446,7 +446,7 @@ export class GoderStatusPop extends GoderPanel {
     const running = !!t.lastRunSid && s.isRunning(t.lastRunSid);
     const opName = s.index.projects.find((p) => p.id === t.operatorId)?.name ?? '';
     const dead = !opName;
-    const armed = this.armedTaskDelete === t.id;
+    const armed = this.armed.isArmed(t.id);
     return html`
       <div
         class="sp-task ${running ? 'running' : ''} ${dead ? 'dead' : ''}"
@@ -456,21 +456,7 @@ export class GoderStatusPop extends GoderPanel {
         @click=${() => !dead && s.runAutomationTask(t.id)}
       >
         <span class="sp-tic">
-          ${running
-            ? html`<svg class="spin" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="var(--goder-border-hover)" stroke-width="2" />
-                <circle
-                  cx="8"
-                  cy="8"
-                  r="6"
-                  fill="none"
-                  stroke="var(--goder-accent)"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-dasharray="16 38"
-                />
-              </svg>`
-            : unsafeHTML(icon.play)}
+          ${running ? renderSpinner() : unsafeHTML(icon.play)}
         </span>
         <span class="sp-tname">${t.name}</span>
         ${dead
@@ -490,28 +476,38 @@ export class GoderStatusPop extends GoderPanel {
     `;
   }
 
-  // onTaskDeleteClick 任务删除的两段式行内确认(与会话/项目删除同模式):
-  // 首击进入待确认态(按钮变红色「确认」,3 秒未跟击自动退出),再击删除。
+  // onTaskDeleteClick 任务删除的两段式行内确认(与会话/项目删除同模式,
+  // controller 细节见 util/armed):首击进入待确认态(按钮变红色「确认」,
+  // 3 秒未跟击自动退出),再击删除。
   private onTaskDeleteClick(id: string): void {
-    if (this.armedTaskDelete === id) {
-      this.disarmTaskDelete();
-      this.store?.deleteAutomationTask(id);
-      return;
-    }
-    this.armedTaskDelete = id;
-    if (this.disarmTaskTimer) window.clearTimeout(this.disarmTaskTimer);
-    this.disarmTaskTimer = window.setTimeout(() => this.disarmTaskDelete(), 3000);
+    if (this.armed.click(id)) this.store?.deleteAutomationTask(id);
   }
 
-  private disarmTaskDelete(): void {
-    if (this.disarmTaskTimer) window.clearTimeout(this.disarmTaskTimer);
-    this.disarmTaskTimer = undefined;
-    this.armedTaskDelete = undefined;
+  // git 区块:桌面态轮询当前项目仓库状态(浮窗自动显示,不依赖任何
+  // 开关;无项目目录时清空)。cwd 变化即重取,非桌面态直接空。
+  private async pollGit(): Promise<void> {
+    if (!inWails()) return;
+    const cwd = this.store?.activeProjectPath();
+    if (!cwd) {
+      this.git = null;
+      return;
+    }
+    try {
+      this.git = await gitStatus(cwd);
+    } catch {
+      this.git = null;
+    }
+  }
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    void this.pollGit();
+    this.gitTimer = window.setInterval(() => void this.pollGit(), 8000);
   }
 
   disconnectedCallback(): void {
-    if (this.disarmTaskTimer) window.clearTimeout(this.disarmTaskTimer);
-    this.disarmTaskTimer = undefined;
+    if (this.gitTimer) window.clearInterval(this.gitTimer);
+    this.gitTimer = undefined;
     super.disconnectedCallback();
   }
 
