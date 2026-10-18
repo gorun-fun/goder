@@ -109,16 +109,20 @@ func (p *Proc) Start() Status {
 	cmd.Stdout = lf
 	cmd.Stderr = lf
 	cmd.SysProcAttr = childProcAttr() // 平台差异见 proc_unix.go / proc_windows.go
-	if p.cfg.GrfHome != "" || len(p.cfg.ExtraEnv) > 0 {
-		// 按用户隔离 gh 配置(settings.json/skills/plugins 解析根)+
-		// 宿主透传的额外环境;只追加覆盖,继承网关进程的其余环境。
-		env := os.Environ()
-		if p.cfg.GrfHome != "" {
-			env = append(env, "GRF_HOME="+p.cfg.GrfHome)
-		}
-		env = append(env, p.cfg.ExtraEnv...)
-		cmd.Env = env
+	// 按用户隔离 gh 配置(settings.json/skills/plugins 解析根)+ 默认值 +
+	// 宿主透传的额外环境;只追加覆盖,继承网关进程的其余环境。追加序里
+	// 同键后者生效(os/exec 语义),宿主可经 ExtraEnv 覆盖默认值。
+	env := os.Environ()
+	if p.cfg.GrfHome != "" {
+		env = append(env, "GRF_HOME="+p.cfg.GrfHome)
 	}
+	// gh 0.0.1-alpha.29+ 默认每请求一行访问日志写 stderr(会灌满上面的
+	// server.log,且 goder 侧反代已有请求视角),托管形态默认关闭;宿主
+	// 可经 GODER_GH_ENV_GRF_SERVER_ACCESS_LOG=on 显式开启。旧版 gh 不认识
+	// 该变量,设了也无害。
+	env = append(env, "GRF_SERVER_ACCESS_LOG=off")
+	env = append(env, p.cfg.ExtraEnv...)
+	cmd.Env = env
 	if err := cmd.Start(); err != nil {
 		lf.Close()
 		p.lastErr = err.Error()

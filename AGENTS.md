@@ -57,7 +57,11 @@ pkg/                     Go 公开层(三方 Go module 可 import 的基座面;
                          桌面壳与 web 网关同一套实现)
   ghserver/              gh server 进程管理:Proc(单进程生命周期:启动/
                          收养/就绪等待/令牌/停止、Unix 管道 + Windows Job
-                         看门狗)+ Manager(uid → 进程注册表:端口池分配、
+                         看门狗;托管 gh 默认注入 GRF_SERVER_ACCESS_LOG=off
+                         ——gh 0.0.1-alpha.29+ 起每请求一行访问日志会灌满
+                         server.log 且与 goder 反代视角重复,宿主可经
+                         ExtraEnv(GODER_GH_ENV_*)覆盖开启)+
+                         Manager(uid → 进程注册表:端口池分配、
                          懒启动、空闲回收、崩溃重启冷却、数量上限、
                          PerUserHome 隔离)+ NewProxy(反代核心:去前缀、
                          注入 Bearer、SSE flush、无 Content-Length body
@@ -113,7 +117,8 @@ cmd/goder-serve/       多用户网关 CLI(GODER_IDENTITY=single|header|sso;
                          运维 env:GODER_ADMIN_TOKEN/GODER_WEBHOOK_URL/
                          GODER_WEBHOOK_SECRET(事件回调 HMAC 签名)/
                          GODER_GH_ENV_<KEY>(透传环境给 gh 子进程,如
-                         GRF_TURN_WEBHOOK_*,回合事件外发)/
+                         GRF_TURN_WEBHOOK_* 回合事件外发、
+                         GRF_SERVER_ACCESS_LOG=on 覆盖托管默认的关闭)/
                          GODER_CORS_ORIGINS/GODER_ACCESS_LOG/GODER_SESSIONS_FILE)
 frontend/src/
   core/    无 UI 核心层:api(ORS 客户端 fetch+SSE+看门狗+非流式超时;

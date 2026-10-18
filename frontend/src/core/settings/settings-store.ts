@@ -739,26 +739,33 @@ class SettingsStore {
 
 export const settingsStore = new SettingsStore();
 
-// 裸模型名补全器(供 scope 继承旧记录用):按当前 gh 供应商表把裸名配成
-// "provider/model" 全名。同名模型挂多个供应商时取首个,属 best-effort。
-setModelNameResolver((bare) => {
-  for (const p of settingsStore.modelCfg?.providers ?? []) {
-    if ((p.models ?? []).includes(bare)) return `${p.name}/${bare}`;
+// 裸模型名补全(与 gh 侧 config.ResolveModel 同语义,0.0.1-alpha.29+ 起
+// 线上真正生效):裸名默认供应商优先,否则恰一家提供时取该家;多家歧义/
+// 零命中返回 undefined —— gh 侧此时透传当前供应商解析,goder 侧按未选
+// 处理(走会话当前模型),不武断取表序首个造成与 gh 择店不一致。
+function bareModelFull(bare: string): string | undefined {
+  const providers = settingsStore.modelCfg?.providers ?? [];
+  const def = settingsStore.modelCfg?.default?.split('/')[0] ?? '';
+  if (def && (providers.find((p) => p.name === def)?.models ?? []).includes(bare)) {
+    return `${def}/${bare}`;
   }
-  return undefined;
-});
+  const hits = providers.filter((p) => (p.models ?? []).includes(bare));
+  return hits.length === 1 ? `${hits[0].name}/${bare}` : undefined;
+}
 
-/** 展示用模型名补全:已是合法全名原样;命中某供应商模型名(含九天式
- * 自带 / 的裸名,如 qwen/qwen3.8-27b)补 "provider/" 前缀;表未加载或
- * 未命中原样返回。仅用于展示,不用于下发 —— 服务端回报的裸名经此对齐
- * 菜单项与详情展示。 */
+// 裸模型名补全器(供 scope 继承旧记录用):见 bareModelFull。
+setModelNameResolver((bare) => bareModelFull(bare));
+
+/** 展示用模型名补全:已是合法全名原样;裸名(含九天式自带 / 的裸名,
+ * 如 qwen/qwen3.8-27b)按 bareModelFull 同语义补 "provider/" 前缀;表
+ * 未加载或歧义/未命中原样返回。仅用于展示,不用于下发 —— 服务端回报的
+ * 裸名经此对齐菜单项与详情展示。 */
 export function displayFullModel(m: string): string {
   if (!m) return m;
   for (const p of settingsStore.modelCfg?.providers ?? []) {
     for (const name of p.models ?? []) {
       if (m === `${p.name}/${name}`) return m; // 已是合法全名
-      if (m === name) return `${p.name}/${m}`; // 裸名(含九天式)补全
     }
   }
-  return m;
+  return bareModelFull(m) ?? m; // 裸名:默认供应商优先 → 恰一家
 }

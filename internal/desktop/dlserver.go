@@ -130,10 +130,29 @@ func latestPluginsDir(ctx context.Context) (*RemoteReleaseDTO, error) {
 		if err != nil || !ok || len(files) == 0 {
 			continue
 		}
-		sort.Strings(files)
-		return &RemoteReleaseDTO{Version: v, Files: files}, nil
+		// CI publish 随产物在 plugins/ 子目录生成 SHA256SUMS 完整性清单
+		// (gh 0.0.1-alpha.29+,selfupdate 按同目录清单校验):不是插件产物,
+		// 不能进可安装列表(技能侧只收 .md 天然不受影响)。
+		filtered := files[:0:0]
+		for _, f := range files {
+			if isDlManifest(f) {
+				continue
+			}
+			filtered = append(filtered, f)
+		}
+		if len(filtered) == 0 {
+			continue
+		}
+		sort.Strings(filtered)
+		return &RemoteReleaseDTO{Version: v, Files: filtered}, nil
 	}
 	return nil, nil
+}
+
+// isDlManifest 下载服务器目录里的完整性清单文件(非产物):sha256sum
+// 标准名 SHA256SUMS,及可能的 .sha256 变体。
+func isDlManifest(name string) bool {
+	return name == "SHA256SUMS" || strings.HasSuffix(name, ".sha256")
 }
 
 // downloadFile 拉取远端文件并原子落盘(临时文件 + rename)。
