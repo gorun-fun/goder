@@ -431,6 +431,43 @@ auth: { loginUrl: '/goder-api/auth/login' } })`。
 | 前端面板嵌入、registry 定制、scope 数据隔离 | **本项目嵌入库** |
 | 独立部署时的完整登录流程(Casdoor sso 模式) | 本项目提供,可选 |
 
+### 宿主管理面(声明式集成,PerUserHome 布局)
+
+`GODER_ADMIN_TOKEN` 开放的 `/admin/*` 除进程运维(statuses/start/stop/
+restart)外,提供一组**声明式端点**——嵌入方(如 openos 类桌面宿主)此前
+只能靠直写 goder 私有文件(serve-data 布局、settings.json 多写者协议、
+wrapper 反抠)实现的能力,现全部经 API 表达意图,目录知识收敛回本项目:
+
+- **托管供应商声明** `PUT /admin/users/{uid}/providers`
+  `{entries:[{name,base_url,api_key,models}], managed:[名字全集],
+  default:"P/m"|"", force_default:bool}`。受管名内的条目保真 upsert、
+  本次未声明的清除、声明外不碰;默认模型按决策链写(force / 现值为空 /
+  现值本就指向受管条目),不打架用户自选;内容不变不写。对从未打开过
+  goder 的用户直接建目录起播(赶在播种与 gh 首启之前)。配套
+  `GET /admin/users/{uid}/providers` 返回 settings.json 指纹与受管名
+  (嵌入方请求路径幂等缓存判定用)。
+- **managed:true 注入(自动)**:声明过受管名的用户,其
+  `GET /v1/agent/models` 代理响应由网关就地注入 `managed:true`(嵌入
+  约定的平台托管只读语义,嵌入方反代层无须再改写响应)。
+- **裸名模型解析** `GET /admin/users/{uid}/resolve-model?name=`
+  → `{status: ok|no_default|not_found|ambiguous|unreadable, resolved?,
+  candidates?}`。择序与 gh `config.ResolveModel` 对齐(默认供应商优先 →
+  恰一家命中;多家歧义如实上报,不武断挑选);错误文案由宿主合成。
+- **宿主 stdio 插件** `POST /admin/plugins/install`
+  `{uid, name, command:[完整 argv]}`(自动发现模式落 wrapper / 显式
+  列表模式 upsert 命令项,保「无 plugins 键 = 自动发现」语义)、
+  `GET /admin/plugins`(清单,**回读原始 uid**——目录名清洗不可逆,
+  存量自愈不再解析 wrapper 反抠)、`DELETE /admin/plugins?uid=&name=`。
+- **会话分组索引**:`GET|PUT /admin/users/{uid}/index`(整存整取)+
+  `POST /admin/users/{uid}/index/sessions`(保真追加一条会话到分组
+  项目,读改写在服务端一把锁内完成);浏览器侧嵌入件用**用户态端点**
+  `GET|PUT <prefix>/index`(身份即鉴权)。字段形状与前端 ProjectsIndex
+  一致,未知键(automation 等)保真——宿主不再需要自建服务端镜像。
+- **用户目录生命周期**:`GET /admin/users`(全部用户目录概览,含未
+  在线)、`DELETE /admin/users/{uid}`(停进程 + 删目录,删号级联用)。
+
+全部端点要求 PerUserHome 布局(共享 `~/.grf` 形态 409 拒绝)。
+
 ## 6. scope:一页多实例
 
 同 scope 的面板共享:当前会话、运行状态、事件流、控制台日志。

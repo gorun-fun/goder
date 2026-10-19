@@ -69,6 +69,11 @@ func (g *Gateway) hAPI(w http.ResponseWriter, r *http.Request) {
 		g.upstreamError(w, err)
 		return
 	}
+	// 平台托管供应商的 managed:true 注入(仅 GET /v1/agent/models;未声明
+	// 受管名或注入失败时回落常规代理,见 adminhost.go)。
+	if g.injectManagedModels(w, r, up, u.UID) {
+		return
+	}
 	ghserver.NewProxy(ghserver.ProxyOptions{
 		Prefix: g.prefix,
 		Resolve: func(*http.Request) (ghserver.Upstream, error) {

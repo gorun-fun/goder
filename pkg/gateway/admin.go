@@ -11,10 +11,13 @@ import (
 // adminMux /admin/* 子路由:<prefix>/admin/statuses(GET)、
 // /admin/start?uid=<>(POST,幂等拉起)、/admin/stop?uid=<>(POST)、
 // /admin/restart?uid=<>(POST,停止后拉起 —— 配置变更/进程僵死时用;
-// 会换端口,数据目录不变)。Bearer AdminToken 鉴权;start/restart 的
-// 启动类错误走 upstreamError 的类型化状态映射。
+// 会换端口,数据目录不变)。宿主管理面(供应商声明/模型解析/插件安装/
+// 会话索引/用户目录生命周期)见 adminhost.go 的 registerHostAdmin。
+// Bearer AdminToken 鉴权;start/restart 的启动类错误走 upstreamError 的
+// 类型化状态映射。
 func (g *Gateway) adminMux() http.Handler {
 	mux := http.NewServeMux()
+	g.registerHostAdmin(mux)
 	mux.HandleFunc("/statuses", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if g.opts.Manager == nil {
@@ -84,7 +87,7 @@ func (g *Gateway) adminMux() http.Handler {
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"endpoints":["statuses","start?uid=","stop?uid=","restart?uid="]}`))
+		_, _ = w.Write([]byte(`{"endpoints":["statuses","start?uid=","stop?uid=","restart?uid=","users","users/{uid}/providers","users/{uid}/resolve-model?name=","plugins/install","plugins","users/{uid}/index","users/{uid}/index/sessions"]}`))
 	})
 	return mux
 }

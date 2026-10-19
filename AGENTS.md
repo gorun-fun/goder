@@ -66,7 +66,11 @@ pkg/                     Go 公开层(三方 Go module 可 import 的基座面;
                          PerUserHome 隔离)+ NewProxy(反代核心:去前缀、
                          注入 Bearer、SSE flush、无 Content-Length body
                          缓冲补齐、请求体上限)+ 类型化错误(errors.go:
-                         容量类 429 / 未就绪与冷却 503)
+                         容量类 429 / 未就绪与冷却 503)+
+                         hostadmin/hostsettings(宿主管理面域逻辑:用户
+                         目录布局所有权、托管供应商声明 upsert、裸名解析、
+                         插件安装、会话索引;openos 类宿主经网关 /admin/*
+                         消费,不再直写 goder 私有文件)
   identity/              用户身份解析 Resolver:single(单用户)/ header
                          (信任上级网关用户头,被集成推荐)/ sso(Casdoor
                          OAuth2 + 本地会话 cookie;SessionStore 可注入,
@@ -76,7 +80,10 @@ pkg/                     Go 公开层(三方 Go module 可 import 的基座面;
                          (身份 → 懒拉起用户进程 → 注入令牌转发)+ auth
                          端点挂载 + CORS(通配/白名单)+ /healthz/ready +
                          /admin/* 管理 API(statuses/start/stop/restart,
-                         Bearer AdminToken)+ webhook + 请求日志
+                         Bearer AdminToken)+ webhook + 请求日志 +
+                         宿主管理面(adminhost.go,声明式集成:供应商声明/
+                         managed 注入/裸名解析/插件安装/会话索引/用户目录
+                         生命周期,见 embedding.md「宿主管理面」)
 internal/                Go 桌面专属层
   appcfg/                桌面配置与项目索引的文件持久化(原子写)
   grfsettings/           gh 配置 settings.json 的读改写事务(互斥串行 +

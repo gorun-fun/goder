@@ -132,6 +132,12 @@ func (g *Gateway) Handler() http.Handler {
 	if g.opts.AdminToken != "" {
 		mux.Handle(g.prefix+"/admin/", http.StripPrefix(g.prefix+"/admin", g.requireAdmin(g.adminMux())))
 	}
+	// 用户态会话索引(身份即鉴权,非 admin;托管模式专属——浏览器侧
+	// goder 嵌入件的 setPersistence 适配器 load/save 落点,详见 adminhost.go)。
+	if g.opts.Manager != nil && g.opts.Resolver != nil {
+		mux.HandleFunc("GET "+g.prefix+"/index", g.hUserIndexGet)
+		mux.HandleFunc("PUT "+g.prefix+"/index", g.hUserIndexPut)
+	}
 	// 其余 API 全部进用户代理。
 	api := http.Handler(http.HandlerFunc(g.hAPI))
 	if len(g.opts.CORSOrigins) > 0 {
