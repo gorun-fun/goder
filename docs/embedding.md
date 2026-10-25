@@ -1,5 +1,7 @@
 # 三方 Web 集成指南
 
+**中文(默认)** · [English](embedding.en.md)
+
 把 grf-harness 的会话列表 / 聊天 / 详情栏 / 事件台嵌入你自己的 web 应用。
 与"裸 grf-harness 可配置开启哪些工具"对齐:界面的四个装配区域
 (左栏导航、右栏 tab、底栏 tab、设置分区)全部经 **registry 注册表**装配 ——
@@ -436,7 +438,11 @@ auth: { loginUrl: '/goder-api/auth/login' } })`。
 `GODER_ADMIN_TOKEN` 开放的 `/admin/*` 除进程运维(statuses/start/stop/
 restart)外,提供一组**声明式端点**——嵌入方(如 openos 类桌面宿主)此前
 只能靠直写 goder 私有文件(serve-data 布局、settings.json 多写者协议、
-wrapper 反抠)实现的能力,现全部经 API 表达意图,目录知识收敛回本项目:
+wrapper 反抠)实现的能力,现全部经 API 表达意图,目录知识收敛回本项目。
+
+> **安全边界**:AdminToken 等同服务器上的代码执行权限(插件安装端点
+> 落的 wrapper 会被 gh 以该用户身份执行)。只在内网/可信网络传递,
+> 用长随机值,不要放进 URL 或前端代码。
 
 - **托管供应商声明** `PUT /admin/users/{uid}/providers`
   `{entries:[{name,base_url,api_key,models}], managed:[名字全集],
@@ -505,7 +511,18 @@ window.addEventListener('goder:session-selected', (e) => {
 
 ## 8. 主题
 
-面板读取 `--goder-*` CSS 变量,在页面 `:root` 覆写:
+设置页「外观 → 主题」提供 **深色 / 浅色 / 跟随系统** 三档(存
+localStorage,`configure()` 首次调用时恢复镜像)。「跟随系统」按以下
+优先级探测落定深浅,探测源变化时界面即时跟进:
+
+1. 宿主页面根元素的显式主题类(`<html>` 或 `<body>` 上的 `dark` /
+   `light` 类,Tailwind 类约定宿主);
+2. openos 宿主(探测到 `window.OpenOS`):深色即 `html.dark` 已被上一条
+   命中,无类即浅色 —— 即跟随 openos 桌面的深浅设置切换;
+3. 浏览器/系统偏好 `prefers-color-scheme`(桌面 wails 与纯 web 形态
+   的跟随通道,系统切换自动跟进)。
+
+宿主仍可直接覆写变量全权接管换肤:
 
 ```css
 :root {

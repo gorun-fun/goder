@@ -30,11 +30,17 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
   人工 E2E 为真实 gh server + 真实模型的手动浏览器验证,playwright-cli
   或浏览器驱动)
 - **发版(打版)规则**:推送 tag 触发 GitLab CI(`.gitlab-ci.yml`,
-  仅 tag 触发)。tag 与产物版本号 = gh(grf-harness)最新发布 tag;
+  仅 tag 触发;发布机地址/用户/目录 DEPLOY_HOST/DEPLOY_USER/DEPLOY_DIR
+  经 CI/CD 变量注入,内网信息不入库——openos 同套约定)。tag 与产物
+  版本号 = gh(grf-harness)最新发布 tag;
   gh 未更新而本程序再次发版时追加 `.postN`(N 从 0 递增,
   推算脚本 `scripts/version.sh`,tag 名应与推算值一致)。
   发版步骤:`sh scripts/version.sh` 得版本 → 先推送 main →
   `git tag v<版本> && git push origin v<版本>`。
+  publish 为每个产物随发 `.sha256` 校验文件;下载侧(internal/desktop
+  的 verifyDlChecksum)按同目录 `.sha256`/`SHA256SUMS` 校验完整性,
+  校验面存在即强制匹配、皆无则跳过(历史已发目录)——改校验约定时
+  CI 与客户端两边同步。
   已发版本以下载服务器目录为准(download.gorun.fun/goder);
   受保护 tag 不可移动,误发的 tag 只能另打新 tag 重触发。
 - **版本号约定**:形态 `X.Y.Z[-预发布.N][.postM]`,如
@@ -93,9 +99,15 @@ internal/                Go 桌面专属层
                          ModelConfig/AgentConfig/Desktop/TerminalManager/
                          BrowserManager/ConsoleMCP/Updater + rootHandler
                          /goder-api 反代与 /goder-api/token 冷启动端点;
-                         version.go 版本比较单一实现(三处同步之一,见
-                         版本号约定);dlserver.go 下载服务器客户端(gh 引导/
-                         自更新/插件技能安装共用);agentskills.go 技能面;
+                         本地服务敏感路径 Host 白名单 proxy.go 的
+                         LoopbackHostGuard(/goder-api* 与 /wails/* 仅放行
+                         本机主机名,防 DNS rebinding 借回环服务驱动机器
+                         —— wails transport 自身无来源校验;本地服务组装点
+                         main.go/testserve.go 包最外层);version.go 版本比较
+                         单一实现(三处同步之一,见版本号约定);dlserver.go
+                         下载服务器客户端(gh 引导/自更新/插件技能安装共用,
+                         落盘前按同目录 .sha256/SHA256SUMS 校验完整性);
+                         agentskills.go 技能面;
                          /goder-api/local-file 本地文件只读服务带目录
                          白名单(用户主目录/gh 数据目录/项目索引登记目录,
                          proxy.go 的 localFileAllowed——改允许面时同步);
@@ -251,8 +263,11 @@ frontend/src/
 - **goder-console 接入不变量**:gh 的 plugins 配置「settings.json 无
   plugins 键 = 自动发现 ~/.grf/plugins」语义不可破坏 —— 给 gh 注册
   goder-console 一律走 plugins/console 包的 Install(wrapper/命令项),不要写
-  URL 条目(那会把 gh 切到显式列表模式、杀死自动发现)。wrapper 与
-  settings 里的端点/令牌由启动期 Install 烙写,端口令牌持久化在
+  URL 条目(那会把 gh 切到显式列表模式、杀死自动发现)。wrapper 内嵌
+  端点与 GODER_CONSOLE_TOKEN 环境变量(令牌不进 argv:进程参数对本机
+  ps 可见);显式列表命令项只带 [exe, console-shim, endpoint],shim
+  回读 console-mcp.json 取令牌,argv 旧形态(shimToken)保留兼容升级
+  窗口。端口令牌持久化在
   appcfg 目录 console-mcp.json;goder-console 在 builtinPlugins 里
   不可删。工具命名带 `goder_` 前缀,避免与 grf-browser 插件的
   `browser_*` 撞名(gh 对重名工具取先连者并告警);全部工具的中文
@@ -308,7 +323,20 @@ frontend/src/
 ## 约定与文档
 
 - 仓库内注释与文档均用中文,保持一致。
-- 改嵌入/对外 API 前先读 `docs/embedding.md`;功能对照与已知限制见
-  `README.md`。SSO/身份职责边界表在 embedding.md 第 5 节。
+- 文档组织(openos 同套约定):`README.md` 是面向人的门面(形态/快速
+  开始/特性速览/配置与安全要点),深度内容在 `docs/` 专题文档 +
+  `docs/README.md` 索引——desktop.md(桌面指南与已知限制)/ deploy.md
+  (部署、环境变量全表与生产清单)/ security.md(安全模型)/
+  embedding.md(三方集成)/ testing.md(E2E)/ integration-testing.md
+  (scripted-api 数据面)。改对应区域时同步对应文档;安全面改动(令牌
+  边界/Host 守卫/下载校验/管理面权限等)必须同步 security.md。
+- **文档双语约定**:中文为默认版(`README.md`、`docs/*.md`),英文版
+  同名加 `.en.md` 后缀(`README.en.md`、`docs/*.en.md`),两版顶部互链。
+  **修改任一版本的实质内容(结构、参数、行为描述、安全边界)必须同步
+  另一版本**——同改一次提交,不允许只改一边;纯文案润色与排版可单边。
+  代码块内注释随所在文档语言;专有名词(gh/grf-harness/goder-console
+  /wails 等)与 i18n 示例 key(中文文案 key 本身)不翻译。
+- 改嵌入/对外 API 前先读 `docs/embedding.md`。SSO/身份职责边界表在
+  embedding.md 第 5 节。
 - 本目录是 git 仓库;未经用户明确要求不做提交/推送,重构大改动保持
   工作区可审阅(文件移动用 git mv 保留历史)。

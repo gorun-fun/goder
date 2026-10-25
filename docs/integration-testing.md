@@ -1,5 +1,7 @@
 # 接入方 AI 自动化测试指导
 
+**中文(默认)** · [English](integration-testing.en.md)
+
 > 本文档面向**把 goder 作为基座集成**的三方(嵌入 `goder.js` 的页面方、
 > 部署 `goder-serve` 的网关方)与执行自动化测试的 AI 智能体:如何用
 > 浏览器自动化测 goder 的**全部功能与扩展点**,而不依赖真实 gh server
