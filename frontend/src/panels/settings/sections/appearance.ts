@@ -1,6 +1,6 @@
 // appearance.ts — 「外观」分区:主题 / 强调色(预设 + 调色盘) / 字号。
 // 经 registry.settings 注册(builtin-common),render 返回池化元素。
-import { css, html } from 'lit';
+import { css, html, nothing } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { sectionSharedCss, SettingsSectionPanel } from './shared';
 import { settingsStore, ACCENTS, FONT_MIN, FONT_MAX, type ThemeMode } from '../../../core/settings/settings-store';
@@ -80,6 +80,7 @@ export class GoderSettingsAppearance extends SettingsSectionPanel {
     const themes: [ThemeMode, string][] = [
       ['dark', '深色'],
       ['light', '浅色'],
+      ['system', '跟随系统'],
     ];
     // 当前是否为自定义色(非预设 key)
     const custom = !(ap.accent in ACCENTS);
@@ -93,6 +94,9 @@ export class GoderSettingsAppearance extends SettingsSectionPanel {
             `,
           )}
         </div>
+        ${ap.theme === 'system'
+          ? html`<div class="hint">跟随宿主页面或系统深浅,当前为${settingsStore.systemTheme === 'dark' ? '深色' : '浅色'},切换时自动跟进。</div>`
+          : nothing}
       </div>
       <div class="sec">
         <h4>强调色</h4>

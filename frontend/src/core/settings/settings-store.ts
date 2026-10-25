@@ -66,8 +66,8 @@ import {
 // node 环境可独立单测);此处 re-export 维持原导出面(设置页分区与
 // 嵌入库在消费),DOM 应用留在下方 applyAppearanceVars。
 export { ACCENTS, FONT_MIN, FONT_MAX } from './appearance';
-export type { Appearance, ThemeMode, AccentValue } from './appearance';
-import { DEFAULT_APPEARANCE, LS_KEY, loadAppearanceLocal, appearanceCssVars, type Appearance } from './appearance';
+export type { Appearance, ThemeMode, AccentValue, ResolvedTheme } from './appearance';
+import { DEFAULT_APPEARANCE, LS_KEY, loadAppearanceLocal, appearanceCssVars, resolveTheme, type Appearance, type ResolvedTheme } from './appearance';
 
 // ---------- 供应商模型上下文窗口(探测缓存) ----------
 // OpenAI 兼容网关(token-hub / OpenRouter / SiliconFlow / vLLM 等)会在
@@ -135,8 +135,13 @@ class SettingsStore {
    * (配置随登录用户隔离),unsupported = gh server 过旧,设置页回落引导 */
   agentApi: 'unknown' | 'ok' | 'unsupported' = 'unknown';
   appearance: Appearance = { ...DEFAULT_APPEARANCE };
+  /** 系统(或宿主)深浅的当前落定值:「跟随系统」模式的取值来源,
+   * 探测与监听装订见 ensureSystemWatch/readSystemTheme。 */
+  systemTheme: ResolvedTheme = 'dark';
   /** 桌面态桥配置是否已加载完成 */
   loaded = false;
+  /** 系统主题监听是否已装订(ensureSystemWatch 幂等标记) */
+  private themeWatched = false;
 
   /** 网页形态 agent API 连接参数(沿用设置页的连接配置) */
   private get conn(): { baseUrl: string; token: string } {
@@ -154,9 +159,11 @@ class SettingsStore {
     for (const fn of this.listeners) fn();
   }
 
-  /** 启动即恢复外观(localStorage 镜像,双形态通用、即刻生效) */
+  /** 启动即恢复外观(localStorage 镜像,双形态通用、即刻生效)并装订
+   * 系统主题监听(跟随系统模式的即时跟进通道)。 */
   initAppearance(): void {
     this.appearance = loadAppearanceLocal();
+    this.ensureSystemWatch();
     this.applyAppearanceVars();
   }
 
@@ -174,18 +181,70 @@ class SettingsStore {
   setAppearance(patch: Partial<Appearance>): void {
     this.appearance = { ...this.appearance, ...patch };
     kvSet(LS_KEY, this.appearance);
+    // 切到「跟随系统」可能早于任何 initAppearance(嵌入宿主未走 configure
+    // 的角落路径):顺手确保探测与监听已就位
+    this.ensureSystemWatch();
     this.applyAppearanceVars();
     this.bump();
   }
 
   /** 把外观写到 documentElement 的 skin 挂钩上(穿透全部 shadow DOM
-   * 即时生效);变量表由 appearance.ts 的 appearanceCssVars 纯计算,
-   * 这里只做 DOM 应用,null = 清除覆写走 ui/theme.ts 默认值,键序即应用序。 */
+   * 即时生效);变量表由 appearance.ts 的 appearanceCssVars 纯计算
+   * (system 模式在此落定深浅),这里只做 DOM 应用,null = 清除覆写走
+   * ui/theme.ts 默认值,键序即应用序。 */
   private applyAppearanceVars(): void {
     const root = document.documentElement.style;
-    for (const [name, value] of Object.entries(appearanceCssVars(this.appearance))) {
+    const resolved = resolveTheme(this.appearance.theme, this.systemTheme === 'dark');
+    for (const [name, value] of Object.entries(appearanceCssVars(this.appearance, resolved))) {
       if (value === null) root.removeProperty(name);
       else root.setProperty(name, value);
+    }
+  }
+
+  /** 探测系统(或宿主)当前深浅,优先级:
+   * 1) 宿主页面根元素的显式主题类 —— html/body 上的 dark/light 类
+   *    (Tailwind 类约定宿主;openos 深色即 html.dark),最权威的宿主声明;
+   * 2) openos 宿主(window.OpenOS 由 openos 框架无条件注入):浅色无类,
+   *    深色已被 1) 命中,落到这里即浅色;
+   * 3) 浏览器/系统偏好 prefers-color-scheme(桌面 wails 与纯 web 形态
+   *    的跟随通道)。 */
+  private readSystemTheme(): ResolvedTheme {
+    if (typeof document !== 'undefined') {
+      const de = document.documentElement;
+      const bd = document.body;
+      if (de.classList.contains('dark') || bd?.classList.contains('dark')) return 'dark';
+      if (de.classList.contains('light') || bd?.classList.contains('light')) return 'light';
+    }
+    if (typeof window !== 'undefined' && 'OpenOS' in window) return 'light';
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return 'dark';
+  }
+
+  /** 装订系统主题监听(幂等):浏览器深浅变化(matchMedia change)+ 宿主
+   * 根元素主题类变化(MutationObserver;openos 切深浅即切 html.dark,
+   * 同文档可观察)。变化时仅「跟随系统」模式重应用,显式模式不受影响。 */
+  private ensureSystemWatch(): void {
+    if (this.themeWatched || typeof window === 'undefined') return;
+    this.themeWatched = true;
+    this.systemTheme = this.readSystemTheme();
+    window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => this.onSystemThemeFlip());
+    if (typeof MutationObserver !== 'undefined' && document.documentElement) {
+      const obs = new MutationObserver(() => this.onSystemThemeFlip());
+      obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+      if (document.body) obs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    }
+  }
+
+  /** 系统/宿主深浅翻转:落定值变化且当前为跟随系统时重应用变量并通知。 */
+  private onSystemThemeFlip(): void {
+    const next = this.readSystemTheme();
+    if (next === this.systemTheme) return;
+    this.systemTheme = next;
+    if (this.appearance.theme === 'system') {
+      this.applyAppearanceVars();
+      this.bump();
     }
   }
 

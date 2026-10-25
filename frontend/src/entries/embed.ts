@@ -34,7 +34,8 @@ import type { AuthConfig } from '../core/store/scope';
 import type { GrfSessionConfig } from '../core/api/types';
 import type { SendInterceptor, ApprovalHook } from '../core/store/host-config';
 export { settingsStore, ACCENTS } from '../core/settings/settings-store';
-export type { Appearance, ThemeMode, AccentValue } from '../core/settings/settings-store';
+export type { Appearance, ThemeMode, AccentValue, ResolvedTheme } from '../core/settings/settings-store';
+import { settingsStore } from '../core/settings/settings-store';
 export { GoderClient, GoderApiError } from '../core/api/client';
 export * from '../core/api/types';
 export { renderMarkdown } from '../util/markdown';
@@ -208,6 +209,11 @@ export function configure(
     statusPop?: boolean;
   },
 ): void {
+  // 外观镜像恢复(深/浅/跟随系统 + 强调色 + 字号):嵌入形态的启动
+  // 恢复入口,兼装订「跟随系统」的宿主主题监听(openos 切深浅即切
+  // html.dark)。放 configure 而非模块加载,让宿主先完成
+  // setKeyValueStorage 注入再读镜像(测试装具的干净起点语义不受影响)。
+  settingsStore.initAppearance();
   if (cfg.user !== undefined) setUser(scope, cfg.user);
   if (cfg.sideTop !== undefined) setSideTop(scope, cfg.sideTop);
   if (cfg.settings !== undefined) setSettingsConfig(scope, cfg.settings);

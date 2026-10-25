@@ -109,6 +109,10 @@ export class GoderAppShell extends GoderPanel {
         display: flex;
         flex-direction: column;
         min-height: 0;
+        box-sizing: border-box;
+        /* 右缘分割线:深色透明(背景色阶已可区分),浅色为一条灰线
+         * (左栏与工作卡同为白色,无边距贴合需显式分隔) */
+        border-right: 1px solid var(--goder-border-split);
       }
       .left > * {
         flex: 1;

@@ -28,6 +28,9 @@ export const theme = css`
     --goder-bg-active: var(--goder-skin-bg-active, #2d323e);
     --goder-border: var(--goder-skin-border, #2a2d36);
     --goder-border-soft: var(--goder-skin-border-soft, #232630);
+    /* 左栏与工作卡的纵向分割线:深色默认透明(背景色阶已可区分,见
+     * app-shell 的 .left),浅色皮肤覆写为灰色(两栏同为白色需显式分隔) */
+    --goder-border-split: var(--goder-skin-border-split, transparent);
     --goder-text: var(--goder-skin-text, #d7dae0);
     --goder-text-dim: var(--goder-skin-text-dim, #8b909c);
     --goder-text-faint: var(--goder-skin-text-faint, #5f636e);

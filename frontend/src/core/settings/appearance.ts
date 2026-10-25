@@ -7,7 +7,15 @@
 // 见 settings-store 头注释。换肤只经 --goder-* CSS 变量(见 ui/theme.ts)。
 import { kvGet } from '../store/storage';
 
-export type ThemeMode = 'dark' | 'light';
+export type ThemeMode = 'dark' | 'light' | 'system';
+/** 落定后的实际深浅(「跟随系统」已解析;显式模式与自身相同) */
+export type ResolvedTheme = 'dark' | 'light';
+
+/** 把主题模式落定为实际深浅:显式模式原样,system 按系统探测取值。
+ * 探测(DOM/宿主环境)在 settings-store 侧,本模块保持无 DOM 依赖。 */
+export function resolveTheme(mode: ThemeMode, systemDark: boolean): ResolvedTheme {
+  return mode === 'system' ? (systemDark ? 'dark' : 'light') : mode;
+}
 /** 强调色:预设 key 或 "#rrggbb" 自定义色值 */
 export type AccentValue = string;
 
@@ -71,6 +79,8 @@ const LIGHT_SKIN: Record<string, string> = {
   '--goder-skin-border': '#d5d8de',
   '--goder-skin-border-soft': '#e4e6eb',
   '--goder-skin-border-hover': '#bfc4cc',
+  // 左栏与工作卡的分割线(深色透明):浅色两栏同为白色,需一条灰线分隔
+  '--goder-skin-border-split': '#d5d8de',
   '--goder-skin-text': '#26292f',
   '--goder-skin-text-dim': '#5d636e',
   '--goder-skin-text-faint': '#9096a0',
@@ -106,7 +116,7 @@ export function loadAppearanceLocal(): Appearance {
         ? FONT_MODE_PX[p.fontSize]
         : DEFAULT_APPEARANCE.fontSize;
   return {
-    theme: p.theme === 'light' ? 'light' : 'dark',
+    theme: p.theme === 'light' || p.theme === 'system' ? p.theme : 'dark',
     accent: typeof p.accent === 'string' && p.accent ? p.accent : 'blue',
     fontSize: Math.max(FONT_MIN, Math.min(FONT_MAX, fontSize)),
   };
@@ -115,16 +125,17 @@ export function loadAppearanceLocal(): Appearance {
 /**
  * 由外观推导完整的 skin CSS 变量表:键为 --goder-skin-* 挂钩名,值为
  * 该外观下应写的取值,null 表示清除覆写、回落 ui/theme.ts 的深色默认值
- * (深色主题 + 默认蓝 + 13.5px 标准字号时全表为 null)。纯计算,不做
- * 任何 DOM 写入;应用侧(settings-store.applyAppearanceVars)按表逐键
+ * (深色主题 + 默认蓝 + 13.5px 标准字号时全表为 null)。resolved 为落定
+ * 深浅(system 模式由调用方解析,见 resolveTheme)。纯计算,不做任何
+ * DOM 写入;应用侧(settings-store.applyAppearanceVars)按表逐键
  * setProperty/removeProperty,键序即应用序。
  */
-export function appearanceCssVars(a: Appearance): Record<string, string | null> {
+export function appearanceCssVars(a: Appearance, resolved: ResolvedTheme): Record<string, string | null> {
   const vars: Record<string, string | null> = {};
   // 主题:深色走默认值,浅色整体覆写
-  for (const [k, v] of Object.entries(LIGHT_SKIN)) vars[k] = a.theme === 'light' ? v : null;
+  for (const [k, v] of Object.entries(LIGHT_SKIN)) vars[k] = resolved === 'light' ? v : null;
   // 强调色:浅色主题文字用加深变体保证对比度
-  const onLight = a.theme === 'light';
+  const onLight = resolved === 'light';
   const accent = resolveAccent(a.accent);
   const isDefaultBlue = a.accent === 'blue';
   vars['--goder-skin-accent'] = isDefaultBlue ? null : accent.accent;
