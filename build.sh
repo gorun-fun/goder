@@ -46,7 +46,7 @@ if [ "${1:-}" = "app" ]; then
   VERSION="$(sh scripts/version.sh 2>/dev/null)" || VERSION="0.1.0"
 fi
 echo "==> 版本: $VERSION"
-go build -ldflags "-X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o goder .
+go build -ldflags "-X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" -o goder .
 echo "==> 二进制: ./goder"
 
 if [ "${1:-}" = "app" ]; then

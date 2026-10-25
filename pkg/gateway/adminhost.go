@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"git.gorun.fun/share/goder/pkg/ghserver"
+	"github.com/gorun-fun/goder/pkg/ghserver"
 )
 
 // registerHostAdmin 把宿主管理端点挂进 admin 子路由(Manager 缺失时

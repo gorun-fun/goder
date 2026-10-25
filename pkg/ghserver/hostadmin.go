@@ -14,8 +14,7 @@ import (
 // grf-home)。平台侧状态(platform/ 子目录:托管供应商清单、宿主插件规格、
 // 会话索引)也落在这里,与 gh 感知的两个子目录并列、互不干扰。
 func (m *Manager) UserRoot(uid string) string {
-	san := uidSan.ReplaceAllString(uid, "_")
-	return filepath.Join(m.cfg.DataRoot, "users", san)
+	return filepath.Join(m.cfg.DataRoot, "users", sanitizeUID(uid))
 }
 
 // UserGrfHome 某用户的独立 GRF_HOME(users/<san>/grf-home)。仅 PerUserHome

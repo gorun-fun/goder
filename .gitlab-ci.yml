@@ -36,16 +36,20 @@
 # 图标不能用 frontend/public/icon.svg 现场生成,用仓库内预生成的
 # build/darwin/AppIcon.icns(本地改图标后需重新生成提交,见 build.sh 注释)。
 #
-# 发布侧需在 GitLab CI/CD Variables 配置文件型变量:
-#   DEPLOY_SSH_PRIVATE_KEY (发布机 SSH 私钥,类型选 File) —— 与 g-term 共用
+# 发布侧的内网地址与产物目录不入库,经 GitLab CI/CD Variables 注入
+# (openos 同套约定):
+#   DEPLOY_HOST            发布机主机(内网,SSH 登录)
+#   DEPLOY_DIR             发布机上的产物根目录
+#   DEPLOY_SSH_PRIVATE_KEY 发布机 SSH 私钥(类型选 File)
+# DEPLOY_USER 为明文(root):GitLab 变量值最短 8 字符、root 只有 4 位
+# 存不进去,且用户名本身非机密(openos 公开仓同款明文)。
 # ============================================================================
 
 image: golang:1.26-trixie
 
 variables:
-  # 发布目标主机(内网,通过 SSH 登录)与产物目录,同 g-term 的发布机
-  DEPLOY_HOST: 10.8.0.5
-  DEPLOY_DIR: /data/download/goder
+  # 发布机地址/目录(DEPLOY_HOST/DEPLOY_DIR)经 CI/CD Variables 注入,
+  # 不入库(见文件头注释);DEPLOY_USER 明文,理由同上
   DEPLOY_USER: root
   GOPROXY: "https://goproxy.cn,direct"
   # gh(grf-harness)已发布产物的下载基地址:其下 {平台}/{版本}/gh
@@ -143,7 +147,7 @@ build:
     # | (DT_NEEDED)不搜 -L 目录,需 CGO_LDFLAGS 补 -rpath-link 指向 sysroot
     # | 与交叉工具链库目录;运行库仍用目标机系统库。
     - |
-      CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-linux-${NATIVE_ARCH} .
+      CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-linux-${NATIVE_ARCH} .
       XS="/opt/xs/${CROSS_DEB}"
       if [ ! -d "$XS/usr/lib/${CROSS_TRIPLE}/pkgconfig" ]; then
         XS="$CI_PROJECT_DIR/.ci-cache/xs2/${CROSS_DEB}"
@@ -174,7 +178,7 @@ build:
       PKG_CONFIG_SYSROOT_DIR=$XS \
       CGO_LDFLAGS="-Wl,-rpath-link,$XS/usr/lib/${CROSS_TRIPLE} -Wl,-rpath-link,/usr/${CROSS_TRIPLE}/lib" \
       CGO_ENABLED=1 GOOS=linux GOARCH=${CROSS_ARCH} \
-        go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-linux-${CROSS_ARCH} .
+        go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-linux-${CROSS_ARCH} .
       for ARCH in ${NATIVE_ARCH} ${CROSS_ARCH}; do
         rm -rf .linstage && mkdir .linstage
         # 不捆绑 gh:App 启动时检测到缺失会静默自动下载当前系统版本(见
@@ -196,15 +200,15 @@ build:
     - |
       for ARCH in amd64 arm64; do
         CGO_ENABLED=0 GOOS=windows GOARCH=${ARCH} \
-          go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -H windowsgui -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-windows-${ARCH}.exe .
+          go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -H windowsgui -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-windows-${ARCH}.exe .
         rm -rf .winstage && mkdir .winstage
         cp bin/goder-windows-${ARCH}.exe .winstage/goder.exe
         (cd .winstage && zip -qry ../bin/goder-windows-${ARCH}.zip goder.exe)
       done
       rm -rf .winstage
     # ---- darwin 交叉:zig cc + macOS SDK + ldid 均已预置镜像 /opt/mc ----
-    - CC=/opt/mc/bin/zcc-darwin-arm64 GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-darwin-arm64 .
-    - CC=/opt/mc/bin/zcc-darwin-amd64 GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X git.gorun.fun/share/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-darwin-amd64 .
+    - CC=/opt/mc/bin/zcc-darwin-arm64 GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-darwin-arm64 .
+    - CC=/opt/mc/bin/zcc-darwin-amd64 GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false -ldflags "-s -w -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" -o bin/goder-darwin-amd64 .
     # adhoc 重签(链接器签名在文件复制后可能失效;gh 下载件同样补签一次)
     - '/opt/mc/bin/ldid -S bin/goder-darwin-arm64 2>/dev/null || echo "WARN arm64 adhoc 签名未执行"'
     - '/opt/mc/bin/ldid -S bin/goder-darwin-amd64 2>/dev/null || echo "WARN amd64 adhoc 签名未执行"'
@@ -246,7 +250,7 @@ build:
   rules:
     - if: '$CI_COMMIT_TAG'
 
-# -------------- 发布:按平台/版本目录 scp 产物 zip 到 10.8.0.5 --------------
+# -------- 发布:按平台/版本目录 scp 产物 zip 与 .sha256 校验文件到发布机 --------
 publish:
   stage: publish
   tags:
@@ -269,16 +273,20 @@ publish:
     # 产物清单由 build 阶段写入 bin/PUBLISH_MANIFEST(每行"目录 zip 名"),
     # 目录名与 gh 下载侧平台目录一致:macos-arm64 / macos / linux(-arm64) /
     # windows(-arm64)。注意 ssh 必须 -n 断开 stdin,否则会吃掉循环读的清单。
+    # 每个产物随发 .sha256 校验文件(openos cli 同款;桌面 App 下载侧按同
+    # 目录校验和验证完整性,见 internal/desktop 的 downloadFile/ghDownload)。
     - |
       while read -r DIR ZIP; do
         [ -n "$DIR" ] || continue
+        sha256sum bin/$ZIP > bin/$ZIP.sha256
         ssh -n ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_DIR}/${DIR}/${VERSION}"
-        scp -p bin/$ZIP ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/${DIR}/${VERSION}/
+        scp -p bin/$ZIP bin/$ZIP.sha256 ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/${DIR}/${VERSION}/
       done < bin/PUBLISH_MANIFEST
-      # 更新说明随每个平台目录一起发布(桌面 App 自动更新读取)
+      # 更新说明随每个平台目录一起发布(桌面 App 自动更新读取),校验文件同发
       awk '{print $1}' bin/PUBLISH_MANIFEST | sort -u | while read -r DIR; do
         [ -n "$DIR" ] || continue
-        scp -p bin/notes.txt ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/${DIR}/${VERSION}/notes.txt
+        sha256sum bin/notes.txt > bin/notes.txt.sha256
+        scp -p bin/notes.txt bin/notes.txt.sha256 ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/${DIR}/${VERSION}/
       done
   rules:
     - if: '$CI_COMMIT_TAG'

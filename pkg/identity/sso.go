@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -188,12 +189,15 @@ func (s *ssoResolver) hCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	accessToken, err := s.exchange(code)
 	if err != nil {
-		fail(err.Error())
+		// 细节(上游地址/网络错误)进日志;浏览器侧只给归类文案
+		log.Printf("[sso] access_token 交换失败: %v", err)
+		fail("身份服务通信失败")
 		return
 	}
 	u, err := s.userinfo(accessToken)
 	if err != nil {
-		fail(err.Error())
+		log.Printf("[sso] userinfo 获取失败: %v", err)
+		fail("身份服务通信失败")
 		return
 	}
 	s.issueSession(w, u)

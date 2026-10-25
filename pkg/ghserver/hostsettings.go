@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"git.gorun.fun/share/goder/internal/grfsettings"
+	"github.com/gorun-fun/goder/internal/grfsettings"
 )
 
 // ---- 目录约定 ----

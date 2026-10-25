@@ -15,9 +15,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"git.gorun.fun/share/goder/internal/appcfg"
-	"git.gorun.fun/share/goder/internal/browser"
-	"git.gorun.fun/share/goder/plugins/console"
+	"github.com/gorun-fun/goder/internal/appcfg"
+	"github.com/gorun-fun/goder/internal/browser"
+	"github.com/gorun-fun/goder/plugins/console"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )

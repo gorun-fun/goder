@@ -82,7 +82,7 @@ interface WailsCall {
 
 // wails Call.ByName 按完整 FQN(包路径.类型.方法)精确匹配;桌面服务在
 // internal/desktop,与 Go 侧 module 路径保持同步。
-const SVC = 'git.gorun.fun/share/goder/internal/desktop';
+const SVC = 'github.com/gorun-fun/goder/internal/desktop';
 
 let runtime: WailsCall | null = null;
 

@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"git.gorun.fun/share/goder/internal/browser"
+	"github.com/gorun-fun/goder/internal/browser"
 )
 
 // evalReportPath 浏览器求值回报端点(见 internal/browser/eval.go 的

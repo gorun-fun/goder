@@ -26,7 +26,7 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"git.gorun.fun/share/goder/internal/appcfg"
+	"github.com/gorun-fun/goder/internal/appcfg"
 )
 
 // appVersion 当前 goder 版本(build 时 -X 注入;本地构建为 "dev",

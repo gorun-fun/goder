@@ -17,16 +17,38 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/gorun-fun/goder/internal/appcfg"
 )
 
+// shimToken 解析 shim 令牌,顺序:argv(旧版 wrapper/显式列表把令牌烙在
+// 命令行的兼容形态)→ 环境变量 GODER_CONSOLE_TOKEN(新版 wrapper 内嵌;
+// 显式列表模式 gh 直起进程无法注入环境,不经过此路)→ 配置文件
+// console-mcp.json(桌面进程持久化的同一份令牌,与桌面端零漂移)。
+func shimToken(args []string) string {
+	if len(args) >= 3 && args[2] != "" {
+		return args[2]
+	}
+	if t := os.Getenv("GODER_CONSOLE_TOKEN"); t != "" {
+		return t
+	}
+	if dir, err := appcfg.DefaultDir(); err == nil {
+		return LoadConfig(dir).Token
+	}
+	return ""
+}
+
 // RunShim 执行 stdio→HTTP 转发,返回进程退出码。args 为 os.Args 去掉
-// 程序名后的剩余参数:console-shim <endpoint> <token>。
+// 程序名后的剩余参数:console-shim <endpoint> [token]。令牌解析见
+// shimToken:argv 兼容(旧版烙写形态)→ 环境变量 → 配置文件;令牌不落
+// argv 的常态形态(argv 对本机所有用户 ps 可见,wrapper 0700 的文件
+// 保护覆盖不到进程参数)。
 func RunShim(args []string) int {
-	if len(args) < 3 || args[0] != "console-shim" {
-		fmt.Fprintln(os.Stderr, "用法: goder console-shim <mcp-endpoint> <token>")
+	if len(args) < 2 || args[0] != "console-shim" {
+		fmt.Fprintln(os.Stderr, "用法: goder console-shim <mcp-endpoint> [token]")
 		return 2
 	}
-	endpoint, token := args[1], args[2]
+	endpoint, token := args[1], shimToken(args)
 	client := &http.Client{Timeout: 120 * time.Second}
 
 	in := bufio.NewScanner(os.Stdin)

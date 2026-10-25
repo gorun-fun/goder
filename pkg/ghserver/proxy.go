@@ -13,6 +13,7 @@ package ghserver
 import (
 	"bytes"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -100,7 +101,9 @@ func NewProxy(opts ProxyOptions) http.Handler {
 		}
 		up, err := opts.Resolve(r)
 		if err != nil {
-			http.Error(w, "bad upstream: "+err.Error(), http.StatusBadGateway)
+			// 细节(内部地址/配置路径)只进日志,不下发请求方
+			log.Printf("[proxy] 上游解析失败: %v", err)
+			http.Error(w, "bad upstream", http.StatusBadGateway)
 			return
 		}
 		proxyFor(up).ServeHTTP(w, r)

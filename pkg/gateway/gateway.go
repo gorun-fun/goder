@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"git.gorun.fun/share/goder/pkg/ghserver"
-	"git.gorun.fun/share/goder/pkg/identity"
+	"github.com/gorun-fun/goder/pkg/ghserver"
+	"github.com/gorun-fun/goder/pkg/identity"
 )
 
 // Options 网关参数。

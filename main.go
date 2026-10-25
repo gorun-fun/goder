@@ -10,8 +10,8 @@ import (
 	"os"
 	"runtime"
 
-	"git.gorun.fun/share/goder/internal/desktop"
-	"git.gorun.fun/share/goder/plugins/console"
+	"github.com/gorun-fun/goder/internal/desktop"
+	"github.com/gorun-fun/goder/plugins/console"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	wailsEvents "github.com/wailsapp/wails/v3/pkg/events"
@@ -95,8 +95,10 @@ func main() {
 	// Windows:wails 资产管道整体缓冲响应、SSE 无流式(见
 	// localserv_windows.go);改从本地真实 HTTP 服务器加载,静态资产与
 	// /goder-api 同源。本地服务器同时挂 transport 的 /wails/runtime IPC
-	// 端点(见上)。失败则回退 wails 资产服务(流式缺失但可用)。
-	if baseURL := startLocalServer(transport.Handler()(rootHandler)); baseURL != "" {
+	// 端点(见上)。最外层套 desktop.LoopbackHostGuard:/goder-api 与
+	// /wails 敏感路径只放行本机主机名(防 DNS rebinding 借回环服务驱动机
+	// 器;wails transport 自身无来源校验)。失败则回退 wails 资产服务。
+	if baseURL := startLocalServer(desktop.LoopbackHostGuard(transport.Handler()(rootHandler))); baseURL != "" {
 		winOpts.URL = baseURL
 		defer stopLocalServer()
 	}

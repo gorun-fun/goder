@@ -58,7 +58,7 @@ func bridgeFQNRefs(t *testing.T) map[string]bool {
 		t.Skipf("读不到 bridge.ts(%v);前端源码不在时跳过", err)
 	}
 	re := regexp.MustCompile(`\$\{SVC\}\.([A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*)`)
-	svc := "git.gorun.fun/share/goder/internal/desktop"
+	svc := "github.com/gorun-fun/goder/internal/desktop"
 	out := map[string]bool{}
 	for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
 		out[svc+"."+m[1]] = true

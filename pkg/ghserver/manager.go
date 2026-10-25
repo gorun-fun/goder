@@ -95,16 +95,25 @@ func NewManager(cfg ManagerConfig) *Manager {
 // uidSan 把任意 uid 映射为安全的目录名(防路径穿越/怪字符)。
 var uidSan = regexp.MustCompile(`[^a-zA-Z0-9_.-]`)
 
+// sanitizeUID uid → 目录名:uidSan 折叠非法字符后,"." 与 ".." 是字符集
+// 放行的点段(filepath.Join 会把它们穿越出 users/,uid=".." 时 UserRoot
+// 恰为 DataRoot 本身、DeleteUser 即 RemoveAll(DataRoot)),一并折叠为 _。
+func sanitizeUID(uid string) string {
+	san := uidSan.ReplaceAllString(uid, "_")
+	if san == "." || san == ".." {
+		san = "_"
+	}
+	return san
+}
+
 // UserDir 某用户的数据目录(<DataRoot>/users/<san>/server-data)。
 func (m *Manager) UserDir(uid string) string {
-	san := uidSan.ReplaceAllString(uid, "_")
-	return filepath.Join(m.cfg.DataRoot, "users", san, "server-data")
+	return filepath.Join(m.cfg.DataRoot, "users", sanitizeUID(uid), "server-data")
 }
 
 // userGrfHome 某用户的独立 GRF_HOME(<DataRoot>/users/<san>/grf-home)。
 func (m *Manager) userGrfHome(uid string) string {
-	san := uidSan.ReplaceAllString(uid, "_")
-	return filepath.Join(m.cfg.DataRoot, "users", san, "grf-home")
+	return filepath.Join(m.cfg.DataRoot, "users", sanitizeUID(uid), "grf-home")
 }
 
 // prepareUserHome PerUserHome 时建用户 GRF_HOME 并按需播种:用户

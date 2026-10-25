@@ -1,4 +1,4 @@
-module git.gorun.fun/share/goder
+module github.com/gorun-fun/goder
 
 go 1.26
 

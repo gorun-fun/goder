@@ -3,10 +3,12 @@
 // 接入方式(保住「settings.json 无 plugins 键 = 自动发现」语义,不能写
 // URL 条目把 gh 切到显式列表模式):
 //   - 自动发现模式:向 ~/.grf/plugins/ 落一个 wrapper(unix sh 脚本 /
-//     Windows .cmd),内容烙上当前 goder 可执行文件路径与端点令牌,gh
-//     自动发现直接收编(stdio 插件)。
+//     Windows .cmd),内容烙上当前 goder 可执行文件路径与端点,令牌经
+//     GODER_CONSOLE_TOKEN 环境变量传给 shim(argv 对本机 ps 可见,不落
+//     命令行),gh 自动发现直接收编(stdio 插件)。
 //   - 显式列表模式(settings.json 有 plugins 键):把 shim 命令项
-//     [exe, console-shim, url, token] upsert 进数组,其余条目原样保留。
+//     [exe, console-shim, url] upsert 进数组,其余条目原样保留;gh 直起
+//     进程无法注入环境,shim 自行回读 console-mcp.json 里的令牌。
 //
 // 端口与令牌持久化在 goder 配置目录的 console-mcp.json(令牌跨启动稳定:
 // 已在跑的 gh 收养场景不至于因令牌轮换而失联;端口被占则换新并回写)。
@@ -22,8 +24,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 
-	"git.gorun.fun/share/goder/internal/grfsettings"
+	"github.com/gorun-fun/goder/internal/grfsettings"
 )
 
 // pluginName gh 侧的插件名(工具描述里的归属展示)。
@@ -98,19 +101,22 @@ func Install(exe, pluginsDir, settingsPath, endpoint, token string) error {
 }
 
 // writeWrapper 落 ~/.grf/plugins/goder-console(unix sh / windows .cmd)。
+// 令牌经环境变量传给 shim(不进 argv:进程参数对本机所有用户 ps 可见);
+// argv 形态仍是 shim 的兼容输入,升级窗口期的旧 wrapper 不断链。
 func writeWrapper(exe, pluginsDir, endpoint, token string) error {
 	var path, content string
 	if runtime.GOOS == "windows" {
 		path = filepath.Join(pluginsDir, pluginName+".cmd")
-		content = "@echo off\r\n\"" + exe + "\" console-shim " + endpoint + " " + token + " %*\r\n"
+		content = "@echo off\r\nset \"GODER_CONSOLE_TOKEN=" + token + "\"\r\n\"" + exe + "\" console-shim " + endpoint + " %*\r\n"
 	} else {
 		path = filepath.Join(pluginsDir, pluginName)
-		content = "#!/bin/sh\nexec \"" + exe + "\" console-shim " + endpoint + " " + token + " \"$@\"\n"
+		content = "#!/bin/sh\nGODER_CONSOLE_TOKEN='" + strings.ReplaceAll(token, "'", `'\''`) + "' exec \"" + exe + "\" console-shim " + endpoint + " \"$@\"\n"
 	}
 	if raw, err := os.ReadFile(path); err == nil && string(raw) == content {
 		return nil // 内容一致,免写
 	}
-	// 0700:wrapper 内嵌 MCP 端点令牌,多用户机器上不给其他本地用户读权限
+	// 0700:wrapper 内嵌 MCP 端点令牌(环境变量形态),多用户机器上不给
+	// 其他本地用户读权限
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
 		return fmt.Errorf("写入插件 wrapper: %w", err)
 	}
@@ -136,7 +142,9 @@ func upsertSettings(exe, settingsPath, endpoint, token string) error {
 		}
 		entry := map[string]any{
 			"name":    pluginName,
-			"command": []string{exe, "console-shim", endpoint, token},
+			"command": []string{exe, "console-shim", endpoint},
+			// 令牌不经命令行(gh 直起进程,argv 对本机 ps 可见):shim 落
+			// 入配置文件回读路径(见 shimToken)。
 		}
 		replaced := false
 		for i, p := range list {

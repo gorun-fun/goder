@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"git.gorun.fun/share/goder/internal/grfsettings"
+	"github.com/gorun-fun/goder/internal/grfsettings"
 )
 
 // PluginDTO 与前端 host/bridge.ts 的 PluginDTO 对齐(settings.json plugins 项)。

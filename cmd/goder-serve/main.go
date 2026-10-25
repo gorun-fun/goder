@@ -28,8 +28,10 @@
 //	SSO_ENDPOINT / SSO_CLIENT_ID / SSO_CLIENT_SECRET / SSO_REDIRECT_URL /
 //	SSO_ORGANIZATION / AUTH_DEV_EMAIL / COOKIE_SECURE / GODER_SESSIONS_FILE(仅 sso)
 //	GODER_CORS_ORIGINS(逗号分隔白名单,给出时精确放行+允许凭据,优先于 GODER_CORS)
-//	GODER_ADMIN_TOKEN(/admin/* 管理 API 令牌;空 = 关闭)  GODER_WEBHOOK_URL(进程
-//	生命周期事件回调;空 = 关闭)  GODER_WEBHOOK_SECRET(回调 HMAC-SHA256 签名密钥)
+//	GODER_ADMIN_TOKEN(/admin/* 管理 API 令牌;空 = 关闭。注意:该令牌等同
+//	                   服务器代码执行权限——/admin/plugins/install 落的
+//	                   wrapper 会被 gh 执行,只在内网传递、用长随机值)
+//	GODER_WEBHOOK_URL(进程生命周期事件回调;空 = 关闭)  GODER_WEBHOOK_SECRET(回调 HMAC-SHA256 签名密钥)
 //	GODER_ACCESS_LOG(1 = 请求日志)
 //	GODER_GH_ENV_<KEY>(透传额外环境给每个 gh 子进程,如
 //	  GODER_GH_ENV_GRF_TURN_WEBHOOK_URL / GODER_GH_ENV_GRF_TURN_WEBHOOK_SECRET
@@ -48,9 +50,9 @@ import (
 	"syscall"
 	"time"
 
-	"git.gorun.fun/share/goder/pkg/gateway"
-	"git.gorun.fun/share/goder/pkg/ghserver"
-	"git.gorun.fun/share/goder/pkg/identity"
+	"github.com/gorun-fun/goder/pkg/gateway"
+	"github.com/gorun-fun/goder/pkg/ghserver"
+	"github.com/gorun-fun/goder/pkg/identity"
 )
 
 func main() {

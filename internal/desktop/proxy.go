@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"git.gorun.fun/share/goder/internal/appcfg"
-	"git.gorun.fun/share/goder/pkg/ghserver"
+	"github.com/gorun-fun/goder/internal/appcfg"
+	"github.com/gorun-fun/goder/pkg/ghserver"
 )
 
 const proxyPrefix = "/goder-api"
@@ -22,35 +22,56 @@ const proxyPrefix = "/goder-api"
 // rootHandler 组合:/goder-api/* → 代理;/goder-api/token → 托管服务信息
 // (同源直读,前端冷启动无需等 wails 调用通道);/goder-api/local-file → 本地
 // 文件只读服务(右栏浏览器按路径渲染 html 等,替代 data URL);其余 → 前端
-// 静态资源。
+// 静态资源。/goder-api 整段过本机 Host 校验(见 LoopbackHostGuard)。
 func RootHandler(fallback http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	// 敏感端点(令牌下发/本地文件读取)先过本机 Host 校验:服务只监听
-	// 回环,但 DNS rebinding 可让恶意网页以自有域名解析到 127.0.0.1
-	// 再携带伪造 Host 访问 —— 只放行本机已知主机名。
 	mux.HandleFunc("/goder-api/token", guardLocalHost(serveManagedToken))
 	mux.HandleFunc("/goder-api/local-file", guardLocalHost(serveLocalFile))
-	mux.Handle(proxyPrefix+"/", desktopProxy())
-	mux.Handle(proxyPrefix, desktopProxy())
+	mux.Handle(proxyPrefix+"/", LoopbackHostGuard(desktopProxy()))
+	mux.Handle(proxyPrefix, LoopbackHostGuard(desktopProxy()))
 	mux.Handle("/", fallback)
 	return mux
 }
 
-// guardLocalHost 本机敏感端点的 Host 白名单:127.0.0.1 / localhost /
+// localHostAllowed 本机敏感端点放行的 Host 白名单:127.0.0.1 / localhost /
 // *.localhost(wails 生产源 goder.localhost 等)与空 Host(部分内嵌
-// webview 不带);其余 403。防 DNS rebinding 把回环服务暴露给外域页面。
+// webview 不带)。防 DNS rebinding:恶意网页以自有域名解析到 127.0.0.1,
+// 请求的 Host 是攻击者域名而非本机已知主机名,一律不放行。
+func localHostAllowed(host string) bool {
+	host = strings.ToLower(host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host == "" || host == "127.0.0.1" || host == "localhost" || strings.HasSuffix(host, ".localhost")
+}
+
+// guardLocalHost 单端点的 Host 白名单中间件(403 拒绝非本机主机名)。
 func guardLocalHost(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		host := strings.ToLower(r.Host)
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		}
-		if host == "" || host == "127.0.0.1" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
-			next(w, r)
+		if !localHostAllowed(r.Host) {
+			http.Error(w, "forbidden host", http.StatusForbidden)
 			return
 		}
-		http.Error(w, "forbidden host", http.StatusForbidden)
+		next(w, r)
 	}
+}
+
+// LoopbackHostGuard 本地 HTTP 服务的敏感路径整段 Host 守卫:/goder-api*
+// 与 /wails/*(wails 调用通道,经 transport.Handler 挂进本地服务器,且
+// wails v3 transport 自身不做来源校验)只放行本机已知主机名,其余路径
+// (静态资产,公开内容)直通。包装在本地服务最外层使用(Windows 生产态
+// 与 test-serve 的组装点);此前只有 token/local-file 两个端点有守卫,
+// rebinding 页面仍可借 /goder-api 反代(服务端注入 Bearer)或直调
+// /wails/runtime 服务(终端/更新器)改动机器状态。
+func LoopbackHostGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if (strings.HasPrefix(p, "/goder-api") || strings.HasPrefix(p, "/wails/")) && !localHostAllowed(r.Host) {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // localFileTypes 本地文件服务的 Content-Type(缺省按内容嗅探退化)。

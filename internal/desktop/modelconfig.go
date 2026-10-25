@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"git.gorun.fun/share/goder/internal/grfsettings"
+	"github.com/gorun-fun/goder/internal/grfsettings"
 )
 
 // ProviderDTO 与前端 host/bridge.ts 的 ProviderDTO 对齐。

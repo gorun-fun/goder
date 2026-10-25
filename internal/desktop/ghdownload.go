@@ -9,6 +9,7 @@
 package desktop
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,7 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"git.gorun.fun/share/goder/internal/appcfg"
+	"github.com/gorun-fun/goder/internal/appcfg"
 )
 
 // ghDlBase gh 已发布产物的下载基地址(与 CI 捆绑来源一致)。
@@ -187,6 +188,14 @@ func (d *ghDownload) run(url, dst string) error {
 		}
 	}
 	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	// 完整性校验(gh 发布目录的 SHA256SUMS 清单;历史目录无清单跳过),
+	// 失败即丢弃 —— 不让未验证的字节顶替可执行文件。
+	vctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := verifyDlChecksum(vctx, tmp, url); err != nil {
 		os.Remove(tmp)
 		return err
 	}

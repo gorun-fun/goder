@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"os"
 
-	"git.gorun.fun/share/goder/internal/browser"
+	"github.com/gorun-fun/goder/internal/browser"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )

@@ -3,7 +3,7 @@
 // 纯 web 态自动回退 localStorage(见 frontend core/store/persistence)。
 package desktop
 
-import "git.gorun.fun/share/goder/internal/appcfg"
+import "github.com/gorun-fun/goder/internal/appcfg"
 
 // AppConfig wails 服务(配置文件 + 每个 scope 的项目索引)。
 type AppConfig struct{}

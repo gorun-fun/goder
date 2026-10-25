@@ -9,8 +9,11 @@ package desktop
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -155,7 +158,8 @@ func isDlManifest(name string) bool {
 	return name == "SHA256SUMS" || strings.HasSuffix(name, ".sha256")
 }
 
-// downloadFile 拉取远端文件并原子落盘(临时文件 + rename)。
+// downloadFile 拉取远端文件并原子落盘(临时文件 + rename);落盘前按同
+// 目录校验面验证完整性(见 verifyDlChecksum)。
 func downloadFile(ctx context.Context, url, dst string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -186,6 +190,10 @@ func downloadFile(ctx context.Context, url, dst string) error {
 		_ = os.Remove(name)
 		return err
 	}
+	if err := verifyDlChecksum(ctx, name, url); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
 	mode := os.FileMode(0o755) // 插件需要可执行位;技能 md 同样无害
 	if err := os.Chmod(name, mode); err != nil {
 		_ = os.Remove(name)
@@ -195,6 +203,114 @@ func downloadFile(ctx context.Context, url, dst string) error {
 	// (替换被占用 exe 报 Access is denied):走 installDownload(挪唯一
 	// .old + 短重试),与 gh 更新同一条路径。
 	return installDownload(name, dst)
+}
+
+// ---------- 下载完整性:同目录校验面(.sha256 / SHA256SUMS) ----------
+//
+// 发布侧约定:CI publish 为每个产物随发 <file>.sha256(openos cli 同款,
+// 单行 sha256sum 输出);gh(grf-harness)发布目录带 SHA256SUMS 清单。
+// 校验面存在即强制匹配(下载链路对 download.gorun.fun 单点信任的唯一
+// 缓解);两者皆无(历史已发目录、任意 URL 技能安装)跳过并记日志。
+
+// shaHexRe 合法 sha256 hex(64 位小写十六进制;大写归一后比较)。
+var shaHexRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// parseShaLine 从 sha256sum 输出行/单文件 .sha256 内容取合法摘要;取首
+// 字段,非法(非 64 位 hex)返回空。
+func parseShaLine(s string) string {
+	f := strings.TrimSpace(s)
+	if i := strings.IndexAny(f, " \t"); i >= 0 {
+		f = f[:i]
+	}
+	f = strings.ToLower(f)
+	if shaHexRe.MatchString(f) {
+		return f
+	}
+	return ""
+}
+
+// expectedDlChecksum 取远端文件应匹配的 sha256:优先同目录 <file>.sha256,
+// 回落同目录 SHA256SUMS 清单(标准 `<hex>  <name>` 行,兼容二进制模式的
+// `*<name>` 前缀)。皆不可得返回空串(调用方跳过校验);网络错误静默按
+// 无校验面处理 —— 校验是加严面,不应把可达性抖动放大成下载失败。
+func expectedDlChecksum(ctx context.Context, fileURL string) string {
+	i := strings.LastIndex(fileURL, "/")
+	if i < 0 {
+		return ""
+	}
+	dir, name := fileURL[:i+1], fileURL[i+1:]
+	client := &http.Client{Timeout: 15 * time.Second}
+	get := func(u string) (string, bool) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return "", false
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", false
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return "", false
+		}
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return "", false
+		}
+		return string(b), true
+	}
+	if body, ok := get(dir + name + ".sha256"); ok {
+		if s := parseShaLine(body); s != "" {
+			return s
+		}
+	}
+	if body, ok := get(dir + "SHA256SUMS"); ok {
+		for _, line := range strings.Split(body, "\n") {
+			sum, rest, ok := strings.Cut(line, " ")
+			if !ok {
+				continue
+			}
+			rest = strings.TrimPrefix(strings.TrimSpace(rest), "*")
+			if rest == name {
+				if s := parseShaLine(sum); s != "" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// fileSha256 本地文件的 sha256 hex。
+func fileSha256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// verifyDlChecksum 校验已下载文件与同目录校验面一致;无校验面跳过(记
+// 日志),存在而不匹配为硬错误 —— 该文件不落盘不执行。
+func verifyDlChecksum(ctx context.Context, path, fileURL string) error {
+	want := expectedDlChecksum(ctx, fileURL)
+	if want == "" {
+		log.Printf("[download] %s 同目录无校验文件(.sha256/SHA256SUMS),跳过完整性校验", filepath.Base(fileURL))
+		return nil
+	}
+	got, err := fileSha256(path)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("%s 完整性校验失败(校验面 %s,实得 %s)", filepath.Base(fileURL), want, got)
+	}
+	return nil
 }
 
 // matchPluginFile 宽松匹配下载服务器上的插件文件名(与 gh 的

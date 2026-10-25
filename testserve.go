@@ -49,7 +49,7 @@ import (
 	"sync"
 	"syscall"
 
-	"git.gorun.fun/share/goder/internal/desktop"
+	"github.com/gorun-fun/goder/internal/desktop"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -106,7 +106,9 @@ func runTestServe(args []string) error {
 	})
 
 	quit := func() { app.Quit() }
-	h := testServeHandler(transport, token, quit, transport.Handler()(rootHandler))
+	// LoopbackHostGuard 在令牌门槛内再加一层 Host 白名单(/goder-api 与
+	// /wails 敏感路径),与桌面 Windows 生产态同一防线(见 main.go)。
+	h := testServeHandler(transport, token, quit, desktop.LoopbackHostGuard(transport.Handler()(rootHandler)))
 
 	// 端口策略:优先 --port(自动化可预期);被占回退随机端口,以实际
 	// 打印的 URL 为准。

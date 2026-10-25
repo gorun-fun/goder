@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"git.gorun.fun/share/goder/pkg/ghserver"
-	"git.gorun.fun/share/goder/pkg/identity"
+	"github.com/gorun-fun/goder/pkg/ghserver"
+	"github.com/gorun-fun/goder/pkg/identity"
 )
 
 // stubResolver 固定解析结果的 Resolver(测 unauthorized 的 login_url 等)。

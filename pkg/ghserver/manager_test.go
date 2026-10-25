@@ -21,6 +21,16 @@ func TestUserDirSanitizesUID(t *testing.T) {
 	if !strings.HasSuffix(got, "server-data") {
 		t.Fatalf("目录结构不符: %s", got)
 	}
+	// "."/".." 是字符集放行的点段,Join 会穿越出 users/(uid=".." 时
+	// UserRoot 恰为 DataRoot 本身,DeleteUser 即 RemoveAll(DataRoot))
+	for _, uid := range []string{".", ".."} {
+		if root := m.UserRoot(uid); root == "/data" || root == "/data/users" {
+			t.Fatalf("uid %q 未折叠点段: UserRoot=%s", uid, root)
+		}
+		if got := m.UserDir(uid); got == "/data/server-data" {
+			t.Fatalf("uid %q 未折叠点段: UserDir=%s", uid, got)
+		}
+	}
 }
 
 func TestManagerMaxUsers(t *testing.T) {

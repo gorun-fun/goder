@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"git.gorun.fun/share/goder/pkg/ghserver"
-	"git.gorun.fun/share/goder/pkg/identity"
+	"github.com/gorun-fun/goder/pkg/ghserver"
+	"github.com/gorun-fun/goder/pkg/identity"
 )
 
 // newHostGateway 带 Manager(PerUserHome)+ AdminToken + 固定用户解析的

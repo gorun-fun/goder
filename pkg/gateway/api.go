@@ -6,9 +6,10 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
-	"git.gorun.fun/share/goder/pkg/ghserver"
+	"github.com/gorun-fun/goder/pkg/ghserver"
 )
 
 // hReady 就绪探针:固定上游模式恒就绪;托管模式要求 gh 二进制可解析。
@@ -84,14 +85,17 @@ func (g *Gateway) hAPI(w http.ResponseWriter, r *http.Request) {
 
 // upstreamError 类型化错误 → HTTP 状态映射:容量类 429,进程未就绪/
 // 冷却/启动失败 503,其余 502(调用方可程序化区分,不再一律 502)。
+// 应答只给归类后的通用文案 —— 错误细节(内部地址/路径/启动日志位置)
+// 进服务端日志,不下发浏览器侧。
 func (g *Gateway) upstreamError(w http.ResponseWriter, err error) {
-	status := http.StatusBadGateway
+	status, msg := http.StatusBadGateway, "上游服务不可用"
 	var se *ghserver.StartError
 	switch {
 	case errors.Is(err, ghserver.ErrTooManyUsers), errors.Is(err, ghserver.ErrPortExhausted):
-		status = http.StatusTooManyRequests
+		status, msg = http.StatusTooManyRequests, "服务容量已满,请稍后重试"
 	case errors.Is(err, ghserver.ErrStartCooling), errors.As(err, &se):
-		status = http.StatusServiceUnavailable
+		status, msg = http.StatusServiceUnavailable, "服务正在启动或暂时不可用,请稍后重试"
 	}
-	http.Error(w, err.Error(), status)
+	log.Printf("[gateway] upstream error: %v", err)
+	http.Error(w, msg, status)
 }

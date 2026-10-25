@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"time"
 
-	"git.gorun.fun/share/goder/pkg/ghserver"
+	"github.com/gorun-fun/goder/pkg/ghserver"
 )
 
 // wireWebhook 把进程生命周期回调转发到配置的 WebhookURL(POST JSON,
