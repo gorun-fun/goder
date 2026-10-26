@@ -303,11 +303,12 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           cat bin/manifest-*.txt > bin/PUBLISH_MANIFEST
-          # 每个产物随发 .sha256 校验文件(与下载服务器发布约定同款,供
-          # 人工校验;桌面 App 自动更新走 download.gorun.fun,不经这里)
+          # 每个产物随发 .sha256 校验文件(供人工校验,文件名不带路径前缀,
+          # 下载后同目录 `shasum -c` 直接可用;桌面 App 自动更新走
+          # download.gorun.fun,不经这里)
           while read -r DIR ZIP; do
             [ -n "$DIR" ] || continue
-            sha256sum "bin/$ZIP" > "bin/$ZIP.sha256"
+            (cd bin && sha256sum "$ZIP" > "$ZIP.sha256")
           done < bin/PUBLISH_MANIFEST
           # alpha/beta/rc 预发布版本自动标记 prerelease
           opts=()
