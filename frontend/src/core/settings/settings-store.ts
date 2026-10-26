@@ -751,12 +751,6 @@ class SettingsStore {
     return err;
   }
 
-  async toggleServer(): Promise<void> {
-    if (!inWails()) return;
-    this.srv = this.srv?.running ? await serverStop() : await serverStart();
-    this.bump();
-  }
-
   /** 地址/二进制变更后重启托管进程并重连环路 */
   async applyManaged(scope: string): Promise<void> {
     if (!inWails()) return;

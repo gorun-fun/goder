@@ -18,7 +18,6 @@ export { GoderChat } from '../panels/chat/chat-panel';
 export { GoderSessionList } from '../panels/sessions/session-list';
 export { GoderSessionDetail } from '../panels/inspector/session-detail';
 export { GoderConsole } from '../panels/console/console';
-export { GoderReview } from '../panels/inspector/review';
 export { GoderBrowser } from '../panels/inspector/browser';
 export { GoderSettingsNav } from '../panels/settings/settings-nav';
 export { GoderSettingsPage } from '../panels/settings/settings-page';

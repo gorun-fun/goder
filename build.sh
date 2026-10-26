@@ -10,11 +10,13 @@ cd "$(dirname "$0")"
 echo "==> 前端构建(app + embed 库)"
 (cd frontend && npm install --no-audit --no-fund >/dev/null 2>&1 || npm install >/dev/null)
 (cd frontend && npm run build && npm run build:embed)
+# 测试装具页随嵌入产物分发(纯静态,只依赖同目录 goder.js)。
+# 拷贝须在任何形态构建之后无条件执行:全量构建同样会重建(清空)
+# dist-embed,只在 embed 分支拷会让全量构建悄悄丢掉该产物。
+cp frontend/test-harness.html frontend/dist-embed/test-harness.html
 
 case "${1:-}" in
   embed)
-    # 测试装具页随嵌入产物分发(纯静态,只依赖同目录 goder.js)
-    cp frontend/test-harness.html frontend/dist-embed/test-harness.html
     echo "==> 嵌入库产物: frontend/dist-embed/goder.js + test-harness.html"
     exit 0
     ;;

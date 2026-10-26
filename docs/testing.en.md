@@ -229,7 +229,8 @@ checked per §5.5 on each platform's desktop app.
   iframe mode is expected (native-only, see §5).
 - **Review panel** (desktop capability): under a git project shows branch,
   ahead/behind, changed files, per-line +/− stats; click a file for the
-  diff. Non-git directories show an empty state, not an error or hang.
+  diff. Non-git directories show an error card (the git fatal text,
+  recoverable and non-blocking), not a hang.
 - ★ **Terminal panel** (desktop capability, test-serve testable): open the
   bottom/side terminal → PTY established (shell prompt appears) → type
   `echo OK` + Enter → `OK` echoes → "new terminal" opens a second session →
@@ -247,9 +248,11 @@ checked per §5.5 on each platform's desktop app.
 - ★ **Models**: provider list CRUD; detect models (GET /models) fills the
   list; default model selection; `~/.grf/settings.json` written correctly
   (desktop; web goes through the agent API, no plaintext keys sent down).
-- **Harness**: managed mode start/stop/status of the gh server (status with
-  addr/pid); remote mode connects after URL/token; gh binary path and
-  service address changes take effect after restart.
+- **Harness**: local (managed, the process is auto-started and kept alive
+  by the desktop shell — no manual start/stop) / remote (URL/token, applied
+  on save) mode toggle; common gh settings (max_steps / policy) written
+  correctly to `~/.grf/settings.json` (desktop via the bridge, web via the
+  agent API).
 - **Plugins**: the list shows built-ins (browser/computer ops, and the
   non-deletable goder-console "interface control"); auto-discovery vs
   explicit-list semantics correct; online install/delete.
@@ -263,10 +266,11 @@ checked per §5.5 on each platform's desktop app.
 
 ### 3.6 Desktop management & update (the former testable in test-serve)
 
-- **gh lifecycle**: after Settings → Harness stops, `/goder-api` is
-  disconnected (chat shows a connection error, not a hang); recovers on
-  start; after a test-serve restart the existing gh instance is adopted
-  (pid unchanged).
+- **gh managed keep-alive**: managed mode has no manual start/stop
+  (Settings → Harness is only a local/remote toggle); the gh server is
+  auto-started and kept alive by the desktop shell, recovering after
+  unexpected exits; after a test-serve restart the existing gh instance is
+  adopted (pid unchanged).
 - **Update check**: the settings/left-column update entry triggers a check
   → shows current/latest for both goder and gh. No-update shows a clear
   notice. **The download/restart phases are desktop-app-only** (test-serve

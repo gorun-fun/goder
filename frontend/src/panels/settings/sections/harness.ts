@@ -1,5 +1,6 @@
 // harness.ts — 「Harness」分区:服务与连接 + gh 常用设置(max_steps/
-// mouse/policy)。桌面态 4s 轮询服务状态(组件挂载期起、卸载即停)。
+// policy)。桌面态 4s 轮询服务状态(组件挂载期起、卸载即停;无手动
+// 启停入口,托管进程由桌面壳自动拉起保活)。
 import { css, html, nothing } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { sectionSharedCss, SettingsSectionPanel } from './shared';
@@ -15,29 +16,6 @@ export class GoderSettingsHarness extends SettingsSectionPanel {
     css`
       label {
         margin-bottom: 12px;
-      }
-      label.check {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      label.check input {
-        width: auto;
-      }
-      .srv-line {
-        font-size: var(--goder-font-size-xs);
-        color: var(--goder-text-dim);
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin: 2px 0 12px;
-      }
-      .srv-line .ok {
-        color: var(--goder-success);
-      }
-      .srv-line .bad {
-        color: var(--goder-error);
       }
     `,
   ];
