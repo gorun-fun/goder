@@ -1,0 +1,63 @@
+# ============================================================================
+# goder 持续集成(提交/PR 检查;发版流水线见 .github/workflows/release.yml)
+# 覆盖 AGENTS.md「常用命令」一节的质量门:
+#   frontend:tsc --noEmit 类型检查 + vitest 单测 + vite build(验证可构建)
+#   go:      gofmt(须无输出)/ go build / go vet / go test
+# 触发:main 推送 + 全部 PR;同分支新推送取消旧跑(concurrency)。
+# Go job 在 ubuntu 上构建桌面壳需要 GTK4/WebKitGTK dev(apt 安装;macOS
+# 开发机自带 Xcode 无需);固定 ubuntu-24.04:noble 起才有
+# libwebkitgtk-6.0-dev(22.04 只有 webkit2gtk),且锁 glibc 版本保证
+# 构建环境稳定。
+# ============================================================================
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit # 类型检查(AGENTS.md 质量门)
+      - run: npm test # vitest 单元测试
+      - run: npm run build # vite build -> frontend/dist(go:embed 输入)
+
+  go:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: 安装 GTK4/WebKitGTK dev(wails v3 linux CGO 依赖)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: gofmt 检查(须无输出)
+        run: |
+          out=$(gofmt -l pkg cmd internal plugins)
+          if [ -n "$out" ]; then
+            echo "以下文件未过 gofmt:"
+            echo "$out"
+            exit 1
+          fi
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...

@@ -1,0 +1,325 @@
+# ============================================================================
+# goder 发版流水线(GitHub Actions):三平台双架构构建,产物只发布到
+# GitHub Release 页(开源分发通道),不写下载服务器——download.gorun.fun
+# 的发布(桌面 App 自动更新通道)由 GitLab CI(.gitlab-ci.yml)负责;
+# 两通道版本号同源(同一 tag),可同时推两远端,各发各的产物。
+#
+# 版本号:直接取自 tag(去 v 前缀),不做 scripts/version.sh 的 .postN
+#   推算——推算以下载服务器已发目录为输入,GitHub 通道不写它、无从计起;
+#   本地打 tag 前仍按 AGENTS.md 用 `sh scripts/version.sh` 推算该取的
+#   版本。tag 基线与 gh 最新发布不一致时给非阻断警告(::warning)。
+#   捆绑 gh 的版本仍经 `sh scripts/version.sh gh` 取最新(读
+#   download.gorun.fun 目录列表,与 GitLab CI 同源)。
+#
+# 产物(与 GitLab CI 同一套打包约定):
+#   macOS .app zip(darwin arm64 + amd64,捆绑 gh,adhoc 签名)
+#   Linux zip(amd64 + arm64,只含 goder + 桌面集成件;gh 由 App 首次
+#     启动静默自动下载,GNOME 需 install.sh 装进应用菜单,见
+#     build/linux/install.sh 头注释)
+#   Windows zip(amd64 + arm64,只含 goder.exe;gh 由 App 首次启动弹框
+#     自动下载)
+#   每个产物随发 .sha256 校验文件;Release 说明 = tag 指向的提交信息;
+#   alpha/beta/rc 预发布版本自动标记 prerelease
+#
+# 与 GitLab CI 的实现差异(GitHub 原生 runner 免去自建交叉编译镜像
+# goder-builder):
+#   darwin   macOS runner 原生 arm64 + clang 交叉 amd64(Go 对本机异构
+#            darwin 自动补 -arch),codesign adhoc 替代 zig cc + ldid
+#   linux    ubuntu runner 原生 CGO 双架构 —— arm64 用 arm 原生 runner
+#            (ubuntu-24.04-arm,公开仓库免费、私有仓需付费计划;不可用
+#            时参照 .gitlab-ci.yml 的 sysroot 交叉方案改回交叉编译)
+#   windows  ubuntu runner 纯 Go 交叉(wails v3 windows 前端纯 syscall
+#            无 CGO;图标与 manifest 由仓库根 rsrc_windows_*.syso 自动链接)
+#
+# 触发:推送 tag(git tag v0.1.0 && git push origin v0.1.0);仅 tag 触发。
+# 无需配置任何 Secrets(gh CLI + 内置 GITHUB_TOKEN 创建 Release)。
+# ============================================================================
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  # gh(grf-harness)已发布产物的下载基地址:其下 {平台}/{版本}/gh
+  GH_DL_BASE: https://download.gorun.fun/grf-harness
+
+jobs:
+  # ------------- 版本号(取自 tag)+ 捆绑 gh 版本 + 基线一致性警告 -----------
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      gh-version: ${{ steps.v.outputs.gh-version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 解析版本号与捆绑 gh 版本
+        id: v
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            v[0-9]*) ;;
+            *) echo "::error::tag ${GITHUB_REF_NAME} 应形如 v<版本号>(如 v0.0.1-alpha.14 / v0.0.1.post0)"; exit 1 ;;
+          esac
+          VERSION="${GITHUB_REF_NAME#v}"
+          GH_VERSION=$(sh scripts/version.sh gh)
+          if [ -z "$GH_VERSION" ]; then
+            echo "::error::获取 gh(grf-harness)最新版本失败"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "gh-version=$GH_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Goder 版本: $VERSION(来自 tag;捆绑 gh: $GH_VERSION)"
+          # 非阻断:版本号应跟随 gh 最新发布 tag(AGENTS.md 发版规则),
+          # 只走本通道的发版不推进下载服务器的 .postN 计数,基线漂移时
+          # 提醒人工核对而非拦死
+          BASE="${VERSION%.post*}"
+          if [ "$BASE" != "$GH_VERSION" ]; then
+            echo "::warning::tag 基线 ${BASE} 与 gh(grf-harness)最新发布 ${GH_VERSION} 不一致;按 AGENTS.md 发版规则,版本号应跟随 gh 最新发布 tag(本地用 sh scripts/version.sh 推算)"
+          fi
+
+  # ------------------------------ 前端 vite --------------------------------
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build # vite build -> frontend/dist(go:embed 输入)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 7 # 仅够构建 job 消费,过期即清
+
+  # --------------------------- linux amd64(原生 CGO) ----------------------
+  build-linux-amd64:
+    name: build linux/amd64
+    needs: [version, frontend]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: 构建 + 打包
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false \
+            -ldflags "-s -w -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" \
+            -o bin/goder-linux-amd64 .
+          # 不捆绑 gh:App 启动时检测到缺失会静默自动下载(见
+          # internal/desktop/ghdownload_linux.go);zip 附桌面集成件。
+          rm -rf .linstage && mkdir .linstage
+          cp bin/goder-linux-amd64 .linstage/goder
+          cp build/linux/install.sh build/linux/goder.desktop frontend/public/icon.svg .linstage/
+          (cd .linstage && zip -qry ../bin/goder-linux-amd64.zip goder install.sh goder.desktop icon.svg)
+          rm -rf .linstage
+          echo "linux goder-linux-amd64.zip" > bin/manifest-linux-amd64.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-amd64
+          path: bin/
+          retention-days: 7
+
+  # --------------------------- linux arm64(原生 runner) --------------------
+  # ubuntu-24.04-arm 对公开仓库免费;私有仓不可用时参照 .gitlab-ci.yml 的
+  # sysroot 交叉方案(在 amd64 job 里交叉出 arm64)。
+  build-linux-arm64:
+    name: build linux/arm64
+    needs: [version, frontend]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: 构建 + 打包
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          CGO_ENABLED=1 go build -tags production -trimpath -buildvcs=false \
+            -ldflags "-s -w -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" \
+            -o bin/goder-linux-arm64 .
+          rm -rf .linstage && mkdir .linstage
+          cp bin/goder-linux-arm64 .linstage/goder
+          cp build/linux/install.sh build/linux/goder.desktop frontend/public/icon.svg .linstage/
+          (cd .linstage && zip -qry ../bin/goder-linux-arm64.zip goder install.sh goder.desktop icon.svg)
+          rm -rf .linstage
+          echo "linux-arm64 goder-linux-arm64.zip" > bin/manifest-linux-arm64.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-arm64
+          path: bin/
+          retention-days: 7
+
+  # ------------------ windows 双架构(ubuntu 纯 Go 交叉,无 CGO) ------------
+  build-windows:
+    name: build windows amd64+arm64
+    needs: [version, frontend]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - name: 构建 + 打包
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          for ARCH in amd64 arm64; do
+            # -H windowsgui:GUI 程序不弹控制台;图标与 manifest 由仓库根
+            # rsrc_windows_${ARCH}.syso 提供(go build 自动链接)。不捆绑
+            # gh:App 启动时检测到缺失会弹框自动下载。
+            CGO_ENABLED=0 GOOS=windows GOARCH=${ARCH} \
+              go build -tags production -trimpath -buildvcs=false \
+              -ldflags "-s -w -H windowsgui -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" \
+              -o bin/goder-windows-${ARCH}.exe .
+            rm -rf .winstage && mkdir .winstage
+            cp bin/goder-windows-${ARCH}.exe .winstage/goder.exe
+            (cd .winstage && zip -qry ../bin/goder-windows-${ARCH}.zip goder.exe)
+          done
+          rm -rf .winstage
+          { echo "windows goder-windows-amd64.zip"
+            echo "windows-arm64 goder-windows-arm64.zip"; } > bin/manifest-windows.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: bin/
+          retention-days: 7
+
+  # ------------- darwin 双架构(macOS runner 原生 + clang 交叉)+ .app -------
+  build-macos:
+    name: build macos arm64+amd64
+    needs: [version, frontend]
+    runs-on: macos-latest # Apple Silicon;amd64 走 clang 交叉(Go 自动补 -arch)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - name: 构建 + 组装 .app + 打包
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GH_VERSION: ${{ needs.version.outputs.gh-version }}
+        run: |
+          mkdir -p bin
+          # gh:直接下载 grf-harness 各平台最新发布版捆绑进 .app(不从源码
+          # 构建;Linux/Windows 不捆绑,App 首启自动下载)。两架构共用同一
+          # 版本(推算见 version job,与发版同一套排序)。
+          curl -fsSL -o bin/gh-darwin-arm64 ${GH_DL_BASE}/macos-arm64/${GH_VERSION}/gh
+          curl -fsSL -o bin/gh-darwin-amd64  ${GH_DL_BASE}/macos/${GH_VERSION}/gh
+          chmod +x bin/gh-darwin-*
+          # 部署目标压到 11.0(与 build.sh、Info.plist 的 LSMinimumSystemVersion
+          # 一致),消除新版 SDK 把目标文件编成当前系统版本的链接告警
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          export CGO_CFLAGS="-O2 -mmacosx-version-min=11.0"
+          export CGO_LDFLAGS="-O2 -mmacosx-version-min=11.0"
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+            go build -tags production -trimpath -buildvcs=false \
+            -ldflags "-s -w -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" \
+            -o bin/goder-darwin-arm64 .
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
+            go build -tags production -trimpath -buildvcs=false \
+            -ldflags "-s -w -X github.com/gorun-fun/goder/internal/desktop.appVersion=${VERSION}" \
+            -o bin/goder-darwin-amd64 .
+          # adhoc 签名(不签名的 arm64 macho 在 Apple Silicon 上会被内核直接
+          # SIGKILL;链接器签名在文件复制后可能失效,gh 下载件同样补签一次)
+          codesign -f -s - bin/goder-darwin-arm64 bin/goder-darwin-amd64 \
+                            bin/gh-darwin-arm64 bin/gh-darwin-amd64
+          chmod +x bin/*
+          for ARCH in arm64 amd64; do
+            rm -rf .appstage
+            mkdir -p .appstage/goder.app/Contents/MacOS .appstage/goder.app/Contents/Resources
+            sed -e "s/0.1.0/${VERSION}/g" build/darwin/Info.plist > .appstage/goder.app/Contents/Info.plist
+            cp build/darwin/AppIcon.icns .appstage/goder.app/Contents/Resources/AppIcon.icns
+            cp bin/goder-darwin-${ARCH} .appstage/goder.app/Contents/MacOS/goder
+            cp bin/gh-darwin-${ARCH} .appstage/goder.app/Contents/MacOS/gh
+            chmod +x .appstage/goder.app/Contents/MacOS/*
+            (cd .appstage && zip -qry ../bin/goder-macos-${ARCH}.zip goder.app)
+            # 目录名与 gh 下载侧一致:arm64 → macos-arm64,amd64 → macos
+            # (不能直接拼 macos-${ARCH}:amd64 会写成 macos-amd64,自动更新
+            # 按 macos/ 找不到新版本)
+            echo "$([ "$ARCH" = amd64 ] && echo macos || echo macos-${ARCH}) goder-macos-${ARCH}.zip" >> bin/manifest-macos.txt
+          done
+          rm -rf .appstage
+          ls -lh bin/
+      # 只上传 zip 与 manifest,bin/ 里的裸二进制(goder-darwin-*/gh-darwin-*)
+      # 已按架构打进 .app zip,不重复占 Artifacts 存储
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path:
+            - bin/goder-macos-*.zip
+            - bin/manifest-macos.txt
+          retention-days: 7
+
+  # ---------------- 发布 GitHub Release(不写下载服务器) --------------------
+  release:
+    needs: [version, build-linux-amd64, build-linux-arm64, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 创建 Release 并上传产物
+    steps:
+      - uses: actions/checkout@v4 # 取 tag 指向的提交信息做 Release 说明
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: bin
+          merge-multiple: true
+      - name: 创建 Release 并上传产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cat bin/manifest-*.txt > bin/PUBLISH_MANIFEST
+          # 每个产物随发 .sha256 校验文件(与下载服务器发布约定同款,供
+          # 人工校验;桌面 App 自动更新走 download.gorun.fun,不经这里)
+          while read -r DIR ZIP; do
+            [ -n "$DIR" ] || continue
+            sha256sum "bin/$ZIP" > "bin/$ZIP.sha256"
+          done < bin/PUBLISH_MANIFEST
+          # alpha/beta/rc 预发布版本自动标记 prerelease
+          opts=()
+          case "$VERSION" in
+            *-alpha*|*-beta*|*-rc*) opts+=(--prerelease) ;;
+          esac
+          # Release 说明:tag 指向的提交信息全文
+          NOTES=$(git log -1 --pretty=%B "${GITHUB_REF_NAME}")
+          # 重复运行(如上次上传中断)时 Release 已存在,改用 upload 续传
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" bin/*.zip bin/*.sha256 --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" bin/*.zip bin/*.sha256 \
+              --title "${GITHUB_REF_NAME}" --notes "$NOTES" "${opts[@]}"
+          fi
+          echo "已发布 ${GITHUB_REF_NAME}:"
+          cat bin/PUBLISH_MANIFEST

@@ -25,18 +25,36 @@ wails v3 桌面 App(内置托管 `gh server` 子进程)、可嵌入三方页面�
   registry/markdown/chat-model 归约器/automation 协议块/i18n/storage/
   retry-policy/发送管线/工具词典/scope 生命周期/scripted-api 测试装具);
   `go test ./...`(pkg 基座面:ghserver 进程管理与反代、identity、
-  gateway;internal/desktop 含 gh 下载与 bridge FQN 对齐守护)
+  gateway;internal/desktop 含 gh 下载与 bridge FQN 对齐守护)。
+  main 推送与 PR 由 `.github/workflows/ci.yml` 自动跑这套检查加
+  tsc/gofmt 门禁(Go job 在 ubuntu-24.04 apt 装 GTK dev)
 - (自动化测试以 test-serve + 浏览器驱动为主,指导见 `docs/testing.md`;
   人工 E2E 为真实 gh server + 真实模型的手动浏览器验证,playwright-cli
   或浏览器驱动)
-- **发版(打版)规则**:推送 tag 触发 GitLab CI(`.gitlab-ci.yml`,
-  仅 tag 触发;发布机地址/用户/目录 DEPLOY_HOST/DEPLOY_USER/DEPLOY_DIR
-  经 CI/CD 变量注入,内网信息不入库——openos 同套约定)。tag 与产物
+- **发版(打版)规则**:推送 tag 触发发版流水线,仅 tag 触发;两通道
+  各管各的,**同一 tag 可同时推两远端**:GitHub Actions
+  (`.github/workflows/release.yml`)构建三平台双架构、产物只发布到
+  **GitHub Release 页**(开源分发通道;版本号直接取自 tag 去 v 前缀
+  ——`.postN` 推算以下载服务器已发目录为输入,GitHub 通道不写它、
+  无从计起,本地打 tag 前仍用 `sh scripts/version.sh` 推算该取的版本,
+  流水线对 tag 基线与 gh 最新发布不一致给非阻断警告;无需配置 Secrets,
+  内置 GITHUB_TOKEN 经 gh CLI 建 Release;每个产物随发 `.sha256`,
+  alpha/beta/rc 自动标记 prerelease;原生 runner 免自建交叉镜像——
+  darwin=macOS runner 原生 + clang 交叉 amd64/codesign adhoc、
+  linux=ubuntu 原生 CGO(arm64 用 ubuntu-24.04-arm,公开仓库免费)、
+  windows=纯 Go 交叉);GitLab CI(`.gitlab-ci.yml`,内网 runner +
+  goder-builder 交叉镜像)发布到**下载服务器** download.gorun.fun
+  (桌面 App 自动更新通道,`.postN` 计数只随它推进;发布机信息
+  DEPLOY_HOST/DEPLOY_DIR/DEPLOY_SSH_PRIVATE_KEY(File 型)+
+  DEPLOY_USER(明文 root,非机密)经 GitLab CI/CD 变量注入,内网信息
+  不入库——openos 同套约定)。两通道版本号同源(同一 tag)但构建机
+  不同,二进制各有各的下载源,不混用。tag 与产物
   版本号 = gh(grf-harness)最新发布 tag;
   gh 未更新而本程序再次发版时追加 `.postN`(N 从 0 递增,
   推算脚本 `scripts/version.sh`,tag 名应与推算值一致)。
   发版步骤:`sh scripts/version.sh` 得版本 → 先推送 main →
-  `git tag v<版本> && git push origin v<版本>`。
+  `git tag v<版本> && git push origin v<版本>`(要 GitHub Release 页
+  分发时,同一 tag 再 `git push github v<版本>`)。
   publish 为每个产物随发 `.sha256` 校验文件;下载侧(internal/desktop
   的 verifyDlChecksum)按同目录 `.sha256`/`SHA256SUMS` 校验完整性,
   校验面存在即强制匹配、皆无则跳过(历史已发目录)——改校验约定时
