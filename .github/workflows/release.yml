@@ -273,13 +273,15 @@ jobs:
           rm -rf .appstage
           ls -lh bin/
       # 只上传 zip 与 manifest,bin/ 里的裸二进制(goder-darwin-*/gh-darwin-*)
-      # 已按架构打进 .app zip,不重复占 Artifacts 存储
+      # 已按架构打进 .app zip,不重复占 Artifacts 存储(with 的值必须是
+      # 标量——多路径用多行字符串,GitHub 校验器不认 YAML 序列,会判
+      # 整个 workflow 无效)
       - uses: actions/upload-artifact@v4
         with:
           name: release-macos
-          path:
-            - bin/goder-macos-*.zip
-            - bin/manifest-macos.txt
+          path: |
+            bin/goder-macos-*.zip
+            bin/manifest-macos.txt
           retention-days: 7
 
   # ---------------- 发布 GitHub Release(不写下载服务器) --------------------

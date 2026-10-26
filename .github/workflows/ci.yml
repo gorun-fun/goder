@@ -50,6 +50,10 @@ jobs:
           go-version-file: go.mod
       - name: 安装 GTK4/WebKitGTK dev(wails v3 linux CGO 依赖)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-4-dev libwebkitgtk-6.0-dev
+      # go:embed all:frontend/dist 需要目录存在(全新 checkout 没有)——
+      # vet/build/test 不校验资源内容,放占位文件即可,不重复跑 vite
+      - name: 补 go:embed 占位输入
+        run: mkdir -p frontend/dist && echo placeholder > frontend/dist/index.html
       - name: gofmt 检查(须无输出)
         run: |
           out=$(gofmt -l pkg cmd internal plugins)
