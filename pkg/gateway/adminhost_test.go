@@ -5,6 +5,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -88,14 +89,55 @@ func TestHostAdminProvidersFlow(t *testing.T) {
 	if got.Mark == "" {
 		t.Fatal("mark 应非空")
 	}
-	// 解析:限定名/裸名命中、未含报 not_found
+	// 解析:权威在 gh(转发该用户 gh 进程的 /v1/agent/models/resolve)。
+	// 本网关无真实 gh(GhBin 占位),断言 fail-fast:503 明示、不静默回退。
 	resp, raw = adminDo(t, srv, http.MethodGet, "/goder-api/admin/users/zhang san/resolve-model?name=m1", nil)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"resolved":"OpenOS/m1"`) {
-		t.Fatalf("裸名应解析: %d %s", resp.StatusCode, raw)
+	if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(raw), "不可用") {
+		t.Fatalf("gh 不可启时应 503 fail-fast: %d %s", resp.StatusCode, raw)
 	}
-	_, raw = adminDo(t, srv, http.MethodGet, "/goder-api/admin/users/zhang san/resolve-model?name=zz", nil)
-	if !strings.Contains(string(raw), `"not_found"`) {
-		t.Fatalf("未含应 not_found: %s", raw)
+}
+
+// TestResolveModelForwarding 转发链路(fake 上游):200 透传、404→503 提示
+// 升级、非 200→502、应答损坏→502。
+func TestResolveModelForwarding(t *testing.T) {
+	fake := ghserver.NewFakeUpstream()
+	defer fake.Close()
+	target := fake.URL()
+
+	// 200 正常透传
+	fake.RespondJSON("GET", "/v1/agent/models/resolve", `{"status":"ok","resolved":"OpenOS/m1"}`)
+	res, status, errMsg := forwardResolve(context.Background(), ghserver.Upstream{Target: target, Token: "tok"}, "m1")
+	if status != http.StatusOK || errMsg != "" || res.Status != "ok" || res.Resolved != "OpenOS/m1" {
+		t.Fatalf("应透传 ok: %+v %d %s", res, status, errMsg)
+	}
+	// 令牌已被注入
+	last := fake.Requests()[len(fake.Requests())-1]
+	if last.Auth != "Bearer tok" {
+		t.Fatalf("应注入 Bearer 令牌: %q", last.Auth)
+	}
+	if !strings.Contains(last.Query, "name=m1") {
+		t.Fatalf("应携带 name 查询参数: %q", last.Query)
+	}
+
+	// 404(旧版 gh 无端点)→ 503 升级提示
+	fake.RespondStatus("GET", "/v1/agent/models/resolve", http.StatusNotFound)
+	_, status, errMsg = forwardResolve(context.Background(), ghserver.Upstream{Target: target}, "m1")
+	if status != http.StatusServiceUnavailable || !strings.Contains(errMsg, "升级 gh") {
+		t.Fatalf("404 应 503 提示升级: %d %s", status, errMsg)
+	}
+
+	// 非 200 → 502
+	fake.RespondStatus("GET", "/v1/agent/models/resolve", http.StatusInternalServerError)
+	_, status, _ = forwardResolve(context.Background(), ghserver.Upstream{Target: target}, "m1")
+	if status != http.StatusBadGateway {
+		t.Fatalf("500 应 502: %d", status)
+	}
+
+	// 应答损坏 → 502
+	fake.RespondJSON("GET", "/v1/agent/models/resolve", `{oops`)
+	_, status, errMsg = forwardResolve(context.Background(), ghserver.Upstream{Target: target}, "m1")
+	if status != http.StatusBadGateway || !strings.Contains(errMsg, "不可解析") {
+		t.Fatalf("损坏应 502: %d %s", status, errMsg)
 	}
 }
 

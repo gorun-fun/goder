@@ -15,9 +15,13 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -157,15 +161,62 @@ func (g *Gateway) hProvidersPut(w http.ResponseWriter, r *http.Request) {
 
 // hResolveModel GET /users/{uid}/resolve-model?name= — 裸名/限定名/空(默认)
 // 的结构化解析(宿主无头任务 fail-fast 判定用;错误文案由宿主合成)。
+// 解析权威在 gh:转发该用户 gh 进程的 /v1/agent/models/resolve(端点每
+// 请求重读 settings.json,宿主刚落盘的供应商声明立即可见),不再在本仓
+// 镜像选解逻辑——选解唯一实现是 gh 的 config.ResolveModelEx,双实现
+// 靠注释人工对齐曾是语义漂移的源头。需惰拉该用户 gh 进程(无头任务
+// 链路下一步建会话本就会拉起);gh 版本过旧(无此端点,404)或不可达
+// 时 503 明示升级,不静默回退。
 func (g *Gateway) hResolveModel(w http.ResponseWriter, r *http.Request) {
 	m := g.requireManaged(w)
 	if m == nil {
 		return
 	}
 	uid := r.PathValue("uid")
-	sp := filepath.Join(m.UserGrfHome(uid), "settings.json")
-	res := ghserver.ResolveModelName(sp, strings.TrimSpace(r.URL.Query().Get("name")))
+	up, err := m.UserUpstream(uid)
+	if err != nil {
+		g.upstreamError(w, err)
+		return
+	}
+	res, status, errMsg := forwardResolve(r.Context(), up, strings.TrimSpace(r.URL.Query().Get("name")))
+	if status != http.StatusOK {
+		log.Printf("[gateway] resolve-model 转发失败(uid=%s): %s", uid, errMsg)
+		aerr(w, status, errMsg)
+		return
+	}
 	ajson(w, http.StatusOK, res)
+}
+
+// forwardResolve 向用户 gh 上游转发模型解析请求(独立函数便于网关级
+// fake 上游测试——Manager 的进程管理面须用真实 gh 测)。返回值:成功时
+// status=200 且 res 有效;失败时给出应写回的 HTTP 状态与错误文案。
+func forwardResolve(ctx context.Context, up ghserver.Upstream, name string) (res ghserver.ResolveResult, status int, errMsg string) {
+	q := url.Values{"name": []string{name}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		up.Target.JoinPath("/v1/agent/models/resolve").String()+"?"+q.Encode(), nil)
+	if err != nil {
+		return res, http.StatusInternalServerError, err.Error()
+	}
+	if up.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+up.Token)
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return res, http.StatusServiceUnavailable, "gh 上游不可达,请稍后重试"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return res, http.StatusServiceUnavailable, "gh 版本过旧(无 /v1/agent/models/resolve 端点),请升级 gh"
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return res, http.StatusBadGateway, fmt.Sprintf("gh 上游解析失败(应答 %d): %s", resp.StatusCode, body)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return res, http.StatusBadGateway, "gh 上游应答不可解析: " + err.Error()
+	}
+	return res, http.StatusOK, ""
 }
 
 // hPluginInstall POST /plugins/install {uid, name, command} — 安装宿主

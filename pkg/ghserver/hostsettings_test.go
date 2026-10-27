@@ -153,45 +153,6 @@ func TestUpsertProvidersCorruptSkip(t *testing.T) {
 	}
 }
 
-func TestResolveModelName(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	writeSettings(t, path, `{
-  "providers": {
-    "A": {"base_url": "x", "api_key": "k", "models": ["a1", "a2"]},
-    "B": {"base_url": "x", "api_key": "k", "models": ["b1", "x1"]},
-    "C": {"base_url": "x", "api_key": "k", "models": ["c1", "x1"]}
-  },
-  "default": "A/a1"
-}`)
-	cases := []struct {
-		want, status, resolved string
-		cands                  []string
-	}{
-		{"", "ok", "A/a1", nil},                     // 空 = 默认
-		{"A/a2", "ok", "A/a2", nil},                 // 限定名命中
-		{"A/b1", "not_found", "", nil},              // 限定名未含
-		{"a1", "ok", "A/a1", nil},                   // 默认供应商优先
-		{"b1", "ok", "B/b1", nil},                   // 恰一家命中
-		{"x1", "ambiguous", "", []string{"B", "C"}}, // 多家歧义,不武断挑选
-		{"zz", "not_found", "", nil},
-	}
-	for _, c := range cases {
-		got := ResolveModelName(path, c.want)
-		if got.Status != c.status || got.Resolved != c.resolved {
-			t.Fatalf("ResolveModelName(%q) = %+v,期望 status=%s resolved=%s", c.want, got, c.status, c.resolved)
-		}
-		if len(got.Candidates) != len(c.cands) {
-			t.Fatalf("ResolveModelName(%q) candidates = %v,期望 %v", c.want, got.Candidates, c.cands)
-		}
-	}
-	if r := ResolveModelName(filepath.Join(t.TempDir(), "none.json"), ""); r.Status != "unreadable" {
-		t.Fatalf("缺文件应 unreadable,得到 %s", r.Status)
-	}
-	writeSettings(t, path, `{"providers": {}}`) // 无默认
-	if r := ResolveModelName(path, ""); r.Status != "no_default" {
-		t.Fatalf("空名无默认应 no_default,得到 %s", r.Status)
-	}
-}
 
 func TestInstallPluginModes(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "grf-home")

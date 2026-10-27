@@ -194,79 +194,14 @@ func writeFileAtomic(path string, data []byte) error {
 // Status:ok(解析成功,Resolved 为全限定名)/ no_default(空名且未配置默认)/
 // not_found(不在可用清单)/ ambiguous(多家供应商同名命中,Candidates 有序
 // 列出)/ unreadable(配置缺失或损坏)。错误文案由调用方(宿主)按自己的
-// 语言习惯合成——这里只给机器可判定的语义。择序与 gh config.ResolveModel
-// 对齐:默认供应商优先 → 恰一家命中;多家歧义不武断挑选。
+// 语言习惯合成——这里只给机器可判定的语义。
+// 选解权威在 gh(唯一实现 config.ResolveModelEx,经 /v1/agent/models/
+// resolve 端点暴露);本类型只是网关转发的应答形状声明,本仓不再镜像
+// 选解逻辑(双实现靠注释人工对齐曾是语义漂移的源头)。
 type ResolveResult struct {
 	Status     string   `json:"status"`
 	Resolved   string   `json:"resolved,omitempty"`
 	Candidates []string `json:"candidates,omitempty"`
-}
-
-// ResolveModelName 对某用户的 settings.json 解析请求模型(裸名或全限定名;
-// 空 = 取默认)。fail-fast 语义(歧义/未含如实上报,绝不静默换路由)由
-// 调用方消费——gh 运行时的 best-effort 解析(歧义沿用当前)与此互补。
-func ResolveModelName(settingsPath, want string) ResolveResult {
-	raw, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return ResolveResult{Status: "unreadable"}
-	}
-	var cfg struct {
-		Providers map[string]struct {
-			Models []string `json:"models"`
-		} `json:"providers"`
-		Default string `json:"default"`
-	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return ResolveResult{Status: "unreadable"}
-	}
-	names := make([]string, 0, len(cfg.Providers))
-	for n := range cfg.Providers {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	has := func(provider, model string) bool {
-		p, ok := cfg.Providers[provider]
-		if !ok {
-			return false
-		}
-		for _, m := range p.Models {
-			if m == model {
-				return true
-			}
-		}
-		return false
-	}
-	switch {
-	case want == "":
-		if cfg.Default == "" {
-			return ResolveResult{Status: "no_default"}
-		}
-		return ResolveResult{Status: "ok", Resolved: cfg.Default}
-	case strings.Contains(want, "/"):
-		provider, model, _ := strings.Cut(want, "/")
-		if has(provider, model) {
-			return ResolveResult{Status: "ok", Resolved: want}
-		}
-		return ResolveResult{Status: "not_found"}
-	default:
-		if dp, _, ok := strings.Cut(cfg.Default, "/"); ok && has(dp, want) {
-			return ResolveResult{Status: "ok", Resolved: dp + "/" + want}
-		}
-		var hits []string
-		for _, n := range names {
-			if has(n, want) {
-				hits = append(hits, n)
-			}
-		}
-		switch len(hits) {
-		case 0:
-			return ResolveResult{Status: "not_found"}
-		case 1:
-			return ResolveResult{Status: "ok", Resolved: hits[0] + "/" + want}
-		default:
-			return ResolveResult{Status: "ambiguous", Candidates: hits}
-		}
-	}
 }
 
 // ---- 宿主 stdio 插件 ----

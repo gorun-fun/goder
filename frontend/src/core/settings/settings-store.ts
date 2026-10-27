@@ -792,10 +792,12 @@ class SettingsStore {
 
 export const settingsStore = new SettingsStore();
 
-// 裸模型名补全(与 gh 侧 config.ResolveModel 同语义,0.0.1-alpha.29+ 起
-// 线上真正生效):裸名默认供应商优先,否则恰一家提供时取该家;多家歧义/
-// 零命中返回 undefined —— gh 侧此时透传当前供应商解析,goder 侧按未选
-// 处理(走会话当前模型),不武断取表序首个造成与 gh 择店不一致。
+// 裸模型名补全(与 gh 侧选解同语义,0.0.1-alpha.29+ 起线上真正生效):
+// 裸名默认供应商优先,否则恰一家提供时取该家;多家歧义/零命中返回
+// undefined —— gh 侧此时透传当前供应商解析,goder 侧按未选处理(走会话
+// 当前模型),不武断取表序首个造成与 gh 择店不一致。同步签名的 UI 补全
+// 糖;选解权威在 gh /v1/agent/models/resolve(网关管理面 resolve-model
+// 即转发该端点),本函数语义须与其保持一致,勿单独演化。
 function bareModelFull(bare: string): string | undefined {
   const providers = settingsStore.modelCfg?.providers ?? [];
   const def = settingsStore.modelCfg?.default?.split('/')[0] ?? '';

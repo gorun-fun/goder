@@ -92,7 +92,8 @@ pkg/                     Go 公开层(三方 Go module 可 import 的基座面;
                          缓冲补齐、请求体上限)+ 类型化错误(errors.go:
                          容量类 429 / 未就绪与冷却 503)+
                          hostadmin/hostsettings(宿主管理面域逻辑:用户
-                         目录布局所有权、托管供应商声明 upsert、裸名解析、
+                         目录布局所有权、托管供应商声明 upsert、裸名解析
+                         (转发 gh /v1/agent/models/resolve 权威端点)、
                          插件安装、会话索引;openos 类宿主经网关 /admin/*
                          消费,不再直写 goder 私有文件)
   identity/              用户身份解析 Resolver:single(单用户)/ header

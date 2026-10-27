@@ -457,8 +457,12 @@ wrapper 反抠)实现的能力,现全部经 API 表达意图,目录知识收敛�
   约定的平台托管只读语义,嵌入方反代层无须再改写响应)。
 - **裸名模型解析** `GET /admin/users/{uid}/resolve-model?name=`
   → `{status: ok|no_default|not_found|ambiguous|unreadable, resolved?,
-  candidates?}`。择序与 gh `config.ResolveModel` 对齐(默认供应商优先 →
-  恰一家命中;多家歧义如实上报,不武断挑选);错误文案由宿主合成。
+  candidates?}`。**转发该用户 gh 进程的 `/v1/agent/models/resolve`**
+  (选解唯一权威在 gh 的 config.ResolveModelEx,本仓不再镜像选解逻辑;
+  端点每请求重读 settings.json,刚落盘的供应商声明立即可见)。会惰拉
+  该用户的 gh 进程——无头任务链路下一步建会话本就会拉起;gh 版本过旧
+  (无此端点)或不可达时 503 明示,不静默回退(需 gh ≥ 提供
+  /v1/agent/models/resolve 的版本)。错误文案由宿主合成。
 - **宿主 stdio 插件** `POST /admin/plugins/install`
   `{uid, name, command:[完整 argv]}`(自动发现模式落 wrapper / 显式
   列表模式 upsert 命令项,保「无 plugins 键 = 自动发现」语义)、

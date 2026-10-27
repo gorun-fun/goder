@@ -538,9 +538,15 @@ APIs, with directory knowledge converged back into this project.
   longer need to rewrite responses).
 - **Bare model-name resolution** `GET /admin/users/{uid}/resolve-model?name=`
   → `{status: ok|no_default|not_found|ambiguous|unreadable, resolved?,
-  candidates?}`. Resolution order matches gh's `config.ResolveModel`
-  (default provider first → exactly one hit; ambiguity is reported honestly,
-  never silently picked); error copy is synthesized by the host.
+  candidates?}`. **Forwards to that user's gh process
+  `/v1/agent/models/resolve`** (the single resolution authority is gh's
+  config.ResolveModelEx — this repo no longer mirrors the selection logic;
+  the endpoint re-reads settings.json per request, so provider declarations
+  just written are immediately visible). It lazily starts the user's gh
+  process — headless task flows would start it anyway on the next step; an
+  outdated gh (no such endpoint) or an unreachable one yields 503 with an
+  explicit message, never a silent fallback (requires gh ≥ the first version
+  shipping /v1/agent/models/resolve). Error copy is synthesized by the host.
 - **Host stdio plugins** `POST /admin/plugins/install`
   `{uid, name, command:[full argv]}` (auto-discovery mode writes a wrapper /
   explicit-list mode upserts the command entry, preserving the "no plugins
