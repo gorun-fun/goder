@@ -39,6 +39,15 @@ export class GoderSettingsModels extends SettingsSectionPanel {
         gap: 12px;
         align-items: start;
       }
+      /* 窄屏(手机):供应商列表与详情改单栏堆叠,列表限高滚动 */
+      @media (max-width: 560px) {
+        .models-cols {
+          grid-template-columns: 1fr;
+        }
+        .prov-list {
+          max-height: 35vh;
+        }
+      }
       .prov-list {
         border: 1px solid var(--goder-border);
         border-radius: var(--goder-radius);

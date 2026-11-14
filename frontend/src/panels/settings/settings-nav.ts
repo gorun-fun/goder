@@ -112,6 +112,15 @@ export class GoderSettingsNav extends GoderPanel {
         height: 14px;
         flex: none;
       }
+      /* 触屏:返回条与分区条目的触控行高加大 */
+      @media (hover: none) {
+        .back {
+          padding: 12px;
+        }
+        .item {
+          padding: 12px 10px;
+        }
+      }
       .footbar {
         flex: none;
         border-top: 1px solid var(--goder-border-soft);

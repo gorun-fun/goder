@@ -78,6 +78,13 @@ export class GoderUserChip extends GoderPanel {
         margin-left: -6px;
         border-radius: var(--goder-radius-sm);
       }
+      /* 触屏:可点 chip 命中区加大 */
+      @media (hover: none) {
+        .inner.click {
+          padding: 8px 10px;
+          margin-left: -10px;
+        }
+      }
       .inner.click:hover,
       .inner.click.on {
         background: var(--goder-bg-hover);

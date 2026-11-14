@@ -301,6 +301,31 @@ export class GoderSessionList extends GoderPanel {
         gap: 5px;
         padding: 4px 6px;
       }
+      /* 触屏(无 hover):悬停显形/互换的控件改为常显 —— 项目行操作钮
+       * (新建/折叠)与删除钮直接可见可点,时间戳让位;命中区同步加大 */
+      @media (hover: none) {
+        .proj-head .op {
+          opacity: 1;
+        }
+        .op button,
+        .sess .del {
+          padding: 7px;
+        }
+        .op svg,
+        .sess .del svg {
+          width: 16px;
+          height: 16px;
+        }
+        .sess .at {
+          display: none;
+        }
+        .sess .del {
+          display: inline-flex;
+        }
+        .edit-in {
+          padding: 8px 10px;
+        }
+      }
     `,
     /* 两段式删除待确认态(垃圾桶换红色「确认」文字);放数组末尾以
      * 压过上方两类名基态规则,详见 util/armed 的 armedBtnCss 注释 */

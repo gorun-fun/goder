@@ -77,6 +77,9 @@ const EFFORT_OPTIONS: { value: string; label: string }[] = [
 
 @customElement('goder-composer')
 export class GoderComposer extends LitElement {
+  /** 触屏环境(主输入无法 hover,如手机/平板):Enter 换行、发送靠按钮
+   * (移动 IM 惯例 —— 虚拟键盘无 Shift+Enter,否则无法多行输入)。 */
+  private static readonly TOUCH = typeof matchMedia !== 'undefined' && matchMedia('(hover: none)').matches;
   /** 数据域名(发送钩子等嵌入方策略按 scope 生效;宿主/chat-panel 下发) */
   @property({ type: String }) scope = 'default';
   /** 运行中(切换为停止) */
@@ -88,9 +91,16 @@ export class GoderComposer extends LitElement {
   /** 排队待发消息(回合运行中发送的,显示在输入框上方,可删除) */
   @property({ type: Array }) queue: { text: string; images?: string[] }[] = [];
   @property({ type: String }) placeholder = '';
-  /** 未显式给 placeholder 时的默认文案(i18n 可覆盖)。 */
+  /** 未显式给 placeholder 时的默认文案(i18n 可覆盖)。触屏不提示
+   * Enter/Shift+Enter 键位(Enter 是换行,发送靠按钮)。 */
   private get placeholderText(): string {
-    return this.placeholder || translate(this.scope, '发送消息…(/ 指令,Enter 发送,Shift+Enter 换行)');
+    return (
+      this.placeholder ||
+      translate(
+        this.scope,
+        GoderComposer.TOUCH ? '发送消息…(/ 指令)' : '发送消息…(/ 指令,Enter 发送,Shift+Enter 换行)',
+      )
+    );
   }
   /** 新会话访问策略:write-workspace(工作区访问)| off(完全访问) */
   @property({ type: String }) policy: DraftPolicy = 'off';
@@ -548,6 +558,40 @@ export class GoderComposer extends LitElement {
         padding-bottom: 4px;
         border-bottom: 1px solid var(--goder-border-soft);
         margin-bottom: 2px;
+      }
+      /* 触屏(无 hover):发送/停止、工具栏按钮、排队删除/附件移除、
+       * 弹出列表选项的命中区加大 */
+      @media (hover: none) {
+        .send,
+        .stop {
+          width: 38px;
+          height: 38px;
+        }
+        .send svg,
+        .stop svg {
+          width: 18px;
+          height: 18px;
+        }
+        .bar-btn {
+          padding: 9px 10px;
+        }
+        .queue-item button {
+          padding: 7px;
+        }
+        .queue-item button svg {
+          width: 14px;
+          height: 14px;
+        }
+        .img-chip button {
+          padding: 6px;
+        }
+        .img-chip button svg {
+          width: 13px;
+          height: 13px;
+        }
+        .pop-item {
+          padding: 10px;
+        }
       }
     `,
   ];
@@ -1057,17 +1101,22 @@ export class GoderComposer extends LitElement {
       }
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      // 菜单展开且高亮项未输全:Enter 先补全指令名
+      // 菜单展开且高亮项未输全:Enter 先补全指令名(触屏同样适用)
       if (this.slashOpen) {
         const word = this.slashWord.slice(1);
         const sel = this.slashItems[Math.min(this.slashIdx, this.slashItems.length - 1)];
         if (sel && sel.name !== word) {
+          e.preventDefault();
           this.completeSlash(sel.name);
           return;
         }
       }
-      this.submit();
+      // 桌面:Enter 发送、Shift+Enter 换行;触屏:Enter 换行(虚拟键盘
+      // 无 Shift+Enter,否则无法多行输入),发送一律靠按钮
+      if (!GoderComposer.TOUCH) {
+        e.preventDefault();
+        this.submit();
+      }
     }
   }
 

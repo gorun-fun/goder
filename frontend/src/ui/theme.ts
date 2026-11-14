@@ -155,4 +155,26 @@ export const controls = css`
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
+  /* 触屏(主输入无法 hover,如 Android WebView):加大命中区。
+   * 全部 adopt controls 的面板共享此规则 —— 桌面 hover 交互不受影响。 */
+  @media (hover: none) {
+    button {
+      padding: 8px 12px;
+    }
+    button.ghost {
+      padding: 8px 10px;
+    }
+    button svg {
+      width: 15px;
+      height: 15px;
+    }
+    input[type='text'],
+    input[type='password'],
+    input[type='number'],
+    input:not([type]),
+    textarea,
+    select {
+      padding: 8px 10px;
+    }
+  }
 `;

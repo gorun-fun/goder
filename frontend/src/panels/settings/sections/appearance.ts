@@ -72,6 +72,13 @@ export class GoderSettingsAppearance extends SettingsSectionPanel {
         font-size: var(--goder-font-size-xs);
         color: var(--goder-text-faint);
       }
+      /* 触屏:强调色圆钮命中区加大 */
+      @media (hover: none) {
+        .swatch {
+          width: 30px;
+          height: 30px;
+        }
+      }
     `,
   ];
 

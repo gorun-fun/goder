@@ -127,6 +127,12 @@ export class GoderSettingsPage extends GoderPanel {
       .body.wide {
         max-width: 880px;
       }
+      /* 窄屏(手机):画布内边距收窄 */
+      @media (max-width: 560px) {
+        .body {
+          padding: 16px 14px 40px;
+        }
+      }
       .hint {
         font-size: var(--goder-font-size-xs);
         color: var(--goder-text-faint);

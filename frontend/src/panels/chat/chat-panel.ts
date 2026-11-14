@@ -61,9 +61,9 @@ export class GoderChat extends GoderPanel {
   private stickRo: ResizeObserver | null = null;
   /** 上次渲染的会话 id(切会话重置吸附并滚到最新) */
   private lastSid?: string;
-  /** 聊天列过窄(右栏/窗口挤压):状态浮窗自动收成单行,避免盖住对话内容 */
+  /** 聊天列过窄(右栏/窗口挤压/移动端全屏):状态浮窗抑制自动展开(手动展开不受限) */
   @state() private colNarrow = false;
-  /** 聊天列窄阈值(px):低于即自动收缩浮窗 */
+  /** 聊天列窄阈值(px):低于即通知浮窗抑制自动展开 */
   private static readonly NARROW_AT = 560;
   /** 聊天列宽度观察(浮窗自动收缩用) */
   private colRo: ResizeObserver | null = null;
@@ -419,6 +419,27 @@ export class GoderChat extends GoderPanel {
       .bop svg {
         width: 13px;
         height: 13px;
+      }
+      /* 触屏(无 hover):用户消息复制/编辑常显,回到底部加大命中区 */
+      @media (hover: none) {
+        .bops {
+          opacity: 1;
+        }
+        .bop {
+          padding: 7px;
+        }
+        .bop svg {
+          width: 16px;
+          height: 16px;
+        }
+        .to-bottom {
+          width: 44px;
+          height: 44px;
+        }
+        .to-bottom svg {
+          width: 18px;
+          height: 18px;
+        }
       }
       /* 编辑态:原位输入框 + 操作行 */
       .edit-box {

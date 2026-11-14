@@ -227,14 +227,23 @@ export const sectionSharedCss = [
       padding: 2px 7px;
       font-size: var(--goder-font-size-sm);
     }
-    .mrow .mhint {
-      flex: none;
-      font-size: var(--goder-font-size-xs);
-      color: var(--goder-text-faint);
-      user-select: none;
-    }
-  `,
-];
+      .mrow .mhint {
+        flex: none;
+        font-size: var(--goder-font-size-xs);
+        color: var(--goder-text-faint);
+        user-select: none;
+      }
+      /* 窄屏(手机):表单双栏与平铺卡片改单栏,避免挤压截断 */
+      @media (max-width: 560px) {
+        .prov-body .fields {
+          grid-template-columns: 1fr;
+        }
+        .tiles {
+          grid-template-columns: 1fr;
+        }
+      }
+    `,
+  ];
 
 /** 内置设置分区组件基类(抽象,不注册自定义元素)。 */
 export class SettingsSectionPanel extends GoderPanel {

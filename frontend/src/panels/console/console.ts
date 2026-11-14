@@ -70,6 +70,15 @@ export class GoderConsole extends GoderPanel {
         padding: 2px 7px;
         font-size: var(--goder-font-size-xs);
       }
+      /* 触屏:过滤项与头部按钮(暂停/清空)命中区加大 */
+      @media (hover: none) {
+        .f {
+          padding: 7px 10px;
+        }
+        .head button {
+          padding: 7px 10px;
+        }
+      }
       .body {
         flex: 1;
         overflow: auto;

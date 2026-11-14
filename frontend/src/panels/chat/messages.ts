@@ -125,7 +125,7 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
           break;
         }
       }
-      return html`<goder-tool-card .item=${it} .ctxShot=${ctxShot} .ctxMeta=${ctxMeta}></goder-tool-card>`;
+      return html`<goder-tool-card .item=${it} .scope=${p.scope} .ctxShot=${ctxShot} .ctxMeta=${ctxMeta}></goder-tool-card>`;
     }
     case 'notice':
       return html`

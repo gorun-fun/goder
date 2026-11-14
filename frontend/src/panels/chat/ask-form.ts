@@ -214,6 +214,15 @@ export class GoderAskForm extends LitElement {
         white-space: pre-wrap;
         word-break: break-word;
       }
+      /* 触屏:「自定义答案」入口与已应答折叠行的命中区加大 */
+      @media (hover: none) {
+        .other-row {
+          padding: 11px 12px;
+        }
+        .done {
+          padding: 8px 2px;
+        }
+      }
     `,
   ];
 

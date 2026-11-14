@@ -23,7 +23,7 @@ export class GoderStatusPop extends GoderPanel {
   /** git 轮询计时器与上次取值的项目目录(cwd 变化即重取) */
   private gitTimer?: number;
   private gitCwd = '';
-  /** 聊天列过窄:强制单行,避免盖住对话内容 */
+  /** 聊天列过窄:抑制「内容变化自动展开」(避免盖住对话内容),手动展开不受限 */
   @property({ type: Boolean }) narrow = false;
 
   /** 展开态(收起为单行:有任务列表时显示任务完成度,否则 git 行级变更);
@@ -51,7 +51,7 @@ export class GoderStatusPop extends GoderPanel {
       this.snap = { sid, key };
     } else if (this.snap.key !== key) {
       this.snap = { sid, key };
-      this.open = true;
+      if (!this.narrow) this.open = true;
     }
   }
 
@@ -317,6 +317,30 @@ export class GoderStatusPop extends GoderPanel {
       .sp-task:hover .sp-tdel {
         display: inline-flex;
       }
+      /* 触屏(无 hover):删除钮常显(操作员名让位),展开钮/任务行命中区加大 */
+      @media (hover: none) {
+        .sp-fold {
+          padding: 7px;
+        }
+        .sp-fold svg {
+          width: 16px;
+          height: 16px;
+        }
+        .sp-task {
+          padding: 8px 6px 8px 2px;
+        }
+        .sp-task .sp-towner {
+          display: none;
+        }
+        .sp-task .sp-tdel {
+          display: inline-flex;
+          padding: 7px;
+        }
+        .sp-task .sp-tdel svg {
+          width: 16px;
+          height: 16px;
+        }
+      }
     `,
     /* 两段式删除待确认态(垃圾桶换红色「确认」文字),放数组末尾压过
      * 两类名基态规则,详见 util/armed 的 armedBtnCss 注释 */
@@ -338,8 +362,10 @@ export class GoderStatusPop extends GoderPanel {
     if (!hasGit && !hasTodos && !hasGoal && !hasAuto) return nothing;
 
     // 收起态:单行显示——优先级:任务完成度 > 目标阶段 > git 行级变更 >
-    // 自动化任务数;整行可点击展开(按钮点击冒泡到同一处理)。
-    if (!this.open || this.narrow) {
+    // 自动化任务数;整行可点击展开(按钮点击冒泡到同一处理)。narrow 只
+    // 抑制自动展开,手动展开可用(移动端聊天列恒窄,浮窗有 max-width/72%
+    // 高度约束,展开不会失控)。
+    if (!this.open) {
       const doneCnt = todos?.filter((t) => t.status === 'completed').length ?? 0;
       return html`
         <div class="status-pop collapsed" title="展开状态浮窗" @click=${this.expand}>

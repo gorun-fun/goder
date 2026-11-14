@@ -7,11 +7,14 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { theme } from '../../ui/panel';
 import { fileEditStat, fmtToolDuration, toolDetail, toolFilePath, toolLabel, toolPrimaryText } from '../../util/fmt';
 import { clickCoordOf, isClickTool, parseShotMeta } from '../../core/model/chat-model';
+import { getFileOpen } from '../../registry/registry';
 import type { ToolItem } from '../../core/model/chat-model';
 
 @customElement('goder-tool-card')
 export class GoderToolCard extends LitElement {
   @property({ type: Object }) item!: ToolItem;
+  /** 数据域名(宿主 fileOpen 钩子按 scope 生效;messages.ts 渲染时下发) */
+  @property({ type: String }) scope = 'default';
   /** 点击类工具的定位底图:它之前最近一张截图(data URL);缺省则不显示「查看」。 */
   @property({ type: Object, attribute: false }) ctxShot?: string;
   /** 底图截图的结果文本(含覆盖起点/scale meta;全局坐标换算图上像素用) */
@@ -192,6 +195,15 @@ export class GoderToolCard extends LitElement {
           box-shadow: 0 0 0 4px rgb(0 0 0 / 0.15);
         }
       }
+      /* 触屏:整行(展开详情的唯一点击区)与「查看」链接命中区加大 */
+      @media (hover: none) {
+        .line {
+          padding: 7px 2px;
+        }
+        .view {
+          padding: 6px 2px;
+        }
+      }
     `,
   ];
 
@@ -220,26 +232,32 @@ export class GoderToolCard extends LitElement {
     // 在截图上圈出本次点击位置(坐标是截图栅格像素,按原始尺寸换算百分比)。
     const spot = isClickTool(it.name) && it.status !== 'running' ? clickCoordOf(it.args) : undefined;
     const canSpot = !!(spot && this.ctxShot);
+    // 文件名可点(→ goder-open-file)仅当有接管方:app-shell(桌面/网页
+    // 形态)或宿主 fileOpen 钩子(embed.configure 落点)。独立面板嵌入
+    // (如移动宿主)两者皆无时降级为普通文本,避免死点击。
+    const fileOpenable = !!getFileOpen(this.scope) || !!document.querySelector('goder-app-shell');
     return html`
       <div class="line ${it.status === 'running' ? 'running' : ''}" @click=${() => (this.open = !this.open)}>
         <span class="lab">${label}</span>
         ${dur ? html`<span class="time">${dur}</span>` : nothing}
         ${fileName && filePath
-          ? html`<span
-              class="subject file"
-              title=${`点击在右栏打开:${filePath}`}
-              @click=${(e: Event) => {
-                e.stopPropagation();
-                this.dispatchEvent(
-                  new CustomEvent('goder-open-file', {
-                    detail: { path: filePath, name: fileName, rel: fileName },
-                    bubbles: true,
-                    composed: true,
-                  }),
-                );
-              }}
-              >${fileName}</span
-            >`
+          ? fileOpenable
+            ? html`<span
+                class="subject file"
+                title=${`点击在右栏打开:${filePath}`}
+                @click=${(e: Event) => {
+                  e.stopPropagation();
+                  this.dispatchEvent(
+                    new CustomEvent('goder-open-file', {
+                      detail: { path: filePath, name: fileName, rel: fileName },
+                      bubbles: true,
+                      composed: true,
+                    }),
+                  );
+                }}
+                >${fileName}</span
+              >`
+            : html`<span class="subject" title=${filePath}>${fileName}</span>`
           : subject
             ? html`<span class="subject">${subject}</span>`
             : nothing}
