@@ -30,6 +30,9 @@ import './user-chip';
 export class GoderSessionList extends GoderPanel {
   /** 隐藏底部连接区(嵌入态由宿主全局配置时) */
   @property({ type: Boolean, attribute: 'no-connection' }) noConnection = false;
+  /** 扁平模式(移动端宿主):不渲染「项目」小节头与分组头/新建项目/刷新,
+   * 非操作员项目的全部会话跨项目按最近活动合并为一个列表。 */
+  @property({ type: Boolean, reflect: true }) flat = false;
 
   /** web 态新建项目的内联输入 */
   @state() private newProject = false;
@@ -346,6 +349,7 @@ export class GoderSessionList extends GoderPanel {
 
   render() {
     const s = this.store;
+    if (this.flat) return this.renderFlat();
     const desktop = inWails();
     const operators = desktop ? s.operatorGroups() : [];
     const projects = [...s.index.projects]
@@ -394,6 +398,38 @@ export class GoderSessionList extends GoderPanel {
         ${projects.map((p) => this.renderProject(p.id, p.name, !!p.collapsed, p.path))}
         ${projects.length === 0 && !this.newProject
           ? html`<div class="hint-empty">还没有项目。点击「项目」右侧 + 新建。</div>`
+          : nothing}
+      </div>
+      ${this.noConnection
+        ? nothing
+        : html`
+            <div class="footbar">
+              <goder-user-chip scope=${this.scope}></goder-user-chip>
+              <button class="gear" title="设置" @click=${() => this.fire('goder-open-settings')}>${unsafeHTML(icon.settings)}</button>
+            </div>
+          `}
+    `;
+  }
+
+  /** 扁平模式(移动端宿主):无「项目」小节头/分组头/新建项目/刷新,
+   * 草稿伪行置顶 + 非操作员项目的全部会话跨项目按最近活动合并为一个列表。 */
+  private renderFlat() {
+    const s = this.store;
+    const opIds = new Set(s.index.projects.filter((p) => p.kind === 'operator').map((p) => p.id));
+    const sessions = Object.entries(s.index.sessions)
+      .filter(([, rec]) => !opIds.has(rec.projectId))
+      .sort((a, b) => ((a[1].updatedAt ?? a[1].createdAt) < (b[1].updatedAt ?? b[1].createdAt) ? 1 : -1));
+    const drafting = !!s.activeSessionId?.startsWith('draft:');
+    return html`
+      <div class="list">
+        ${drafting ? this.renderSession(s.activeSessionId!, '新会话(未发送)', '') : nothing}
+        ${repeat(
+          sessions,
+          ([sid]) => sid,
+          ([sid, rec]) => this.renderSession(sid, rec.title, rec.updatedAt ?? rec.createdAt),
+        )}
+        ${sessions.length === 0 && !drafting
+          ? html`<div class="hint-empty">还没有会话。点右上 + 新建。</div>`
           : nothing}
       </div>
       ${this.noConnection
