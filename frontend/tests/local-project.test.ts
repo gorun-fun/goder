@@ -55,6 +55,28 @@ describe('单项目模式(localProject)', () => {
     releaseScope(name);
   });
 
+  it('后开启也迁移:面板先挂载(scope 已 start)、configure 补跑 reloadIndex 的时序', async () => {
+    // 复刻嵌入时序:自定义元素注册即 upgrade → acquireScope 先于宿主
+    // configure;embed.configure 里 setLocalProject 后补跑 reloadIndex。
+    const name = `lp-late-${Math.random().toString(36).slice(2)}`;
+    setPersistence({
+      load: async () => ({
+        version: 1,
+        projects: [{ id: UNGROUPED, name: '未分组会话', createdAt: '2026-01-01T00:00:00Z' }],
+        sessions: { fc_late: { projectId: UNGROUPED, title: '旧会话', createdAt: '2026-01-01T00:00:00Z' } },
+      }),
+      save: async () => {},
+    });
+    const s = acquireScope(name); // 未开启:reloadIndex 落 UNGROUPED
+    await s.reloadIndex();
+    expect(s.index.sessions['fc_late']?.projectId).toBe(UNGROUPED);
+    setLocalProject(name, true); // 宿主 configure 到达
+    await s.reloadIndex(); // embed.configure 的补跑
+    expect(s.index.projects.find((p) => p.id === LOCAL)?.name).toBe('本地项目');
+    expect(s.index.sessions['fc_late']?.projectId).toBe(LOCAL);
+    releaseScope(name);
+  });
+
   it('关闭模式(未配置)时行为不变:新会话仍落未分组', async () => {
     const api = createScriptedApi();
     setApiFetch(api.asFetch());

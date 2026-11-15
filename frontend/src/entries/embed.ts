@@ -121,7 +121,7 @@ import type { SideTopConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
 import type { MarkdownRenderer } from '../registry/registry';
 
-import { configureScope, setSessionDefaults, setUngroupedSessions, setLocalProject, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt } from '../core/store/scope';
+import { configureScope, getScope, setSessionDefaults, setUngroupedSessions, setLocalProject, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt } from '../core/store/scope';
 import { setI18n } from '../core/i18n';
 import { registerBuiltinCommon } from '../shell/builtin-common';
 import '../shell/app-shell';
@@ -226,7 +226,13 @@ export function configure(
   if (cfg.sessionDefaults !== undefined) setSessionDefaults(scope, cfg.sessionDefaults);
   if (cfg.disableDefaultPrompt !== undefined) setDisableDefaultPrompt(scope, cfg.disableDefaultPrompt);
   if (cfg.ungroupedSessions !== undefined) setUngroupedSessions(scope, cfg.ungroupedSessions);
-  if (cfg.localProject !== undefined) setLocalProject(scope, cfg.localProject);
+  if (cfg.localProject !== undefined) {
+    setLocalProject(scope, cfg.localProject);
+    // 自定义元素注册即 upgrade:面板可能先于本调用挂载,scope 已用旧策略
+    // 跑过 reloadIndex(start)——补跑一次让本地项目补建/迁移即时生效
+    // (幂等;scope 尚不存在时 getScope 创建,start 即带新策略)。
+    void getScope(scope).reloadIndex();
+  }
   if (cfg.fileOpen !== undefined) setFileOpen(scope, cfg.fileOpen);
   if (cfg.uiEvents !== undefined) setUiEventHandler(scope, cfg.uiEvents);
   if (cfg.newProject !== undefined) setNewProject(scope, cfg.newProject);
