@@ -26,7 +26,7 @@ export { GoderToolCard } from '../panels/chat/tool-card';
 export { GoderAskForm } from '../panels/chat/ask-form';
 export { GoderApprovalCard } from '../panels/chat/approval-card';
 
-export { configureScope, getScope, acquireScope, releaseScope, UNGROUPED, savedConn, setSessionDefaults, setUngroupedSessions, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt, setModelNameResolver } from '../core/store/scope';
+export { configureScope, getScope, acquireScope, releaseScope, UNGROUPED, LOCAL, savedConn, setSessionDefaults, setUngroupedSessions, setLocalProject, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt, setModelNameResolver } from '../core/store/scope';
 export type { GoderScope, ConnectionConfig, AuthConfig } from '../core/store/scope';
 export type { SendPayload, SendInterceptor, ApprovalRequest, ApprovalDecision, ApprovalHook } from '../core/store/host-config';
 import type { AuthConfig } from '../core/store/scope';
@@ -121,7 +121,7 @@ import type { SideTopConfig } from '../registry/registry';
 import type { SettingsConfig } from '../registry/registry';
 import type { MarkdownRenderer } from '../registry/registry';
 
-import { configureScope, setSessionDefaults, setUngroupedSessions, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt } from '../core/store/scope';
+import { configureScope, setSessionDefaults, setUngroupedSessions, setLocalProject, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt } from '../core/store/scope';
 import { setI18n } from '../core/i18n';
 import { registerBuiltinCommon } from '../shell/builtin-common';
 import '../shell/app-shell';
@@ -203,6 +203,12 @@ export function configure(
     locale?: string;
     messages?: Record<string, string>;
     persistToken?: boolean;
+    /** 单项目模式(移动端宿主):项目概念对使用者不可见,全部会话归入
+     * 一个隐藏的默认项目(固定 id LOCAL,会话落点全面改道,存量未分组
+     * 会话自动迁入)。值为项目名;true = 默认「本地项目」。配合
+     * session-list 的 flat 属性食用(列表层隐藏全部分组);聊天空态
+     * 文案同步去「项目」化。 */
+    localProject?: boolean | string;
     /** false = 隐藏聊天列右上的状态浮窗(goder 特有的自动化任务/git/
      * goal 卡;不用自动化能力的嵌入方裁掉,聊天区完全干净)。 */
     statusPop?: boolean;
@@ -220,6 +226,7 @@ export function configure(
   if (cfg.sessionDefaults !== undefined) setSessionDefaults(scope, cfg.sessionDefaults);
   if (cfg.disableDefaultPrompt !== undefined) setDisableDefaultPrompt(scope, cfg.disableDefaultPrompt);
   if (cfg.ungroupedSessions !== undefined) setUngroupedSessions(scope, cfg.ungroupedSessions);
+  if (cfg.localProject !== undefined) setLocalProject(scope, cfg.localProject);
   if (cfg.fileOpen !== undefined) setFileOpen(scope, cfg.fileOpen);
   if (cfg.uiEvents !== undefined) setUiEventHandler(scope, cfg.uiEvents);
   if (cfg.newProject !== undefined) setNewProject(scope, cfg.newProject);

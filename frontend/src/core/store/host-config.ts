@@ -51,6 +51,27 @@ export function ungroupedAllowed(scope: string): boolean {
   return !ungroupedDenied.has(scope);
 }
 
+// ---------- localProject(embed.configure 的 localProject 落点) ----------
+
+// 单项目模式(移动端宿主):项目是底层概念不可拆,宿主开启后全部会话
+// 落一个固定 id 的隐藏默认项目(scope 侧补建并改道落点,见 scope.ts 的
+// LOCAL)。值为项目名;true = 默认名「本地项目」;undefined/false 关闭。
+// UI 层的项目隐藏由 session-list 的 flat 属性承担(该模式本就为 flat
+// 宿主而设,非 flat 宿主开启只改会话落点、不动分组渲染)。
+const localProjectNames = new Map<string, string>();
+
+export const LOCAL_PROJECT_DEFAULT_NAME = '本地项目';
+
+export function setLocalProject(scope: string, name: string | boolean | undefined): void {
+  if (name === undefined || name === false) localProjectNames.delete(scope);
+  else localProjectNames.set(scope, name === true ? LOCAL_PROJECT_DEFAULT_NAME : name);
+}
+
+/** 单项目模式的默认项目名;undefined = 未开启。 */
+export function getLocalProject(scope: string): string | undefined {
+  return localProjectNames.get(scope);
+}
+
 // ---------- 发送钩子(embed.configure 的 onBeforeSend 落点) ----------
 
 /** 待发送载荷(composer 提交的原始输入)。 */

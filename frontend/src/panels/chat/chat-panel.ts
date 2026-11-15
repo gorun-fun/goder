@@ -16,6 +16,7 @@ import { usageTotals, type AskItem } from '../../core/model/chat-model';
 import { settingsStore, displayFullModel } from '../../core/settings/settings-store';
 import { modelMenuOf, contextWindowDenominator } from '../../util/model-menu';
 import { registry, getStatusPop, onStatusPopChange, type PanelContext } from '../../registry/registry';
+import { getLocalProject } from '../../core/store/host-config';
 import './composer';
 import './status-pop';
 import { renderItem, renderChatNav, cnavWave, cnavReset, type MessageViewProps } from './messages';
@@ -953,11 +954,15 @@ export class GoderChat extends GoderPanel {
 
   private renderEmpty() {
     const s = this.store!;
+    // 单项目模式(移动端宿主):项目概念对使用者不可见,空态文案不再提及。
+    const noProjects = !!getLocalProject(s.name);
     if (this.sid?.startsWith('draft:')) {
       return html`<div class="empty">
         <div class="big">${unsafeHTML(icon.chat)}</div>
         <h3>${this.t('新会话')}</h3>
-        <p>${this.t('发第一条消息开始对话。首条消息将决定会话标题;项目默认策略(policy / system_prompt 等)随首条消息生效。')}</p>
+        <p>${noProjects
+          ? this.t('发第一条消息开始对话,首条消息将决定会话标题。')
+          : this.t('发第一条消息开始对话。首条消息将决定会话标题;项目默认策略(policy / system_prompt 等)随首条消息生效。')}</p>
       </div>`;
     }
     return html`<div class="empty">
@@ -966,7 +971,9 @@ export class GoderChat extends GoderPanel {
       <p>
         ${s.connState === 'error'
           ? html`${this.t('连接失败:{err}。请检查服务配置或登录状态。', { err: s.connError ?? this.t('未知错误') })}`
-          : this.t('在左侧选择一个项目的会话,或点击项目上的 + 新建;也可以直接在下方输入发送,自动开始一个新会话(未选项目时归入「未分组会话」)。')}
+          : noProjects
+            ? this.t('点击 + 新建会话,或直接在下方输入发送。')
+            : this.t('在左侧选择一个项目的会话,或点击项目上的 + 新建;也可以直接在下方输入发送,自动开始一个新会话(未选项目时归入「未分组会话」)。')}
       </p>
     </div>`;
   }

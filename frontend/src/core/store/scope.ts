@@ -43,6 +43,7 @@ import { Emitter } from './emitter';
 import {
   defaultPromptDisabled,
   getApprovalHook,
+  getLocalProject,
   getSessionDefaults,
   ungroupedAllowed,
 } from './host-config';
@@ -51,6 +52,13 @@ export { errText } from './send-pipeline';
 import { keyValueStorage, kvGet, kvSet } from './storage';
 
 export const UNGROUPED = '__ungrouped';
+
+// 单项目模式(configure localProject)的默认项目:固定 id、名字宿主可配
+// (默认「本地项目」)。项目是底层概念不可拆,移动端等「只有会话」的宿主
+// 开启后:该补则补、存量未分组会话迁入、一切新会话落点(无激活会话直发
+// 兜底/服务端同步发现/无参 newDraft)全部改道到这里;列表层不渲染(宿主
+// 用 session-list 的 flat 属性隐藏全部分组)。
+export const LOCAL = '__local';
 
 // 宿主主目录通道:桌面态经 host/bridge 注入(未选工作区时新会话 workspace
 // 的默认值、自动化操作员的工作区目录创建);纯 web 态保持 no-op 默认。
@@ -79,6 +87,8 @@ export {
   setSessionDefaults,
   setUngroupedSessions,
   ungroupedAllowed,
+  setLocalProject,
+  getLocalProject,
   setSendInterceptor,
   getSendInterceptor,
   setApprovalHook,
@@ -437,7 +447,21 @@ export class GoderScope extends Emitter {
         migrated = true;
       }
     }
-    if (!this.index.projects.find((p) => p.id === UNGROUPED)) {
+    // 单项目模式:补建本地项目(名字宿主可配)并把存量未分组会话迁入;
+    // 该模式下未分组不再是会话落点,伪项目也不必补建(索引里已有的保留)。
+    const localName = getLocalProject(this.name);
+    if (localName) {
+      if (!this.index.projects.find((p) => p.id === LOCAL)) {
+        this.index.projects.push({ id: LOCAL, name: localName, createdAt: new Date().toISOString() });
+      }
+      for (const rec of Object.values(this.index.sessions)) {
+        if (rec.projectId === UNGROUPED) {
+          rec.projectId = LOCAL;
+          migrated = true;
+        }
+      }
+    }
+    if (!localName && !this.index.projects.find((p) => p.id === UNGROUPED)) {
       this.index.projects.push({
         id: UNGROUPED,
         name: '未分组会话',
@@ -543,10 +567,12 @@ export class GoderScope extends Emitter {
         indexDirty = true;
       }
     }
+    // 服务端新会话补进索引:单项目模式落本地项目,其余落未分组。
+    const newBucket = getLocalProject(this.name) ? LOCAL : UNGROUPED;
     for (const [sid, c] of next) {
       if (!this.index.sessions[sid]) {
         this.index.sessions[sid] = {
-          projectId: UNGROUPED,
+          projectId: newBucket,
           title: `会话 ${sid.slice(0, 6)}`,
           createdAt: c.created_at,
           lastResponseId: c.last_response_id,
@@ -670,7 +696,7 @@ export class GoderScope extends Emitter {
   }
 
   deleteProject(pid: string, archiveSessions: boolean): void {
-    if (pid === UNGROUPED) return;
+    if (pid === UNGROUPED || pid === LOCAL) return;
     const sids = Object.entries(this.index.sessions)
       .filter(([, s]) => s.projectId === pid)
       .map(([sid]) => sid);
@@ -875,15 +901,18 @@ export class GoderScope extends Emitter {
     return this.index.sessions[sid]?.title ?? `会话 ${sid.slice(0, 6)}`;
   }
 
-  newDraft(projectId: string): string {
+  /** 开新会话草稿;projectId 缺省走 newSessionProjectId() 兜底(单项目
+   *  模式落本地项目 —— 「只有会话」的宿主无需感知项目概念)。 */
+  newDraft(projectId?: string): string {
+    const pid = projectId ?? this.newSessionProjectId();
     const did = `draft:${genId('d')}`;
-    this.drafts.set(did, { projectId });
+    this.drafts.set(did, { projectId: pid });
     this.runtimes.set(did, newRuntime());
     const rt = this.runtimes.get(did)!;
     rt.loaded = true; // 草稿无需加载历史
-    this.inheritProjectPrefs(projectId);
+    this.inheritProjectPrefs(pid);
     this.activeSessionId = did;
-    this.activeProjectId = projectId;
+    this.activeProjectId = pid;
     this.notify();
     // 与 selectSession 同口径发激活事件:嵌入方(grf-play 等)靠它跟随
     // 「会话 → 所属项目」;不发则新建草稿(左栏「+」/嵌入方直驱)对
@@ -892,11 +921,12 @@ export class GoderScope extends Emitter {
     return did;
   }
 
-  /** 无激活会话直接发送时的兜底项目:允许未分组取 活动项目→UNGROUPED;
-   * 嵌入方禁未分组时取 活动项目→最近会话所属项目→最早的真实项目,
-   * 一个项目都没有时仍回 UNGROUPED(嵌入方动线通常 boot 即建项目,
-   * 此为最终兜底,不静默丢弃用户输入)。 */
+  /** 无激活会话直接发送时的兜底项目:单项目模式一律落本地项目;允许
+   * 未分组取 活动项目→UNGROUPED;嵌入方禁未分组时取 活动项目→最近
+   * 会话所属项目→最早的真实项目,一个项目都没有时仍回 UNGROUPED
+   * (嵌入方动线通常 boot 即建项目,此为最终兜底,不静默丢弃用户输入)。 */
   private newSessionProjectId(): string {
+    if (getLocalProject(this.name)) return LOCAL;
     if (this.activeProjectId) return this.activeProjectId;
     if (ungroupedAllowed(this.name)) return UNGROUPED;
     const latest = Object.values(this.index.sessions)
