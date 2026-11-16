@@ -35,8 +35,8 @@ configure('myscope', {
   policySelector: false, // 可选:false 隐藏 composer 策略选择器(嵌入方
                          // 经项目 defaults 全权管理会话策略时)
   settings: {            // 可选:设置页裁剪
-    agentGroup: false,   // false = 隐藏「智能体」分组(Harness/插件/MCP/
-                         // 技能——浏览器形态只读引导,平台不开放管理时)
+    agentGroup: false,   // false = 隐藏「智能体」分组(Harness/集群/插件/
+                         // MCP/技能——浏览器形态只读引导,平台不开放管理时)
   },
   user: {                // 可选:注入左栏底部身份 chip(自带用户体系的
     name: '张三',        // 嵌入方用;未注入时显示系统用户名/「本地用户」)
@@ -97,6 +97,13 @@ configure('myscope', {
   },
   statusPop: false,      // 可选:false 隐藏聊天列右上的状态浮窗(goder
                          // 特有的自动化任务/git/goal 卡)
+  speechRelay: '/goder-api', // 可选:语音输入转写中继基址——嵌入宿主实现
+                         // 了同款 /speech 中继(参考 internal/desktop/
+                         // speechrelay.go:GET <relay>/speech/models?base=…、
+                         // POST <relay>/speech/transcribe?base=…)时声明。
+                         // 转写请求直连优先,直连被 CORS/网络层拦截时回落
+                         // 中继;局域网自建转写接口普遍无 CORS 头,嵌入
+                         // WebView 不声明则语音输入基本不可用
   persistToken: true,    // 可选:true 才把连接 token 持久化到本地存储
                          // (默认不落盘,每次由宿主下发——见鉴权模型)
 });
@@ -216,7 +223,7 @@ registry.settings.add({
   group: '平台',        // 左栏分组标题;缺省归入「扩展」。
                         // 内置分组名「基础设置」「智能体」可复用(并入其中)
   order: 15,            // 排序权重(内置:外观 10 / 模型 20 / Harness 30 /
-                        // 插件 40 / MCP 50 / 技能 60);缺省追加在内置之后
+                        // 集群 35 / 插件 40 / MCP 50 / 技能 60);缺省追加在内置之后
   wide: true,           // 可选:分区页面用宽画布(880px,默认 620px)
   icon: '<svg …>…</svg>', // 可选;缺省用通用设置图标
   render: (ctx) => html`<div>…自绘分区页面…</div>`,
@@ -315,9 +322,11 @@ DOM 内渲染(宿主样式进不去,样式须内联),跨重渲保活,配置变�
 
 ### 设置页裁剪与定制
 
-设置页的「智能体」分组(Harness/插件/MCP/技能)与「模型」供应商管理,
+设置页的「智能体」分组(Harness/集群/插件/MCP/技能)与「模型」供应商管理,
 网页形态经 gh server 的 `/v1/agent/*` 配置 API 读写(需较新版本 gh;
-API Key/MCP Token 掩码——不下发明文,空值=保留)。多用户网关默认按
+API Key/MCP Token 掩码——不下发明文,空值=保留;集群密钥例外,经
+`/v1/agent/cluster` 明文往返,节点面板数据源为 `/v1/agent/cluster/status`)。
+多用户网关默认按
 用户注入 `GRF_HOME`(`<data>/users/<uid>/grf-home`),配置随登录用户
 完全隔离;`GODER_USER_HOME=0` 关闭,`GODER_SETTINGS_SEED` 可指定用户首启
 播种的初始 settings.json(一次性快照,之后独立)。gh server 过旧或未

@@ -103,12 +103,20 @@ export function registerBuiltinCommon(): void {
     render: builtinSettingsRender('goder-settings-appearance'),
   });
   registry.settings.add({
+    id: 'speech', label: '语音输入', icon: icon.mic, group: '基础设置', order: 15,
+    render: builtinSettingsRender('goder-settings-speech'),
+  });
+  registry.settings.add({
     id: 'models', label: '模型', icon: icon.brain, group: '基础设置', order: 20, wide: true,
     render: builtinSettingsRender('goder-settings-models'),
   });
   registry.settings.add({
     id: 'harness', label: 'Harness', icon: icon.settings, group: '智能体', order: 30,
     render: builtinSettingsRender('goder-settings-harness'),
+  });
+  registry.settings.add({
+    id: 'cluster', label: '集群', icon: icon.globe, group: '智能体', order: 35,
+    render: builtinSettingsRender('goder-settings-cluster'),
   });
   registry.settings.add({
     id: 'plugins', label: '插件', icon: icon.zap, group: '智能体', order: 40,

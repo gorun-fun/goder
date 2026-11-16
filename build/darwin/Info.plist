@@ -13,5 +13,7 @@
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <!-- 语音输入(话筒转文字)首次录音时的系统授权用途说明 -->
+  <key>NSMicrophoneUsageDescription</key><string>用于语音输入:录音后转写为文字填入消息输入框。</string>
 </dict>
 </plist>

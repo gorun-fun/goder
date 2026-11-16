@@ -47,6 +47,7 @@ import {
 } from '../../host/bridge';
 import { getScope, configureScope, savedConn, locationDefaultBase, setModelNameResolver } from '../store/scope';
 import { kvGet, kvSet } from '../store/storage';
+import type { ClusterCfgDTO, ClusterCfgEnvelopeDTO, ClusterStatusDTO } from '../api/agent-dto';
 import {
   fetchModelCfg,
   putModelCfg,
@@ -58,6 +59,9 @@ import {
   putSkillRemote,
   deleteSkillRemote,
   setSkillEnabledRemote,
+  fetchClusterCfg,
+  putClusterCfg,
+  fetchClusterStatus,
   AgentApiUnsupportedError,
 } from './agent-api';
 
@@ -68,6 +72,19 @@ import {
 export { ACCENTS, FONT_MIN, FONT_MAX } from './appearance';
 export type { Appearance, ThemeMode, AccentValue, ResolvedTheme } from './appearance';
 import { DEFAULT_APPEARANCE, LS_KEY, loadAppearanceLocal, appearanceCssVars, resolveTheme, type Appearance, type ResolvedTheme } from './appearance';
+
+// 语音输入(话筒转文字)配置:OpenAI 兼容转写接口的地址/Key/模型/语言/
+// 快捷键,纯 KV 镜像(双形态通用),模型与读写纯函数在 speech.ts。
+export {
+  DEFAULT_SPEECH,
+  SPEECH_LS_KEY,
+  speechHotkeyMatches,
+  speechHotkeyCodeOf,
+  parseSpeechHotkey,
+  formatSpeechHotkey,
+} from './speech';
+export type { SpeechConfig, SpeechHotkey, SpeechHotkeyCombo } from './speech';
+import { loadSpeechLocal, saveSpeechLocal, type SpeechConfig } from './speech';
 
 // ---------- 供应商模型上下文窗口(探测缓存) ----------
 // OpenAI 兼容网关(token-hub / OpenRouter / SiliconFlow / vLLM 等)会在
@@ -134,7 +151,17 @@ class SettingsStore {
   /** 网页形态 gh 配置 API(/v1/agent/*)可用性:unknown 未探测,ok 可用
    * (配置随登录用户隔离),unsupported = gh server 过旧,设置页回落引导 */
   agentApi: 'unknown' | 'ok' | 'unsupported' = 'unknown';
+  /** 集群模式:配置段信封(/v1/agent/cluster);null = 未加载。双形态统一
+   * 走 API(桌面经 /goder-api 同源反代),无桌面桥副本——枚举校验归一的
+   * 权威在 gh 服务端,不在客户端复制第二套语义。 */
+  clusterCfg: ClusterCfgEnvelopeDTO | null = null;
+  /** 集群配置 API 可用性:与 agentApi 同构、独立探测(404 = gh 无集群面) */
+  clusterApi: 'unknown' | 'ok' | 'unsupported' = 'unknown';
+  /** 集群状态快照(节点面板轮询数据源);null = 未拉取 */
+  clusterStatus: ClusterStatusDTO | null = null;
   appearance: Appearance = { ...DEFAULT_APPEARANCE };
+  /** 语音输入配置(转写接口;KV 镜像,与 ctxLens 同款惰性加载) */
+  speech: SpeechConfig = loadSpeechLocal();
   /** 系统(或宿主)深浅的当前落定值:「跟随系统」模式的取值来源,
    * 探测与监听装订见 ensureSystemWatch/readSystemTheme。 */
   systemTheme: ResolvedTheme = 'dark';
@@ -146,6 +173,16 @@ class SettingsStore {
   /** 网页形态 agent API 连接参数(沿用设置页的连接配置) */
   private get conn(): { baseUrl: string; token: string } {
     return { baseUrl: this.cfg.remoteUrl || locationDefaultBase(), token: this.cfg.remoteToken };
+  }
+
+  /** 集群 API 连接参数:双形态统一(桌面恒走同源反代,托管态 token 取
+   * srv——与 applyConnection 桌面分支同一套解析;集群无桌面桥路径) */
+  private get clusterConn(): { baseUrl: string; token: string } {
+    if (!inWails()) return this.conn;
+    return {
+      baseUrl: `${location.origin}/goder-api`,
+      token: this.cfg.serverMode === 'managed' ? (this.srv?.token ?? '') : this.cfg.remoteToken,
+    };
   }
 
   private listeners = new Set<Listener>();
@@ -185,6 +222,13 @@ class SettingsStore {
     // 的角落路径):顺手确保探测与监听已就位
     this.ensureSystemWatch();
     this.applyAppearanceVars();
+    this.bump();
+  }
+
+  /** 更新语音输入配置(改即存,KV 镜像 + bump 驱动 composer 话筒显隐)。 */
+  setSpeech(patch: Partial<SpeechConfig>): void {
+    this.speech = { ...this.speech, ...patch };
+    saveSpeechLocal(this.speech);
     this.bump();
   }
 
@@ -749,6 +793,88 @@ class SettingsStore {
       : await setSkillEnabledRemote(this.conn.baseUrl, this.conn.token, name, enabled);
     if (!err) await this.loadSkillsCfg(true);
     return err;
+  }
+
+  // ---------- 集群模式(双形态统一走 /v1/agent/cluster;无桌面桥) ----------
+
+  /** 进入集群分区时拉取配置段;force 用于保存后强制刷新。桌面托管态的
+   * server token 随 srv 状态到达,未就绪先刷一次(gh 由桌面壳保活)。 */
+  async loadClusterCfg(force = false): Promise<void> {
+    if (this.clusterCfg && !force) return;
+    if (inWails() && this.cfg.serverMode === 'managed' && !this.srv) {
+      await this.refreshServerStatus();
+    }
+    try {
+      const c = this.clusterConn;
+      this.clusterCfg = await fetchClusterCfg(c.baseUrl, c.token);
+      this.clusterApi = 'ok';
+    } catch (e) {
+      if (e instanceof AgentApiUnsupportedError) this.clusterApi = 'unsupported';
+    }
+    this.bump();
+  }
+
+  /** 修改集群段(内存改 + 即时落盘;与 patchProviders/saveModelCfg 同一
+   * 即时保存惯例)。PUT 整体替换,gh 侧对缺字段的中间态容忍;失败经
+   * clusterErr 反馈,不回滚内存(下次修改整段重发)。 */
+  patchCluster(fn: (c: ClusterCfgDTO) => ClusterCfgDTO): void {
+    if (!this.clusterCfg) return;
+    const cur = this.clusterCfg.cluster ?? {};
+    this.clusterCfg = { ...this.clusterCfg, cluster: fn({ ...cur }) };
+    this.bump();
+    void this.persistCluster();
+  }
+
+  /** 最近一次集群保存的错误信息(空 = 无);分区渲染错误条。 */
+  clusterErr = '';
+
+  private async persistCluster(): Promise<void> {
+    if (!this.clusterCfg?.cluster) return;
+    const draft = this.clusterCfg.cluster;
+    const c = this.clusterConn;
+    try {
+      this.clusterCfg = await putClusterCfg(c.baseUrl, c.token, draft);
+      this.clusterApi = 'ok';
+      this.clusterErr = '';
+    } catch (e) {
+      if (e instanceof AgentApiUnsupportedError) {
+        this.clusterApi = 'unsupported';
+        return;
+      }
+      this.clusterErr = e instanceof Error ? e.message : String(e);
+    }
+    this.bump();
+    // 集群段只在 gh server 启动时装配:桌面托管态运行中时防抖重启生效
+    // (连续编辑合并为一次重启);web 形态由分区提示需服务端重启。
+    if (!this.clusterErr && inWails() && this.cfg.serverMode === 'managed' && this.srv?.running) {
+      this.scheduleClusterRestart();
+    }
+  }
+
+  private clusterRestartTimer?: ReturnType<typeof setTimeout>;
+
+  /** 防抖重启托管 gh(3s 窗口内多次保存合并;timer 挂起期间不阻后续保存) */
+  private scheduleClusterRestart(): void {
+    if (this.clusterRestartTimer) return;
+    this.clusterRestartTimer = setTimeout(() => {
+      this.clusterRestartTimer = undefined;
+      void this.applyManaged('app').catch(() => undefined);
+    }, 3000);
+  }
+
+  /** 节点状态快照轮询(分区挂载期 5s);失败静默——下一轮恢复。桌面
+   * 托管态 srv 未就绪(token 空)时跳过,避免无谓 401。 */
+  async refreshClusterStatus(): Promise<void> {
+    if (this.clusterApi === 'unsupported') return;
+    const c = this.clusterConn;
+    if (!c.token && inWails() && this.cfg.serverMode === 'managed') return;
+    try {
+      this.clusterStatus = await fetchClusterStatus(c.baseUrl, c.token);
+      this.clusterApi = 'ok';
+    } catch (e) {
+      if (e instanceof AgentApiUnsupportedError) this.clusterApi = 'unsupported';
+    }
+    this.bump();
   }
 
   /** 地址/二进制变更后重启托管进程并重连环路 */

@@ -3,8 +3,10 @@
 // 经 settings-page 的 HTMLElement 保活通道跨分区切换不丢内部状态
 // (选中供应商、技能编辑文本等)。
 import './appearance';
+import './speech';
 import './models';
 import './harness';
+import './cluster';
 import './plugins';
 import './mcp';
 import './skills';

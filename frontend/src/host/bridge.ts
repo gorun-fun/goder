@@ -29,6 +29,25 @@ export function inWails(): boolean {
   return false;
 }
 
+// ---------- 语音输入转写中继基址 ----------
+// 桌面(wails)形态恒有本地同源中继(internal/desktop/speechrelay.go);
+// 嵌入宿主若也实现了同款 /goder-api/speech/* 中继(如 goder-mobile 的
+// 进程内 host,WebView 里直连局域网接口同样被 CORS 拦),经 configure
+// 的 speechRelay 声明基址,取值点统一收敛在 speechRelayBase()。
+let hostSpeechRelay = '';
+
+/** configure(speechRelay) 的落点:'' = 嵌入宿主未提供中继(直连)。 */
+export function setHostSpeechRelay(v: string): void {
+  hostSpeechRelay = v.trim().replace(/\/+$/, '');
+}
+
+/** 语音转写回落中继基址:桌面 → 同源 /goder-api;嵌入形态取宿主
+ * configure 声明;undefined = 无回落(直连被 CORS 拦即失败,设置页
+ * hint 引导接口开跨域)。 */
+export function speechRelayBase(): string | undefined {
+  return inWails() ? `${location.origin}/goder-api` : hostSpeechRelay || undefined;
+}
+
 /** 探测当前 origin 是否 goder test-serve 宿主(无头测试形态)。
  * 命中 /goder-host-probe 标记端点(204)即视为桌面形态:界面按桌面装配
  * (终端等桌面面板),wails 调用通道就绪由 initHostBridge 的带重试探针

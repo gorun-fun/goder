@@ -2,7 +2,8 @@
 // 粘贴/选择图片(data URL 多模态)、运行中切换为停止按钮。
 // 底部工具栏:左侧「+」附件与访问策略(弹出列表,已有会话立即生效),
 // 右侧上下文占用圆环(悬停看详情)、两级模型菜单(供应商 → 模型,按钮
-// 直接显示当前使用的模型)与发送按钮。
+// 直接显示当前使用的模型)与发送按钮;发送按钮前有语音输入话筒(设置
+// 启用并配好转写接口后显示,录音转写为文字落回输入框,Esc 取消)。
 // 模型暂停提问(ask)时,输入框整体变高并在框内直接展示选项与问题,
 // 点击单选选项即确认提交。
 import { LitElement, css, html, nothing } from 'lit';
@@ -15,8 +16,10 @@ import { fmtTokens } from '../../util/fmt';
 import type { AskItem } from '../../core/model/chat-model';
 import type { LLMStats, Usage } from '../../core/api/types';
 import { getSendInterceptor } from '../../core/store/host-config';
-import { settingsStore } from '../../core/settings/settings-store';
+import { settingsStore, speechHotkeyMatches, parseSpeechHotkey, speechHotkeyCodeOf } from '../../core/settings/settings-store';
 import { translate } from '../../core/i18n';
+import { VoiceRecorder, prewarmMic, recorderSupported } from '../../core/speech/record';
+import { speechRelayBase } from '../../host/bridge';
 import './ask-form';
 
 /** 新会话访问策略(与 gh 预制策略选项一一对应) */
@@ -74,6 +77,22 @@ const EFFORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'high', label: '高' },
   { value: 'max', label: '最高' },
 ];
+
+/** 录音快捷键的页面级按键认领:同一 keydown 只让一个 composer 实例处理
+ *  (多 scope 同页时按监听注册序,首个认领;事件对象一次一变)。 */
+const claimedVoiceKeys = new WeakSet<Event>();
+
+/** 快捷键按键 → 紧随插入的关联时间窗:IME 场景 keydown 可能不可取消
+ *  且插入的字符与按键不同(中文输入法把 ` 变 ·),无法按内容比对,
+ *  只能按时间关联拦截。 */
+const HOTKEY_INSERT_WINDOW_MS = 150;
+
+/** IME 文本插入类 inputType:普通插入、组合中(insertCompositionText)
+ *  与组合提交(insertFromComposition —— 中文输入法最终落字常走这个,
+ *  此前漏了它导致 · 残留)。 */
+function isIMETextInsert(inputType: string): boolean {
+  return inputType === 'insertText' || inputType === 'insertCompositionText' || inputType === 'insertFromComposition';
+}
 
 @customElement('goder-composer')
 export class GoderComposer extends LitElement {
@@ -142,6 +161,20 @@ export class GoderComposer extends LitElement {
   @state() private slashIdx = 0;
   /** 斜杠菜单被关闭(Esc/补全/点击外部),输入变化后复位 */
   @state() private slashDismissed = false;
+  /** 语音输入话筒状态(idle 待用 | recording 录音中 | uploading 停录转写中) */
+  @state() private voice: 'idle' | 'recording' | 'uploading' = 'idle';
+  /** 语音输入瞬时提示(错误/进行中状态,经 hint 行短暂展示) */
+  @state() private voiceMsg = '';
+  /** voiceMsg 自动清除定时器 */
+  private voiceTimer = 0;
+  /** 当前录音会话(每次录音新建,见 core/speech/record.ts) */
+  private recorder: VoiceRecorder | null = null;
+  /** 录音启动中(含麦克风授权与管线预热),防重入 */
+  private voiceStarting = false;
+  /** 最近一次命中快捷键的时刻(beforeinput/input 兜底的时间窗关联) */
+  private hotkeyAt = 0;
+  /** settingsStore 订阅退订(语音配置改动即时反映话筒显隐) */
+  private unSettings: (() => void) | null = null;
 
   static styles = [
     theme,
@@ -351,6 +384,27 @@ export class GoderComposer extends LitElement {
       }
       .attach {
         color: var(--goder-text-dim);
+      }
+      /* 语音输入话筒:ghost 图标按钮(随附件);录音中红色脉冲、
+       * 转写中半透明置忙(不可再点) */
+      .mic {
+        color: var(--goder-text-dim);
+      }
+      .mic.rec {
+        color: var(--goder-danger, #d33);
+        animation: goder-voice-pulse 1.2s ease-in-out infinite;
+      }
+      .mic.busy {
+        opacity: 0.6;
+      }
+      @keyframes goder-voice-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.45;
+        }
       }
       input[type='file'] {
         display: none;
@@ -575,6 +629,10 @@ export class GoderComposer extends LitElement {
         .bar-btn {
           padding: 9px 10px;
         }
+        /* 话筒是触屏高频入口,命中区随工具栏按钮加大 */
+        .ghost.mic {
+          padding: 8px;
+        }
         .queue-item button {
           padding: 7px;
         }
@@ -713,6 +771,17 @@ export class GoderComposer extends LitElement {
                   </svg>
                 </button>
                 ${this.effortPos ? this.renderEffortPop(this.effortPos) : nothing}
+                ${this.voiceReady
+                  ? html`<button
+                      class="ghost mic ${this.voice === 'recording' ? 'rec' : ''} ${this.voice === 'uploading' ? 'busy' : ''}"
+                      title=${this.voiceTitle()}
+                      aria-label=${this.voiceTitle()}
+                      ?disabled=${this.voice === 'uploading'}
+                      @click=${this.onMicClick}
+                    >
+                      ${unsafeHTML(icon.mic)}
+                    </button>`
+                  : nothing}
                 ${this.running
                   ? html`<button class="stop" title="停止" aria-label="停止" @click=${this.stop}>
                       <svg viewBox="0 0 16 16" fill="currentColor"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5" /></svg>
@@ -974,10 +1043,29 @@ export class GoderComposer extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     document.addEventListener('pointerdown', this.onDocPointerDown);
+    document.addEventListener('keydown', this.onDocKeydown);
+    document.addEventListener('keyup', this.onDocKeyup);
+    document.addEventListener('beforeinput', this.onDocBeforeInput);
+    // 点进输入框 = 要输入的意图:语音启用时静默预热麦克风,首次录音也
+    // 零冷启动(focusin 穿透 shadow DOM;保温期内为空操作)
+    this.addEventListener('focusin', this.onFocusIn);
+    // 语音输入配置(设置页改即存)变化时重渲染:话筒按钮显隐即时跟进
+    this.unSettings = settingsStore.subscribe(() => this.requestUpdate());
   }
 
   disconnectedCallback(): void {
     document.removeEventListener('pointerdown', this.onDocPointerDown);
+    document.removeEventListener('keydown', this.onDocKeydown);
+    document.removeEventListener('keyup', this.onDocKeyup);
+    document.removeEventListener('beforeinput', this.onDocBeforeInput);
+    this.removeEventListener('focusin', this.onFocusIn);
+    this.unSettings?.();
+    this.unSettings = null;
+    if (this.voiceTimer) {
+      clearTimeout(this.voiceTimer);
+      this.voiceTimer = 0;
+    }
+    this.cancelVoice(true); // 卸载(如跳设置页)时停录音释放麦克风,不出提示
     super.disconnectedCallback();
   }
 
@@ -1058,7 +1146,228 @@ export class GoderComposer extends LitElement {
     fireCompact(this, 'model-change', v);
   }
 
+  // ---------- 语音输入(话筒转文字) ----------
+  // 通道与能力评估结论见 core/speech/record.ts 头注释:纯浏览器录音 +
+  // OpenAI 兼容转写接口直传,三形态等价,无桌面专属守卫。
+
+  /** 话筒按钮显隐:设置已启用且接口地址已配、当前环境可录音
+   *  (API Key 可留空 —— 内网自建网关常无鉴权;getUserMedia 需 HTTPS,
+   *  不可用时设置分区也会提示)。 */
+  private get voiceReady(): boolean {
+    const sp = settingsStore.speech;
+    return sp.enabled && !!sp.apiBaseUrl.trim() && recorderSupported();
+  }
+
+  private voiceTitle(): string {
+    if (this.voice === 'uploading') return translate(this.scope, '正在转写…');
+    if (this.voice === 'recording') return translate(this.scope, '停止录音并转写');
+    return translate(this.scope, '语音输入');
+  }
+
+  /** 快捷键 keyup 兜底:IME 深度接管按键时 keydown 可能不派发/不带
+   *  code,前置拦截全数空转 —— keyup 不会被 IME 消费且始终携带物理
+   *  键位。单键快捷键在 keydown 未命中时以 keyup(code) 命中:补切换
+   *  录音,并把该按键期间 IME 已插入的字符(` 或 ·)删掉。 */
+  private onDocKeyup = (e: KeyboardEvent): void => {
+    if (this.voiceReady && this.dbgRelevant(e)) {
+      this.dbg('ku', `key=${e.key},code=${e.code},comp=${e.isComposing ? 1 : 0}`);
+    }
+    if (!this.voiceReady || e.isComposing) return;
+    const c = parseSpeechHotkey(settingsStore.speech.hotkey);
+    if (!c || c.mod || c.shift || c.alt) return; // 仅单键需要兜底
+    const code = speechHotkeyCodeOf(c.key);
+    if (!code || e.code !== code) return;
+    if (performance.now() - this.hotkeyAt < 300) return; // keydown 已处理
+    const path = e.composedPath() as EventTarget[];
+    if (!path.some((t) => t === this)) return; // 只管自己输入框内的按键
+    this.dbg('KU-FALLBACK');
+    // keydown 漏网:此刻补动作 + 回删本按键插入的字符
+    this.hotkeyAt = performance.now();
+    if (this.voice === 'uploading' || this.voiceStarting) {
+      this.stripJustInserted();
+      return;
+    }
+    if (this.voice === 'recording') void this.stopVoice();
+    else void this.startVoice();
+    this.stripJustInserted();
+  };
+
+  /** 删除输入框光标前 1 个字符(IME 按键兜底:该物理按键插入的 · 等)。 */
+  private stripJustInserted(): void {
+    const ta = this.renderRoot.querySelector('textarea');
+    if (!ta) return;
+    const pos = ta.selectionStart ?? ta.value.length;
+    if (pos === 0) return;
+    ta.value = ta.value.slice(0, pos - 1) + ta.value.slice(pos);
+    this.text = ta.value;
+    ta.setSelectionRange(pos - 1, pos - 1);
+    this.autosize(ta);
+  }
+
+  // ---------- 语音快捷键 IME 事件序列调试(临时,定位后移除) ----------
+  private dbgLines: string[] = [];
+  private dbgTimer = 0;
+
+  /** 记录一条事件;静默 1 秒后把序列(末 8 条)显示到提示行。 */
+  private dbg(tag: string, detail = ''): void {
+    this.dbgLines.push(`${tag}${detail ? `(${detail})` : ''}`);
+    if (this.dbgTimer) clearTimeout(this.dbgTimer);
+    this.dbgTimer = window.setTimeout(() => {
+      this.flashVoice(`[语音调试] ${this.dbgLines.slice(-8).join(' ')}`);
+      this.dbgLines = [];
+    }, 1000);
+  }
+
+  /** 该事件是否与本轮调试相关(快捷键物理键位 / IME 插入)。 */
+  private dbgRelevant(e: KeyboardEvent): boolean {
+    const c = parseSpeechHotkey(settingsStore.speech.hotkey);
+    const code = c && !c.mod && !c.shift && !c.alt ? speechHotkeyCodeOf(c.key) : null;
+    return !!code && e.code === code;
+  }
+
+  /** 输入框获得焦点(含其内任意控件):语音可用即预热麦克风。 */
+  private onFocusIn = (): void => {
+    if (this.voiceReady) void prewarmMic();
+  };
+
+  private onMicClick(): void {
+    if (this.voice === 'uploading') return;
+    if (this.voice === 'recording') void this.stopVoice();
+    else void this.startVoice();
+  }
+
+  /** 录音快捷键(设置「语音输入」可配,支持单键如 `;默认 Ctrl/⌘+Shift+M):
+   *  切换开始/停止录音,等效点话筒。响应范围:事件落在本组件内(输入框
+   *  聚焦),或页面无任何编辑焦点(如从设置页切回聊天后焦点在 body)——
+   *  焦点在其它输入框/别的 composer 时不抢键;页面级按键同页多实例时
+   *  首个认领,其余让位(claimedVoiceKeys)。 */
+  private onDocKeydown = (e: KeyboardEvent): void => {
+    if (this.voiceReady && this.dbgRelevant(e)) {
+      this.dbg('kd', `key=${e.key},code=${e.code},cancel=${e.cancelable ? 1 : 0},comp=${e.isComposing ? 1 : 0}`);
+    }
+    if (!this.voiceReady || e.isComposing) return;
+    if (!speechHotkeyMatches(settingsStore.speech.hotkey, e)) return;
+    this.dbg('KD-MATCH');
+    this.hotkeyAt = performance.now(); // 紧随插入的兜底拦截以时间窗关联
+    if (claimedVoiceKeys.has(e)) return; // 已被同页其它实例认领
+    // shadow DOM:事件路径(composedPath)能穿透 shadow 边界看真实焦点
+    const path = e.composedPath() as EventTarget[];
+    const inMe = path.some((t) => t === this);
+    if (!inMe) {
+      // 页面级按键:焦点在别的可编辑上下文/别的 composer 内则不抢
+      const inOther = path.some((t) => {
+        if (t === this) return false;
+        if (t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement || t instanceof HTMLSelectElement) return true;
+        return t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'GODER-COMPOSER');
+      });
+      if (inOther) return;
+      claimedVoiceKeys.add(e);
+    }
+    // 命中即吞键:转写中/启动中不动作,但快捷键字符不能落进输入框
+    e.preventDefault();
+    if (this.voice === 'uploading' || this.voiceStarting) return;
+    if (this.voice === 'recording') void this.stopVoice();
+    else void this.startVoice();
+  };
+
+  /** 快捷键按键紧随的插入拦截(IME 兜底):中文输入法会先于网页处理
+   *  按键 —— keydown 不可取消,且插入字符与按键不同(如 ` 被 IME 变
+   *  成 ·),无法按内容比对,只能按时间窗关联;beforeinput 是插入前
+   *  最后一道可取消关口,取消失败时 onInput 再回删。 */
+  private onDocBeforeInput = (e: InputEvent): void => {
+    if (!this.voiceReady) return;
+    if (performance.now() - this.hotkeyAt < 500 && isIMETextInsert(e.inputType)) {
+      this.dbg('bi', `${e.inputType},${e.data ?? ''},cancel=${e.cancelable ? 1 : 0}`);
+    }
+    if (performance.now() - this.hotkeyAt > HOTKEY_INSERT_WINDOW_MS) return;
+    if (!isIMETextInsert(e.inputType)) return;
+    const path = e.composedPath() as EventTarget[];
+    if (!path.some((t) => t === this)) return; // 其它输入框的输入不碰
+    this.dbg('BI-BLOCK');
+    e.preventDefault();
+  };
+
+  private async startVoice(): Promise<void> {
+    if (this.voiceStarting) return; // 预热/授权进行中,防重入开出双录音
+    this.voiceStarting = true;
+    const sp = settingsStore.speech;
+    const rec = new VoiceRecorder({
+      apiBaseUrl: sp.apiBaseUrl.trim(),
+      apiKey: sp.apiKey.trim(),
+      apiModel: sp.apiModel.trim() || 'whisper-1',
+      language: sp.language.trim(),
+      // 桌面态/声明了中继的嵌入宿主走同源回落(接口普遍无 CORS 头,
+      // 浏览器直连被拦);其余 undefined = 直连(要求接口自身允许跨域)
+      relayBase: speechRelayBase(),
+    });
+    try {
+      await rec.start();
+    } catch (e) {
+      this.flashVoice(e instanceof Error ? e.message : '无法开始录音');
+      return;
+    } finally {
+      this.voiceStarting = false;
+    }
+    this.recorder = rec;
+    this.voice = 'recording';
+    this.flashVoice(translate(this.scope, '正在录音…再点一次话筒结束并转写(Esc 取消)'));
+  }
+
+  private async stopVoice(): Promise<void> {
+    const rec = this.recorder;
+    if (!rec) return;
+    this.voice = 'uploading';
+    this.flashVoice(translate(this.scope, '正在转写…'));
+    try {
+      const text = await rec.stop();
+      this.voice = 'idle';
+      this.recorder = null;
+      if (text) this.insertAtCursor(text);
+      this.flashVoice('');
+    } catch (e) {
+      this.voice = 'idle';
+      this.recorder = null;
+      this.flashVoice(e instanceof Error ? e.message : '转写失败');
+    }
+  }
+
+  /** 取消录音(Esc/组件卸载):丢弃音频不上传;转写中请求已发出,
+   *  取消只做静默复位(stop 的落定稍后自行到达,成功仍会插入文本)。 */
+  private cancelVoice(silent = false): void {
+    const wasRecording = this.voice === 'recording';
+    this.recorder?.abort();
+    this.recorder = null;
+    this.voice = 'idle';
+    if (wasRecording && !silent) this.flashVoice(translate(this.scope, '已取消录音'));
+  }
+
+  /** 瞬时提示(错误/进行中),经 hint 行展示约 5 秒;空串立即清除。 */
+  private flashVoice(msg: string): void {
+    if (this.voiceTimer) {
+      clearTimeout(this.voiceTimer);
+      this.voiceTimer = 0;
+    }
+    this.voiceMsg = msg;
+    if (msg) this.voiceTimer = window.setTimeout(() => (this.voiceMsg = ''), 5000);
+  }
+
+  /** 在光标处插入文本(语音转写落稿;无选中即追加到末尾):同步
+   *  textarea、自动增高,光标移到插入内容之后。 */
+  private insertAtCursor(text: string): void {
+    const ta = this.renderRoot.querySelector('textarea');
+    const pos = ta ? Math.min(ta.selectionStart, this.text.length) : this.text.length;
+    const end = ta ? Math.min(ta.selectionEnd, this.text.length) : pos;
+    this.text = this.text.slice(0, pos) + text + this.text.slice(end);
+    if (ta) {
+      ta.value = this.text;
+      this.autosize(ta);
+      ta.focus();
+      ta.setSelectionRange(pos + text.length, pos + text.length);
+    }
+  }
+
   private hint(): string {
+    if (this.voiceMsg) return this.voiceMsg;
     if (this.running) return '回合运行中,发送的消息将排队等候';
     if (this.inputRequired) return '模型在等待上面的交互应答';
     return '';
@@ -1066,6 +1375,20 @@ export class GoderComposer extends LitElement {
 
   private onInput(e: InputEvent): void {
     const ta = e.target as HTMLTextAreaElement;
+    // 快捷键紧随插入的回删兜底:beforeinput 拦不住 IME 组合插入时,
+    // 把这一插入(如中文输入法把 ` 变 ·)从输入框里删掉
+    if (performance.now() - this.hotkeyAt < HOTKEY_INSERT_WINDOW_MS && isIMETextInsert(e.inputType) && e.data) {
+      this.dbg('in', `${e.inputType},${e.data}`);
+      this.dbg('STRIP');
+      const pos = ta.selectionStart ?? ta.value.length;
+      const start = Math.max(0, pos - e.data.length);
+      ta.value = ta.value.slice(0, start) + ta.value.slice(pos);
+      ta.setSelectionRange(start, start);
+      this.hotkeyAt = 0; // 一次按键只回删一次
+      this.text = ta.value;
+      this.autosize(ta);
+      return;
+    }
     this.text = ta.value;
     this.slashIdx = 0;
     this.slashDismissed = false;
@@ -1078,6 +1401,11 @@ export class GoderComposer extends LitElement {
   }
 
   private onKeydown(e: KeyboardEvent): void {
+    // 录音中 Esc 优先取消录音(斜杠菜单等次之)
+    if (e.key === 'Escape' && this.voice === 'recording') {
+      this.cancelVoice();
+      return;
+    }
     if (this.slashOpen) {
       const items = this.slashItems;
       if (e.key === 'ArrowDown') {

@@ -122,6 +122,7 @@ import type { SettingsConfig } from '../registry/registry';
 import type { MarkdownRenderer } from '../registry/registry';
 
 import { configureScope, getScope, setSessionDefaults, setUngroupedSessions, setLocalProject, setSendInterceptor, setApprovalHook, setDisableDefaultPrompt } from '../core/store/scope';
+import { setHostSpeechRelay } from '../host/bridge';
 import { setI18n } from '../core/i18n';
 import { registerBuiltinCommon } from '../shell/builtin-common';
 import '../shell/app-shell';
@@ -212,6 +213,12 @@ export function configure(
     /** false = 隐藏聊天列右上的状态浮窗(goder 特有的自动化任务/git/
      * goal 卡;不用自动化能力的嵌入方裁掉,聊天区完全干净)。 */
     statusPop?: boolean;
+    /** 语音输入转写中继基址(嵌入宿主实现了同款 /speech 中继时声明,
+     * 如 '/goder-api';桌面形态自带无需配置)。转写请求直连优先,
+     * 直连被 CORS/网络层拦截时回落该同源中继 —— 局域网自建转写接口
+     * 普遍不带 CORS 头,嵌入 WebView 里直连必被拦,提供中继的宿主
+     * 声明后语音输入才能用(参考 internal/desktop/speechrelay.go)。 */
+    speechRelay?: string;
   },
 ): void {
   // 外观镜像恢复(深/浅/跟随系统 + 强调色 + 字号):嵌入形态的启动
@@ -240,6 +247,7 @@ export function configure(
   if (cfg.onApproval !== undefined) setApprovalHook(scope, cfg.onApproval);
   if (cfg.markdown !== undefined) setMarkdownRenderer(scope, cfg.markdown);
   if (cfg.statusPop !== undefined) setStatusPop(scope, cfg.statusPop);
+  if (cfg.speechRelay !== undefined) setHostSpeechRelay(cfg.speechRelay);
   if (cfg.locale !== undefined || cfg.messages !== undefined) {
     setI18n(scope, { locale: cfg.locale, messages: cfg.messages });
   }

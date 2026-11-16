@@ -21,12 +21,16 @@ const proxyPrefix = "/goder-api"
 
 // rootHandler 组合:/goder-api/* → 代理;/goder-api/token → 托管服务信息
 // (同源直读,前端冷启动无需等 wails 调用通道);/goder-api/local-file → 本地
-// 文件只读服务(右栏浏览器按路径渲染 html 等,替代 data URL);其余 → 前端
-// 静态资源。/goder-api 整段过本机 Host 校验(见 LoopbackHostGuard)。
+// 文件只读服务(右栏浏览器按路径渲染 html 等,替代 data URL);
+// /goder-api/speech/* → 语音输入转写接口中继(局域网接口无 CORS 头,
+// 浏览器直连被拦,见 speechrelay.go);其余 → 前端静态资源。
+// /goder-api 整段过本机 Host 校验(见 LoopbackHostGuard)。
 func RootHandler(fallback http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/goder-api/token", guardLocalHost(serveManagedToken))
 	mux.HandleFunc("/goder-api/local-file", guardLocalHost(serveLocalFile))
+	mux.HandleFunc("/goder-api/speech/models", guardLocalHost(serveSpeechModels))
+	mux.HandleFunc("/goder-api/speech/transcribe", guardLocalHost(serveSpeechTranscribe))
 	mux.Handle(proxyPrefix+"/", LoopbackHostGuard(desktopProxy()))
 	mux.Handle(proxyPrefix, LoopbackHostGuard(desktopProxy()))
 	mux.Handle("/", fallback)

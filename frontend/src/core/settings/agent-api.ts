@@ -5,7 +5,16 @@
 // 密钥安全往返(掩码语义):GET 只回空 apiKey/token + hasKey/hasToken;
 // PUT 空值 = 保留现值(改名经 keepKeyFrom 指回旧条目),非空 = 更换。
 import { apiFetch } from '../api/fetch';
-import type { DetectedModelDTO, ModelConfigDTO, PluginsDTO, ProviderDTO, SkillsDTO } from '../api/agent-dto';
+import type {
+  ClusterCfgDTO,
+  ClusterCfgEnvelopeDTO,
+  ClusterStatusDTO,
+  DetectedModelDTO,
+  ModelConfigDTO,
+  PluginsDTO,
+  ProviderDTO,
+  SkillsDTO,
+} from '../api/agent-dto';
 
 /** agent API 不可用(404 = gh server 过旧/未启用)时抛出,调用方回落引导文案 */
 export class AgentApiUnsupportedError extends Error {
@@ -123,4 +132,25 @@ export async function setSkillEnabledRemote(baseUrl: string, token: string, name
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }
+}
+
+// ---------- 集群模式 ----------
+// 双形态统一走这两个端点(桌面 /goder-api 同源反代直通 gh server,
+// 不加桌面桥副本:枚举校验与归一的权威在 gh 服务端 normalizeClusterCfg,
+// 客户端不复制第二套语义)。注意集群段只在 gh server 启动时装配,
+// PUT 落盘后需重启进程才生效——生效编排见 settings-store 的 saveClusterCfg。
+
+/** 读集群配置段(信封含 settings.json 路径与可写探测;无段时 cluster 为 null)。 */
+export function fetchClusterCfg(baseUrl: string, token: string): Promise<ClusterCfgEnvelopeDTO> {
+  return req<ClusterCfgEnvelopeDTO>(baseUrl, token, 'GET', 'cluster');
+}
+
+/** 整体替换集群段;响应即归一后的信封,直接回填内存态。 */
+export function putClusterCfg(baseUrl: string, token: string, cfg: ClusterCfgDTO): Promise<ClusterCfgEnvelopeDTO> {
+  return req<ClusterCfgEnvelopeDTO>(baseUrl, token, 'PUT', 'cluster', cfg);
+}
+
+/** 节点状态快照(设置页节点面板数据源:成员表/收件箱在线/远端句柄)。 */
+export function fetchClusterStatus(baseUrl: string, token: string): Promise<ClusterStatusDTO> {
+  return req<ClusterStatusDTO>(baseUrl, token, 'GET', 'cluster/status');
 }

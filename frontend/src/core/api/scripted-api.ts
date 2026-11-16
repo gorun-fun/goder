@@ -705,6 +705,24 @@ export class ScriptedApi {
       ],
       writable: true,
     });
+    // 集群段:指挥官形态默认(一个手动节点表条目);PUT 后 status 端点
+    // 随内存联动,供 E2E 验证「改配置 → 面板变化」。
+    const seedClusterCfg = (): Record<string, unknown> => ({
+      enabled: true,
+      role: 'commander',
+      name: 'fake-commander',
+      token: 'fake-cluster-token',
+      invite_code: '',
+      discover: 'off',
+      sync: '',
+      policy: '',
+      nodes: [{ addr: '127.0.0.1:7500', token: 'fake-node-token', name: 'fake-node', labels: ['browser'] }],
+      route: { allow_local: true, max_inflight_per_node: 4 },
+    });
+    const clusterEnvelope = (): { path: string; writable: boolean; cluster: unknown } => {
+      const saved = store.cluster as { cluster?: unknown } | undefined;
+      return { path: '/tmp/fake-grf-home/settings.json', writable: true, cluster: saved?.cluster ?? seedClusterCfg() };
+    };
 
     if (rest === 'models' && method === 'GET') return jsonResponse(store.models ?? seedModels());
     if (rest === 'models' && method === 'PUT') {
@@ -718,6 +736,37 @@ export class ScriptedApi {
     if (rest === 'plugins' && method === 'PUT') {
       store.plugins = body;
       return jsonResponse({});
+    }
+    if (rest === 'cluster' && method === 'GET') return jsonResponse(clusterEnvelope());
+    if (rest === 'cluster' && method === 'PUT') {
+      store.cluster = { path: '/tmp/fake-grf-home/settings.json', writable: true, cluster: body };
+      return jsonResponse(store.cluster);
+    }
+    if (rest === 'cluster/status' && method === 'GET') {
+      const cfg = clusterEnvelope().cluster as Record<string, unknown>;
+      return jsonResponse({
+        enabled: Boolean(cfg.enabled),
+        role: cfg.role ?? 'node',
+        self: { id: 'node-fake-self', name: cfg.name || 'fake-commander', version: '0.0.1-alpha.test', platform: 'darwin/arm64' },
+        commander_url: typeof cfg.commander_url === 'string' ? cfg.commander_url : '',
+        sync: typeof cfg.sync === 'string' ? cfg.sync : '',
+        discover: typeof cfg.discover === 'string' ? cfg.discover : 'off',
+        invite_required: Boolean(cfg.invite_code),
+        members: [
+          {
+            node_id: 'node-fake-1', name: 'fake-node', addr: '127.0.0.1:7500', labels: ['browser'],
+            source: 'registered', status: 'online', running_turns: 1, last_seen: 1700000000,
+            capabilities: {
+              node_id: 'node-fake-1', name: 'fake-node', version: '0.0.1-alpha.test', platform: 'linux/amd64',
+              tools: ['bash', 'read'], plugins: [{ name: 'grf-browser', tools: 5 }], models: ['fake/chat', 'fake/pro'], ts: 1700000000,
+            },
+          },
+          { name: 'offline-node', addr: '192.168.1.50:7400', source: 'static', status: 'offline' },
+        ],
+        inbox_connected: ['fake-node'],
+        remote_handles: [{ id: 'sub-fake-1', node: 'fake-node', status: 'running', relay: false, label: '浏览器自动化' }],
+        running_turns: 1,
+      });
     }
     if (rest === 'skills' && method === 'GET') return jsonResponse(store.skills ?? seedSkills());
     let m: RegExpMatchArray | null;

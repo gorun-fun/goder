@@ -83,3 +83,128 @@ export interface SkillsDTO {
   skills: SkillDTO[];
   writable: boolean;
 }
+
+// ---------- 集群模式(gh settings.json 的 cluster 段 + 状态快照;与 gh
+// config.Cluster / server.clusterStatus 对齐。双形态统一走 /v1/agent/cluster,
+// 无桌面桥副本——校验归一权威在 gh 服务端 normalizeClusterCfg) ----------
+
+/** 手动节点表条目(指挥官侧静态种子;goder 设置页编辑对象) */
+export interface ClusterNodeDTO {
+  /** gh server 地址 host:port */
+  addr: string;
+  /** 该节点的 server 访问令牌(明文往返,UI 掩码显示) */
+  token?: string;
+  /** 路由名(@name 引用;空取 addr 主机名) */
+  name?: string;
+  /** 能力标签(description 词汇匹配路由) */
+  labels?: string[];
+  /** https 自签部署的证书指纹 sha256 hex(TOFU 信任锚;空走系统校验) */
+  pin?: string;
+}
+
+/** 路由参数;字段可缺省 = gh 侧全默认 */
+export interface ClusterRouteDTO {
+  /** 无匹配节点时回退本地子代理;缺省/true = 回退,false = 报错 */
+  allow_local?: boolean;
+  /** 单节点在跑远端任务上限;0/缺省 = 默认 4 */
+  max_inflight_per_node?: number;
+}
+
+/** 集群段(settings.json 的 cluster 键原样;PUT 整体替换) */
+export interface ClusterCfgDTO {
+  enabled?: boolean;
+  /** commander(指挥官) | node(节点);缺省 node */
+  role?: string;
+  /** 节点显示名/路由名;空 = hostname */
+  name?: string;
+  /** 集群共享密钥(指挥官 /cluster/* 鉴权、节点注册凭据;等同集群级全权) */
+  token?: string;
+  /** 邀请码(指挥官侧准入门;节点侧注册时上送) */
+  invite_code?: string;
+  /** 节点侧 call-home 指挥官地址 http://host:port */
+  commander_url?: string;
+  /** 局域网自动发现:off | lan(mDNS);缺省 off */
+  discover?: string;
+  /** 手动节点表(指挥官侧) */
+  nodes?: ClusterNodeDTO[];
+  /** 派发任务默认策略;空 = off */
+  policy?: string;
+  /** 工作区同步档位:none | seed | git | full */
+  sync?: string;
+  route?: ClusterRouteDTO;
+}
+
+/** GET/PUT /v1/agent/cluster 的响应信封 */
+export interface ClusterCfgEnvelopeDTO {
+  /** settings.json 路径(展示用) */
+  path: string;
+  writable: boolean;
+  /** 文件里无 cluster 段时为 null */
+  cluster: ClusterCfgDTO | null;
+}
+
+/** 成员能力清单(gh /cluster/capabilities 的缓存形状,不含密钥) */
+export interface ClusterCapsDTO {
+  node_id: string;
+  name: string;
+  /** gh 版本 */
+  version: string;
+  /** runtime GOOS/GOARCH */
+  platform: string;
+  tools?: string[];
+  plugins?: { name: string; tools: number }[];
+  /** "provider/model" 条目 */
+  models?: string[];
+  ts: number;
+}
+
+/** 成员表条目(指挥官权威;static 手动 | registered call-home 注册 | mdns 发现) */
+export interface ClusterMemberDTO {
+  /** call-home 节点有;静态节点空 */
+  node_id?: string;
+  name: string;
+  addr?: string;
+  labels?: string[];
+  source: string;
+  /** online | offline | unknown */
+  status: string;
+  running_turns?: number;
+  /** unix 秒 */
+  last_seen?: number;
+  capabilities?: ClusterCapsDTO;
+}
+
+/** 远端句柄(本方派发到远端节点的子代理/工作流在跑状态) */
+export interface ClusterHandleDTO {
+  id: string;
+  node: string;
+  /** running | idle */
+  status: string;
+  /** true = 经指挥官中继(NAT 节点) */
+  relay?: boolean;
+  label: string;
+}
+
+/** GET /v1/agent/cluster/status 的自身段 */
+export interface ClusterSelfDTO {
+  id: string;
+  name: string;
+  version: string;
+  platform: string;
+}
+
+/** GET /v1/agent/cluster/status 响应(设置页节点面板数据源) */
+export interface ClusterStatusDTO {
+  enabled: boolean;
+  role: string;
+  self: ClusterSelfDTO;
+  commander_url?: string;
+  sync?: string;
+  discover?: string;
+  invite_required?: boolean;
+  members?: ClusterMemberDTO[];
+  /** 收件箱 SSE 在线的节点名(中继派发可达) */
+  inbox_connected?: string[];
+  remote_handles?: ClusterHandleDTO[];
+  running_turns: number;
+}

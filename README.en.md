@@ -77,9 +77,19 @@ variables — see [docs/deploy.en.md](docs/deploy.en.md).
 - `ask_user_question` expands right inside the composer (click to confirm,
   checkboxes for multi-select); tool-approval cards (approve/reject + feedback),
   chained continuation after answering
+- Voice input: enable it in the Settings "Voice input" section with an
+  OpenAI-compatible transcription endpoint, and a mic button appears in the
+  composer (speech-to-text drops into the draft, Esc cancels; the toggle
+  hotkey is captured from whatever keys you press — single keys such as
+  `` ` `` work too, Ctrl/Cmd+Shift+M by default; off by default)
 - Project-scoped session list (server truth + local project index grouping);
   restore across restarts, paused sessions resume with their pending cards;
   unread blue dots and running spinners
+- Settings "Cluster" section: manage gh cluster mode (commander/node roles,
+  node table, invite code, workspace sync tier) with a live node panel
+  (member online status / running tasks / remote handles); works in both
+  form factors via `/v1/agent/cluster`, auto-restarting the managed gh server
+  after saves on desktop
 
 ### Desktop workbench (desktop only)
 

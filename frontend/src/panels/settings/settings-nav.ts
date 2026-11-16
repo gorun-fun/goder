@@ -14,7 +14,7 @@ import { registry, getSettingsConfig, onSettingsChange, type PanelContext, type 
 import '../sessions/user-chip';
 
 /** 分区 id:内置六个 + 三方自定义(经 registry.settings.add 注册的任意 id) */
-export type SettingsSection = 'appearance' | 'models' | 'harness' | 'plugins' | 'mcp' | 'skills' | (string & {});
+export type SettingsSection = 'appearance' | 'models' | 'harness' | 'cluster' | 'plugins' | 'mcp' | 'skills' | (string & {});
 
 /** 「智能体」分组的组名(settings.agentGroup:false 时整组隐藏) */
 const AGENT_GROUP = '智能体';

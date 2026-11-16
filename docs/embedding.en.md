@@ -40,9 +40,9 @@ configure('myscope', {
                          // (when the embedder manages session policy entirely
                          // via project defaults)
   settings: {            // optional: settings-page trimming
-    agentGroup: false,   // false = hide the "Agent" group (Harness/plugins/MCP/
-                         // skills — read-only guidance in browser form, when the
-                         // platform doesn't open management)
+    agentGroup: false,   // false = hide the "Agent" group (Harness/cluster/
+                         // plugins/MCP/skills — read-only guidance in browser
+                         // form, when the platform doesn't open management)
   },
   user: {                // optional: identity chip at the bottom of the left
     name: 'Alice',       // column (for embedders with their own user system;
@@ -114,6 +114,16 @@ configure('myscope', {
   statusPop: false,      // optional: false hides the status popover at the top
                          // right of the chat column (goder's automation task/
                          // git/goal cards)
+  speechRelay: '/goder-api', // optional: base URL of the host's speech-relay
+                         // endpoints (implement the same /speech relay as
+                         // internal/desktop/speechrelay.go: GET
+                         // <relay>/speech/models?base=… and POST
+                         // <relay>/speech/transcribe?base=…). Transcription
+                         // requests try direct connection first and fall back
+                         // to this relay when CORS/network blocks it; LAN
+                         // self-hosted STT gateways rarely send CORS headers,
+                         // so without this declaration voice input is mostly
+                         // unusable inside an embedded WebView
   persistToken: true,    // optional: only when true is the connection token
                          // persisted to local storage (default: never written,
                          // the host delivers it every time — see auth model)
@@ -250,8 +260,8 @@ registry.settings.add({
                        // The built-in group names "Basics"/"Agent" can be
                        // reused (merged into them)
   order: 15,           // sort weight (built-in: appearance 10 / models 20 /
-                       // Harness 30 / plugins 40 / MCP 50 / skills 60);
-                       // default appends after built-ins
+                       // Harness 30 / cluster 35 / plugins 40 / MCP 50 /
+                       // skills 60); default appends after built-ins
   wide: true,          // optional: wide canvas for the section page (880px,
                       // default 620px)
   icon: '<svg …>…</svg>', // optional; generic settings icon when absent
@@ -368,10 +378,12 @@ top-left corner.
 
 ### Settings page trimming & customization
 
-The settings page's "Agent" group (Harness/plugins/MCP/skills) and the
+The settings page's "Agent" group (Harness/cluster/plugins/MCP/skills) and the
 "Models" provider management read/write via gh server's `/v1/agent/*`
 configuration API in web form (newer gh required; API keys/MCP tokens are
-masked — plaintext never sent down, empty = keep). The multi-user gateway
+masked — plaintext never sent down, empty = keep; the cluster secret is the
+exception, round-tripped in plaintext via `/v1/agent/cluster`, with
+`/v1/agent/cluster/status` as the node-panel data source). The multi-user gateway
 injects `GRF_HOME` per user by default
 (`<data>/users/<uid>/grf-home`), so config is fully isolated per logged-in
 user; `GODER_USER_HOME=0` disables, `GODER_SETTINGS_SEED` points at the

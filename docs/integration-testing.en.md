@@ -175,7 +175,12 @@ merges server sessions into the index under "ungrouped".
 The fake provides sensible defaults (a `fake` provider with two models,
 plugin auto-discovery, two skills), `models/detect` returns rich results
 (ctxLen); PUTs land in memory and read back — the settings page's
-models/plugins/skills CRUD and the detect button are all testable.
+models/plugins/skills CRUD and the detect button are all testable. The
+cluster section has two more endpoints: `cluster` (a commander-shaped
+default section; PUT replaces it wholesale and reads back) and
+`cluster/status` (a snapshot derived from the post-PUT config, with members,
+inbox-connected nodes and remote handles) — "edit config → node panel
+changes" can be verified end-to-end.
 
 ## 4. Observation: Events & Assertions
 
