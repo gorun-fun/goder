@@ -119,6 +119,29 @@ configure('myscope', {
 
 用户也可在 `<goder-session-list>` 底部的连接区里手动配置(存 localStorage)。
 
+**宿主录音桥(可选)**:语音输入的采集默认走 `getUserMedia`;部分国产
+ROM 的 SELinux 拦 WebView 渲染进程的音频 ioctl,`getUserMedia` 恒
+`NotReadableError`(如实测 vivo/Android 16)。嵌入宿主可注入
+`window.goderHostVoice` 提供原生录音通道(goder 采集**桥优先**,无桥自动
+回落 `getUserMedia`,网页/桌面零影响)。全部为同步方法(JavascriptInterface
+只能暴露方法):
+
+```js
+window.goderHostVoice = {
+  sampleRate: () => 16000,          // 采集率,建议 16000(ASR 通用输入)
+  start: () => 'ok',                // "ok" | "PERMISSION"(已发起系统权限
+                                    // 申请,用户授权后重试) | 失败文案
+  poll: () => '…base64 Int16LE…',  // 增量 PCM;base64(Int16LE 小端);
+                                    // 无新数据返回 null;前端约 250ms 轮询
+  stop: () => null,                 // 停录并返回最后一批(可 null)
+  cancel: () => {},                 // 停录并丢弃已采数据
+};
+```
+
+生命周期由前端驱动:`start → 轮询 poll → stop/cancel`;实现参考
+goder-mobile 的 `VoiceBridge.kt`(AudioRecord,VOICE_RECOGNITION 源,
+16k 单声道 PCM16,分块队列 + Base64.NO_WRAP)。
+
 **鉴权模型(重要)**:同源网关模式下,浏览器只需要网关的登录会话
 (cookie 自动携带);每个用户的 gh 令牌由网关在转发时注入,**不下发浏览器**。
 `token` 仅在直连外部 gh server 时使用。

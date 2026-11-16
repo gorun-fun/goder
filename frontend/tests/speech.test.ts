@@ -14,7 +14,16 @@ import {
   speechHotkeyMatches,
 } from '../src/core/settings/speech';
 import { MemoryStorage, setKeyValueStorage, kvSet } from '../src/core/store/storage';
-import { encodeWav, fetchModelIds, filterTranscribeModels, modelsUrl, transcribeUrl } from '../src/core/speech/record';
+import {
+  VoiceRecorder,
+  encodeWav,
+  fetchModelIds,
+  filterTranscribeModels,
+  hostVoiceBridge,
+  modelsUrl,
+  recorderSupported,
+  transcribeUrl,
+} from '../src/core/speech/record';
 import { filterTtsModels, speechSynthUrl, speechTextFromMarkdown, speak } from '../src/core/speech/tts';
 import { setApiFetch } from '../src/core/api/fetch';
 
@@ -290,6 +299,132 @@ describe('通道回落(直连优先,桌面中继兜底)', () => {
     ).rejects.toThrow('接口不可达');
     expect(calls).toBe(1);
   });
+});
+
+describe('宿主录音桥(goderHostVoice)', () => {
+  afterEach(() => {
+    (globalThis as Record<string, unknown>).goderHostVoice = undefined;
+    setApiFetch(undefined);
+  });
+
+  const int16ToB64 = (vals: number[]) => {
+    const buf = new ArrayBuffer(vals.length * 2);
+    const v = new DataView(buf);
+    vals.forEach((x, i) => v.setInt16(i * 2, x, true));
+    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  };
+
+  const fullBridge = (over: Partial<Record<string, unknown>> = {}) =>
+    Object.assign(
+      {
+        sampleRate: () => 16000,
+        start: () => 'ok',
+        poll: () => null,
+        stop: () => null,
+        cancel: () => {},
+      },
+      over,
+    );
+
+  it('hostVoiceBridge:未注入/缺任一方法视为未提供', () => {
+    expect(hostVoiceBridge()).toBeUndefined();
+    (globalThis as Record<string, unknown>).goderHostVoice = { start: () => 'ok' };
+    expect(hostVoiceBridge()).toBeUndefined();
+    (globalThis as Record<string, unknown>).goderHostVoice = fullBridge();
+    expect(hostVoiceBridge()?.sampleRate()).toBe(16000);
+  });
+
+  it('recorderSupported:桥可用即支持(无需 getUserMedia/AudioContext)', () => {
+    (globalThis as Record<string, unknown>).goderHostVoice = fullBridge();
+    expect(recorderSupported()).toBe(true);
+  });
+
+  it('桥全链路:轮询采集 → stop 尾块 → multipart 上传的 WAV 头与样本正确', async () => {
+    const b64a = int16ToB64([0, 16384]);
+    const b64tail = int16ToB64([-16384]);
+    const calls: string[] = [];
+    let polls = 0;
+    (globalThis as Record<string, unknown>).goderHostVoice = fullBridge({
+      start: () => {
+        calls.push('start');
+        return 'ok';
+      },
+      poll: () => {
+        polls++;
+        return polls === 1 ? b64a : null;
+      },
+      stop: () => {
+        calls.push('stop');
+        return b64tail;
+      },
+    });
+    let captured: FormData | undefined;
+    setApiFetch(
+      (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        captured = init?.body as FormData;
+        return new Response(JSON.stringify({ text: ' 桥转写ok ' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch,
+    );
+
+    const rec = new VoiceRecorder({ apiBaseUrl: 'http://x.example/v1', apiKey: '', apiModel: 'whisper-1', language: 'zh' });
+    await rec.start(); // 首块(250ms 轮询)到达才落定
+    const text = await rec.stop(); // 停录:尾块入列 → WAV 上传
+    expect(text).toBe('桥转写ok');
+    expect(calls[0]).toBe('start');
+    expect(calls).toContain('stop');
+
+    const file = captured!.get('file') as Blob;
+    const ab = await file.arrayBuffer();
+    const dv = new DataView(ab);
+    const tag = (o: number, n: number) => String.fromCharCode(...new Uint8Array(ab, o, n));
+    expect(tag(0, 4)).toBe('RIFF');
+    expect(dv.getUint32(24, true)).toBe(16000); // 采样率
+    expect(dv.getUint32(40, true)).toBe(6); // 3 样本(2 轮询 + 1 尾块)
+    expect(dv.getInt16(44, true)).toBe(0);
+    expect(dv.getInt16(46, true)).toBe(16383); // 0.5 × 0x7fff 截断
+    expect(dv.getInt16(48, true)).toBe(-16384); // -0.5
+    expect(captured!.get('model')).toBe('whisper-1');
+    expect(captured!.get('language')).toBe('zh');
+  }, 10_000);
+
+  it('start 返回 PERMISSION:报授权指引文案,不进入录音', async () => {
+    (globalThis as Record<string, unknown>).goderHostVoice = fullBridge({ start: () => 'PERMISSION' });
+    const rec = new VoiceRecorder({ apiBaseUrl: 'http://x.example/v1', apiKey: '', apiModel: 'whisper-1', language: 'zh' });
+    await expect(rec.start()).rejects.toThrow('授权后请再按一次');
+  });
+
+  it('abort:桥 cancel 被调,不上传', async () => {
+    const b64a = int16ToB64([1]);
+    const calls: string[] = [];
+    let polls = 0;
+    (globalThis as Record<string, unknown>).goderHostVoice = fullBridge({
+      poll: () => {
+        polls++;
+        return polls === 1 ? b64a : null;
+      },
+      stop: () => {
+        calls.push('stop');
+        return null;
+      },
+      cancel: () => calls.push('cancel'),
+    });
+    let fetched = false;
+    setApiFetch(
+      (async () => {
+        fetched = true;
+        return new Response('{}');
+      }) as typeof fetch,
+    );
+    const rec = new VoiceRecorder({ apiBaseUrl: 'http://x.example/v1', apiKey: '', apiModel: 'whisper-1', language: 'zh' });
+    await rec.start();
+    rec.abort();
+    expect(calls).toContain('cancel');
+    expect(calls).not.toContain('stop');
+    expect(fetched).toBe(false);
+  }, 10_000);
 });
 
 describe('speak(合成通道:直连 JSON 优先,桌面中继兜底)', () => {
