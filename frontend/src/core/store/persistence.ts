@@ -25,7 +25,8 @@ export interface SessionRecord {
   lastResponseId?: string;
   /** 用户最后查看会话时的 lastResponseId 基线(与之不同 = 有未查看的新回合) */
   lastSeenResponseId?: string;
-  /** 本会话最后使用的模型/思考强度(新会话按同项目最近会话继承) */
+  /** 本会话最后使用的模型/思考强度(只随非 failed 回合记录;新会话按
+   * 同项目最近会话继承,即继承"最近一次跑通的模型") */
   model?: string;
   effort?: string;
 }

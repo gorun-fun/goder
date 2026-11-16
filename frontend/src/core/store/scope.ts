@@ -941,9 +941,10 @@ export class GoderScope extends Emitter {
 
   /** 新会话继承偏好:模型与思考强度优先取同项目最近一次会话的取值;
    * 该项目尚无记录时回落到全部项目里最近一次对话的会话(新开项目沿用
-   * 用户最近在用的模型)。都没有时:模型保持当前值(localStorage 里上次
-   * 的选择,无选择由发送守卫引导),思考强度回落默认高。
-   * 写回 scope 级配置,composer 即时显示。 */
+   * 用户最近在用的模型)。记录只随非 failed 回合写入,故继承到的总是
+   * "最近一次跑通的模型",坏模型不随失败回合扩散。都没有时:模型保持
+   * 当前值(localStorage 里上次的选择,无选择由发送守卫引导),思考
+   * 强度回落默认高。写回 scope 级配置,composer 即时显示。 */
   private inheritProjectPrefs(projectId: string): void {
     const withModel = Object.values(this.index.sessions).filter((r) => r.model || r.effort !== undefined);
     const inProject = withModel.filter((r) => r.projectId === projectId);
@@ -1314,17 +1315,22 @@ export class GoderScope extends Emitter {
         rec.lastResponseId = final.id;
         rec.updatedAt = new Date().toISOString();
         // 记录本会话最后使用的模型/思考强度,新会话按同项目最近会话继承。
+        // 只随非 failed 回合记录:failed = 模型本身没跑通(配额/鉴权/上游
+        // 故障),记下会让坏模型随继承扩散到新会话;cancelled(用户主动
+        // 中断)与 incomplete(approval-pause/截断)模型已正常生成,照记。
         // 模型必须记请求时下发的全名(provider/model):服务端回报的
         // final.model 是裸名,裸名再下发会被 gh 的 trySwitchModel 忽略、
         // 静默回落服务端默认,继承就形同虚设。本端未选模型时记空串,
         // 新会话继承为"未选"、继续走服务端默认,与原会话语义一致。
-        rec.model = this.model ?? '';
-        rec.effort = this.reasoningEffort ?? '';
+        if (final.status !== 'failed') {
+          rec.model = this.model ?? '';
+          rec.effort = this.reasoningEffort ?? '';
+        }
         this.persistIndex();
       }
       // 用户仍停在该会话:完成即视为已查看;已切走则保留未读标记。
       if (this.activeSessionId === realSid) this.markSessionSeen(realSid);
-      roundOk = true;
+      roundOk = final.status === 'completed' || final.status === 'incomplete';
     } catch (err) {
       // 会话卡死自愈:服务端判定"暂停等待交互"(getConversation paused=true)
       // 但本 UI 没有任何可应答卡片 —— 典型是 App 重启丢掉了进行中客户端
@@ -1704,9 +1710,12 @@ export class GoderScope extends Emitter {
       const rec = this.index.sessions[sid];
       if (rec) {
         rec.lastResponseId = final.id;
-        // 同 send():只记请求全名,不记服务端回报的裸名(见上文说明)。
-        rec.model = this.model ?? rec.model;
-        rec.effort = this.reasoningEffort ?? '';
+        // 同 send():只记请求全名,不记服务端回报的裸名(见上文说明);
+        // failed 终态不记模型(模型未跑通,不随继承扩散)。
+        if (final.status !== 'failed') {
+          rec.model = this.model ?? rec.model;
+          rec.effort = this.reasoningEffort ?? '';
+        }
         this.persistIndex();
       }
       if (this.activeSessionId === sid) this.markSessionSeen(sid);
