@@ -196,7 +196,10 @@ frontend/src/
            自定义同一条 add/remove/hide/show API;条目可带 scopes 字段
            限定只对哪些 scope 可见(同页多实例各装各的)
   panels/  按功能分组:chat(chat-panel——消息流+composer+头部,右栏/
-           底栏 dock 已剥离到 shell;messages 渲染管线三层:自定义渲染器
+           底栏 dock 已剥离到 shell;mobile 属性启用微信式移动布局:
+           头部[返回|标题|模型弹层|新会话]、双方头像气泡、composer 单行
+           输入条长按按住说话(util/hold-detect),见 embedding.md「移动端
+           形态」;messages 渲染管线三层:自定义渲染器
            →内置 kind switch→未知 kind 通用通知卡、status-pop(含自动化任务
            执行入口,configure({statusPop:false}) 可整体隐藏)/composer
            (send 事件 cancelable + onBeforeSend 钩子消费)/工具卡/ask/

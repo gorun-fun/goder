@@ -16,17 +16,20 @@ the areas involved live in [AGENTS.md](../AGENTS.md).
 - The only exception is the "direct external gh server" single-user mode
   (`GODER_UPSTREAM`), where the user holds their own token and the gateway
   does not inject.
-- Voice input (mic-to-text) is a separate third-party channel: recorded
-  audio is sent **straight from the browser to the user-configured
-  OpenAI-compatible transcription endpoint** whenever the endpoint allows
-  browser CORS; on desktop, when the direct connection is blocked by CORS or
-  mixed-content rules, it falls back to the local server's same-origin
-  `/goder-api/speech/*` relay (loopback-only + Host allowlist, fixed
-  `/models` and `/audio/transcriptions` suffixes, http/https bases only, the
-  key is passed through to the upstream and never persisted or logged — see
-  internal/desktop/speechrelay.go). Its API key lives only in the local
-  browser storage (via the injectable KV channel) and is unrelated to the
-  gh token boundary; the feature is off by default.
+- Speech (voice input transcription + voice output playback) is a separate
+  third-party channel: recorded audio and text to speak are sent **straight
+  from the browser to the user-configured OpenAI-compatible speech
+  endpoints** whenever they allow browser CORS; on desktop, when the direct
+  connection is blocked by CORS or mixed-content rules, it falls back to the
+  local server's same-origin `/goder-api/speech/*` relay (loopback-only +
+  Host allowlist, fixed `/models`, `/audio/transcriptions` and
+  `/audio/speech` suffixes, http/https bases only, the key is passed through
+  to the upstream and never persisted or logged — see
+  internal/desktop/speechrelay.go; synthesized audio returns through the
+  relay and is only played back locally, never written to disk). Its API
+  key lives only in the local browser storage (via the injectable KV
+  channel) and is unrelated to the gh token boundary; both directions are
+  off by default (independent toggles).
 
 ## Identity & Trust Model
 

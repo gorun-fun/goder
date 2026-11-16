@@ -115,15 +115,18 @@ configure('myscope', {
                          // right of the chat column (goder's automation task/
                          // git/goal cards)
   speechRelay: '/goder-api', // optional: base URL of the host's speech-relay
-                         // endpoints (implement the same /speech relay as
+                         // endpoints (shared by voice input and output —
+                         // implement the same /speech relay as
                          // internal/desktop/speechrelay.go: GET
-                         // <relay>/speech/models?base=… and POST
-                         // <relay>/speech/transcribe?base=…). Transcription
-                         // requests try direct connection first and fall back
-                         // to this relay when CORS/network blocks it; LAN
-                         // self-hosted STT gateways rarely send CORS headers,
-                         // so without this declaration voice input is mostly
-                         // unusable inside an embedded WebView
+                         // <relay>/speech/models?base=…, POST
+                         // <relay>/speech/transcribe?base=… and POST
+                         // <relay>/speech/tts?base=…). Speech requests try
+                         // direct connection first and fall back to this
+                         // relay when CORS/network blocks it; LAN self-hosted
+                         // speech gateways rarely send CORS headers, so
+                         // without this declaration voice input is mostly
+                         // unusable inside an embedded WebView (speech
+                         // output alike)
   persistToken: true,    // optional: only when true is the connection token
                          // persisted to local storage (default: never written,
                          // the host delivers it every time — see auth model)
@@ -178,8 +181,8 @@ external gh server.
 
 | Element | Description | Common attributes |
 |------|------|----------|
-| `<goder-session-list>` | Project-scoped session list: grouping/new/rename/archive; blue dot = unseen finished round | `no-connection` hides the bottom connection area |
-| `<goder-chat>` | Chat: message stream + tool cards + ask forms + approval cards + composer; the side column is tabbed (entries per registry.side) | `no-header` `no-composer` |
+| `<goder-session-list>` | Project-scoped session list: grouping/new/rename/archive; blue dot = unseen finished round | `no-connection` hides the bottom connection area; `flat` flat mode (mobile, see below) |
+| `<goder-chat>` | Chat: message stream + tool cards + ask forms + approval cards + composer; the side column is tabbed (entries per registry.side) | `no-header` `no-composer`; `mobile` mobile mode (see below) |
 | `<goder-session-detail>` | The side "detail" panel itself: overview/usage/tool timeline/Todo/meta | — |
 | `<goder-review>` | git review: branch/ahead-behind/file grouping + inline diffs (needs desktop capabilities; placeholder in pure web) | `.cwd` |
 | `<goder-browser>` | Embedded browser: address bar + iframe, last URL remembered per scope | — |
@@ -202,6 +205,40 @@ GODER_UI_VERSION; // '0.1.0' — same-source version constant of the artifact,
 `dist-embed/types/` contains the full TypeScript artifacts (`goder.js` +
 `entries/embed.d.ts` and its dependency closure); TS projects get every
 `configure` option and hook signature by importing via relative path.
+
+### Mobile form (mobile)
+
+Phone/tablet hosts (WebView shells) declare `<goder-chat mobile>` to enable
+the WeChat-style mobile layout, combined with `configure({ localProject })`
+single-project mode and `<goder-session-list flat>`:
+
+- **Header**: `[back | title | waiting chip | model | new session]`. Back and
+  new-session dispatch `goder-back` / `goder-new-session` events for the host
+  to wire (typically `history.back()` and `scope.newDraft()`); the model chip
+  sits on the right of the title bar and opens a bottom sheet (provider
+  groups + reasoning-effort segments; selections apply immediately).
+- **Messages**: WeChat-style bubbles with avatars on both sides — user
+  messages get a right avatar + right bubble, assistant messages a left
+  avatar + left bubble; tool cards / reasoning blocks / notices stay
+  full-width.
+- **Composer**: WeChat-style `[+ attach | pill input | send]` — attach on
+  the left, send on the right, and a fixed single-line input that never
+  grows (long text scrolls horizontally; Enter sends); send becomes stop
+  while running; the desktop toolbar's policy / effort / context ring are
+  not rendered. **Press and hold the input area to talk** (WeChat-style):
+  holding for about 350ms starts recording, releasing stops and transcribes
+  into the input at the caret, sliding up then releasing cancels; when voice
+  input is disabled, a one-shot hint explains how to enable it. Recording and
+  transcription reuse the desktop voice pipeline (Settings → Speech; hosts
+  can declare a relay via `configure({ speechRelay })`).
+- **Safe area**: the composer bottom and the model sheet respect the
+  host-injected `--safe-inset-bottom` CSS variable (0 when absent);
+  `touch-action: pan-y` on the message scroll container is built in (the
+  same fix for inner scrollers such as reasoning text / tool output remains
+  the host's injection concern — see goder-mobile's zxScrollFix).
+
+Zero-backend walkthrough page: `frontend/embed-demo.html?panels=mobile&fake=1`
+(scripted-api fake backend + seeded conversation).
 
 ## 4. registry: UI Customization (the core extension point)
 
@@ -638,8 +675,10 @@ Panels dispatch bubbling CustomEvents to the page:
 |------|--------|
 | `goder:session-selected` | `{ sessionId }` |
 | `goder:session-archived` | `{ sessionId }` |
-| `goder:round-completed` | `{ sessionId, ok }` — terminal round state (fired for success/failure/interruption alike; `ok` = normal completion); the standard wait point for stream settlement |
+| `goder:round-completed` | `{ sessionId, ok }` — terminal round state (fired for success/failure/interruption alike; `ok` = normal completion; fired for both plain sends and continuation rounds resumed by ask/approval answers); the standard wait point for stream settlement |
 | `goder:conn-state` | `{ scope, state }` — connection state change (`checking/ok/error/unknown`) |
+| `goder-back` | `{}` — back button of the `<goder-chat mobile>` header (host wires e.g. `history.back()`) |
+| `goder-new-session` | `{}` — new-session button of the `<goder-chat mobile>` header (host wires `scope.newDraft()`) |
 
 ```js
 window.addEventListener('goder:session-selected', (e) => {

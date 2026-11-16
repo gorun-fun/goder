@@ -153,7 +153,6 @@ func TestUpsertProvidersCorruptSkip(t *testing.T) {
 	}
 }
 
-
 func TestInstallPluginModes(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "grf-home")
 	cmd := []string{"/opt/openos-server", "mcp-shim", "http://127.0.0.1:7712/mcp", "tok", "张 三"}

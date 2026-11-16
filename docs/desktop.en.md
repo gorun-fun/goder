@@ -46,11 +46,13 @@ The wails v3 desktop form: an installable native app that manages its own
   session shows a spinner.
 - **Center**: the chat stream. Tool cards (argument digest, expandable full
   input/output), `ask_user_question` expanding right inside the composer,
-  tool-approval cards (approve/reject + feedback), and a voice-input mic button
-  (shown after enabling it in the Settings "Voice input" section with an
+  tool-approval cards (approve/reject + feedback), a voice-input mic button
+  (shown after enabling it in the Settings "Speech" section with an
   OpenAI-compatible transcription endpoint; the first recording triggers the
   macOS microphone permission prompt, and audio goes straight to the
-  configured endpoint).
+  configured endpoint), and voice-output speak buttons (same section with a
+  synthesis endpoint; hover an assistant message to read it aloud, with an
+  optional auto-speak-on-completion toggle).
 - **Side tabs**: detail (overview/usage/tool timeline), **review** (current
   project git status grouping + inline diffs), **terminal** (independent PTY
   session), **browser** (address bar + iframe, remembered per scope), files,

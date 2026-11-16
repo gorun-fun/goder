@@ -27,6 +27,9 @@ export interface MessageViewProps extends ItemViewActions {
   scope: string;
   store: GoderScope;
   sessionId?: string;
+  /** 移动模式(chat-panel mobile 属性下发):user/assistant 微信式
+   *  双方头像气泡布局;其余条目(工具/思考/通知等系统卡)不变。 */
+  mobile?: boolean;
   /** 文案翻译(i18n;chat-panel 实现时绑定面板 scope) */
   t(key: string): string;
   /** 编辑中的用户消息 id 与草稿 */
@@ -34,11 +37,17 @@ export interface MessageViewProps extends ItemViewActions {
   editDraft: string;
   /** 刚复制成功的消息 id(图标短暂变为 ✓) */
   copiedId?: string;
+  /** 语音输出就绪(设置启用且配了接口):助手消息显示朗读按钮 */
+  ttsReady?: boolean;
+  /** 正在朗读(加载音频/播放)的助手消息 id(按钮变停止图标) */
+  speakingId?: string;
   /** 显式展开过的思考块 id */
   reasoningOpen: Set<string>;
   onEditDraft(v: string): void;
   onCommitEdit(): void;
   onCancelEdit(): void;
+  /** 朗读/停止朗读一条助手消息(播放中再点同条 = 停止) */
+  onSpeak?(id: string, text: string): void;
 }
 
 /** 消息流内的 markdown 渲染:per-scope 覆写优先,未覆写走内置。 */
@@ -81,28 +90,47 @@ export function renderItem(it: ChatItem, p: MessageViewProps, items?: ChatItem[]
         `;
       }
       return html`
-        <div class="msg-user" data-mid=${it.id}>
-          <div class="body">${it.text}</div>
-          <div class="bops">
-            <button class="bop" title=${p.t('复制')} @click=${() => p.onCopy(it.id, it.text)}>
-              ${unsafeHTML(p.copiedId === it.id ? icon.check : icon.copy)}
-            </button>
-            <button class="bop" title=${p.t('编辑后重新发送')} @click=${() => p.onStartEdit(it)}>
-              ${unsafeHTML(icon.edit)}
-            </button>
+        <div class=${p.mobile ? 'msg-user mob' : 'msg-user'} data-mid=${it.id}>
+          <div class="side">
+            <div class="body">${it.text}</div>
+            <div class="bops">
+              <button class="bop" title=${p.t('复制')} @click=${() => p.onCopy(it.id, it.text)}>
+                ${unsafeHTML(p.copiedId === it.id ? icon.check : icon.copy)}
+              </button>
+              <button class="bop" title=${p.t('编辑后重新发送')} @click=${() => p.onStartEdit(it)}>
+                ${unsafeHTML(icon.edit)}
+              </button>
+            </div>
+            ${it.images?.length
+              ? html`<div class="imgs">${it.images.map((u) => html`<img src=${u} alt=${p.t('图片')} />`)}</div>`
+              : nothing}
           </div>
-          ${it.images?.length
-            ? html`<div class="imgs">${it.images.map((u) => html`<img src=${u} alt=${p.t('图片')} />`)}</div>`
-            : nothing}
+          ${p.mobile ? html`<span class="ava">${unsafeHTML(icon.user)}</span>` : nothing}
         </div>
       `;
     }
     case 'assistant':
       return html`
-        <div class="msg-assistant">
-          <div class="md">
-            ${renderAssistantBody(it, p)}
-            ${it.streaming && !it.text ? html`<span class="cursor"></span>` : nothing}
+        <div class=${p.mobile ? 'msg-assistant mob' : 'msg-assistant'} data-mid=${it.id}>
+          ${p.mobile ? html`<span class="ava">${unsafeHTML(icon.bot)}</span>` : nothing}
+          <div class="col">
+            <div class="bub">
+              <div class="md">
+                ${renderAssistantBody(it, p)}
+                ${it.streaming && !it.text ? html`<span class="cursor"></span>` : nothing}
+              </div>
+            </div>
+            ${p.ttsReady && p.onSpeak && it.text.trim()
+              ? html`<div class=${p.speakingId === it.id ? 'bops on' : 'bops'}>
+                  <button
+                    class=${p.speakingId === it.id ? 'bop speaking' : 'bop'}
+                    title=${p.speakingId === it.id ? p.t('停止朗读') : p.t('朗读')}
+                    @click=${() => p.onSpeak?.(it.id, it.text)}
+                  >
+                    ${unsafeHTML(p.speakingId === it.id ? icon.stopSquare : icon.speaker)}
+                  </button>
+                </div>`
+              : nothing}
           </div>
         </div>
       `;

@@ -97,13 +97,15 @@ configure('myscope', {
   },
   statusPop: false,      // 可选:false 隐藏聊天列右上的状态浮窗(goder
                          // 特有的自动化任务/git/goal 卡)
-  speechRelay: '/goder-api', // 可选:语音输入转写中继基址——嵌入宿主实现
-                         // 了同款 /speech 中继(参考 internal/desktop/
-                         // speechrelay.go:GET <relay>/speech/models?base=…、
-                         // POST <relay>/speech/transcribe?base=…)时声明。
-                         // 转写请求直连优先,直连被 CORS/网络层拦截时回落
-                         // 中继;局域网自建转写接口普遍无 CORS 头,嵌入
-                         // WebView 不声明则语音输入基本不可用
+  speechRelay: '/goder-api', // 可选:语音中继基址(输入转写 + 输出朗读
+                         // 共用)——嵌入宿主实现了同款 /speech 中继(参考
+                         // internal/desktop/speechrelay.go:GET
+                         // <relay>/speech/models?base=…、POST
+                         // <relay>/speech/transcribe?base=…、POST
+                         // <relay>/speech/tts?base=…)时声明。语音请求
+                         // 直连优先,直连被 CORS/网络层拦截时回落中继;
+                         // 局域网自建语音接口普遍无 CORS 头,嵌入 WebView
+                         // 不声明则语音输入基本不可用(朗读同理)
   persistToken: true,    // 可选:true 才把连接 token 持久化到本地存储
                          // (默认不落盘,每次由宿主下发——见鉴权模型)
 });
@@ -148,8 +150,8 @@ goder-mobile 的 `VoiceBridge.kt`(AudioRecord,VOICE_RECOGNITION 源,
 
 | 元素 | 说明 | 常用属性 |
 |------|------|----------|
-| `<goder-session-list>` | 项目级会话列表:项目分组/新建/重命名/归档;条目蓝点 = 有未查看的完成回合 | `no-connection` 隐藏底部连接配置 |
-| `<goder-chat>` | 聊天:消息流 + 工具卡 + ask 表单 + 审批卡 + 输入框;右栏为 tab 化(条目见 registry.side) | `no-header` `no-composer` |
+| `<goder-session-list>` | 项目级会话列表:项目分组/新建/重命名/归档;条目蓝点 = 有未查看的完成回合 | `no-connection` 隐藏底部连接配置;`flat` 扁平模式(移动端,见下节) |
+| `<goder-chat>` | 聊天:消息流 + 工具卡 + ask 表单 + 审批卡 + 输入框;右栏为 tab 化(条目见 registry.side) | `no-header` `no-composer`;`mobile` 移动模式(见下节) |
 | `<goder-session-detail>` | 右栏"详情"面板本体:概览/用量/工具时间线/Todo/元信息 | — |
 | `<goder-review>` | git 审查:分支/领先落后/文件分组 + 行内 diff(依赖桌面能力,纯 web 态显示占位) | `.cwd` |
 | `<goder-browser>` | 内嵌浏览器:地址栏 + iframe,上次访问地址按 scope 记忆 | — |
@@ -169,6 +171,34 @@ GODER_UI_VERSION; // '0.1.0' —— 产物同源版本常量,升级前可做特�
 `dist-embed/types/` 下有完整 TypeScript 类型产物(`goder.js` +
 `entries/embed.d.ts` 等依赖闭包),TS 项目按相对路径引用即可获得全部
 `configure` 选项与钩子签名。
+
+### 移动端形态(mobile)
+
+手机/平板宿主(WebView 壳)可声明 `<goder-chat mobile>` 启用微信式
+移动布局,配套 `configure({ localProject })` 单项目模式与
+`<goder-session-list flat>` 扁平会话列表一起食用:
+
+- **头部**:`[返回 | 标题 | 等待 chip | 模型 | 新会话]`。返回/新会话
+  派发 `goder-back` / `goder-new-session` 事件由宿主接线(典型:
+  `history.back()` 与 `scope.newDraft()`);模型 chip 在标题栏右侧,
+  点击开底部弹层(供应商分组 + 思考强度分段,选择即时生效)。
+- **消息**:微信式双方头像气泡 —— 用户消息右侧头像 + 右气泡,助手
+  消息左侧头像 + 左气泡;工具卡/思考块/通知等系统条目保持通栏。
+- **输入条**:微信式 `[+ 附件 | 胶囊单行输入框 | 发送]` —— 附件在左、
+  发送在右,输入框固定一行不自动增高(多字横向滚动,Enter 即发送);
+  运行中发送变停止;桌面工具栏的策略/思考强度/上下文圆环不渲染。
+  **长按输入区即按住说话**
+  (微信同款):按住约 350ms 开始录音,松开自动停录并转写落回光标处,
+  手指上滑松开取消;语音未启用时长按给一次性开启指引。录音与转写
+  复用桌面语音输入链路(设置-语音配置,宿主可声明
+  `configure({ speechRelay })` 中继)。
+- **安全区**:composer 底部与模型弹层会按宿主注入的
+  `--safe-inset-bottom` CSS 变量让位(未注入视为 0);消息区滚动容器
+  `touch-action: pan-y` 已内建(内层小块如思考全文/工具输出的同类
+  修复仍属宿主注入范围,见 goder-mobile 的 zxScrollFix)。
+
+零后端走查页:`frontend/embed-demo.html?panels=mobile&fake=1`
+(scripted-api 假后端 + 种子会话)。
 
 ## 4. registry:界面定制(核心扩展点)
 
@@ -536,8 +566,10 @@ token)在重建时保留,不受影响。
 |------|--------|
 | `goder:session-selected` | `{ sessionId }` |
 | `goder:session-archived` | `{ sessionId }` |
-| `goder:round-completed` | `{ sessionId, ok }` —— 回合终态(成功/失败/中断一律派发,`ok`=正常完成);等流式收口的标准等待点 |
+| `goder:round-completed` | `{ sessionId, ok }` —— 回合终态(成功/失败/中断一律派发,`ok`=正常完成;普通发送与 ask/审批应答续跑的回合都会派发);等流式收口的标准等待点 |
 | `goder:conn-state` | `{ scope, state }` —— 连接态变化(`checking/ok/error/unknown`) |
+| `goder-back` | `{}` —— `<goder-chat mobile>` 头部返回键(宿主接 `history.back()` 等) |
+| `goder-new-session` | `{}` —— `<goder-chat mobile>` 头部新会话键(宿主接 `scope.newDraft()`) |
 
 ```js
 window.addEventListener('goder:session-selected', (e) => {

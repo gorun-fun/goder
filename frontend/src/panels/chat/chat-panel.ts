@@ -11,15 +11,18 @@ import { GoderPanel, theme, controls } from '../../ui/panel';
 import { markdownCss } from '../../ui/markdown-css';
 import { icon } from '../../util/icons';
 import { makeTitleDrag, type TitleDrag } from '../../util/titledrag';
-import { inWails, saveSkill } from '../../host/bridge';
-import { usageTotals, type AskItem } from '../../core/model/chat-model';
+import { inWails, saveSkill, speechRelayBase } from '../../host/bridge';
+import { usageTotals, type AskItem, type AssistantItem } from '../../core/model/chat-model';
 import { settingsStore, displayFullModel } from '../../core/settings/settings-store';
+import { isSpeaking, onSpeakStateChange, speak, stopSpeak } from '../../core/speech/tts';
 import { modelMenuOf, contextWindowDenominator } from '../../util/model-menu';
 import { registry, getStatusPop, onStatusPopChange, type PanelContext } from '../../registry/registry';
 import { getLocalProject } from '../../core/store/host-config';
 import './composer';
+import './model-sheet';
 import './status-pop';
 import { renderItem, renderChatNav, cnavWave, cnavReset, type MessageViewProps } from './messages';
+import { shortModel } from './model-sheet';
 
 /** 被模型守卫拦截的输入(模块级:跳设置-模型页会卸载 composer 甚至本
  * 面板,视图切回、面板重连时恢复,用户配完模型回来输入不丢)。 */
@@ -49,8 +52,15 @@ export class GoderChat extends GoderPanel {
    * (最小化/最大化/关闭)留位 */
   @property({ type: Boolean, attribute: 'win-controls' }) winControls = false;
   /** 壳层装配标记:去掉本面板自身的卡片视觉(黑底/圆角上移到壳层
-   * workcard 容器,避免双层卡片);独立嵌入不传,保留卡片感。 */
+   *  workcard 容器,避免双层卡片);独立嵌入不传,保留卡片感。 */
   @property({ type: Boolean }) flat = false;
+  /** 移动模式(移动端宿主声明):微信式移动布局 —— 头部变
+   *  [返回|标题|模型|新会话](返回/新会话 fire goder-back/goder-new-session
+   *  由宿主接线,模型 chip 开底部弹层)、消息双方头像气泡、composer 单行
+   *  输入条(长按按住说话);左侧消息导航条不渲染(与边缘滑动手势冲突)。 */
+  @property({ type: Boolean }) mobile = false;
+  /** 头部模型弹层(移动模式;桌面模型入口在 composer 工具栏) */
+  @state() private modelSheet = false;
 
   /** 底部吸附态:用户在消息区最底(距底容差内)时新内容自动滚到最底;
    * 向上滚看历史即脱离,滚回最底恢复(见 onScroll/STICK_AT)。 */
@@ -74,6 +84,13 @@ export class GoderChat extends GoderPanel {
   /** 刚复制成功的消息 id(图标短暂变为 ✓) */
   @state() private copiedId?: string;
   private copiedTimer = 0;
+  /** 正在朗读(加载音频/播放中)的助手消息 id(语音输出) */
+  @state() private speakingId?: string;
+  /** 朗读状态订阅(tts 引擎单例广播,多面板实例同屏同步) */
+  private speakUnsub?: () => void;
+  /** 朗读失败/自动播放被拦的提示文案(数秒自动清除) */
+  @state() private speakMsg = '';
+  private speakMsgTimer = 0;
   /** 显式展开过的思考块 id */
   private reasoningOpen = new Set<string>();
   /** 本组件生命周期内已保存的技能目录名(技能卡已保存标记) */
@@ -401,8 +418,28 @@ export class GoderChat extends GoderPanel {
         margin-top: 4px;
         transition: opacity 0.12s;
       }
-      .msg-user:hover .bops {
+      /* 朗读失败/自动播放被拦的提示行(消息区顶部,数秒自动清除) */
+      .speak-msg {
+        flex: none;
+        padding: 4px 14px;
+        font-size: 12px;
+        color: var(--goder-text-faint);
+        background: var(--goder-bg-raise);
+        border-bottom: 1px solid var(--goder-border);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .msg-user:hover .bops,
+      .msg-assistant:hover .bops {
         opacity: 1;
+      }
+      /* 播放/加载中的朗读按钮常显(正在播 = 用户需要看到停止入口) */
+      .bops.on {
+        opacity: 1;
+      }
+      .bop.speaking {
+        color: var(--goder-accent);
       }
       .bop {
         border: none;
@@ -420,6 +457,141 @@ export class GoderChat extends GoderPanel {
       .bop svg {
         width: 13px;
         height: 13px;
+      }
+      /* ---------- 移动模式(mobile):微信式头部与聊天气泡 ---------- */
+      header.mobile {
+        height: 44px;
+        padding: 0 6px;
+        gap: 6px;
+      }
+      /* 返回/新会话:38px 方形命中区 */
+      header.mobile .mact {
+        flex: none;
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        justify-content: center;
+      }
+      header.mobile .mact svg {
+        width: 18px;
+        height: 18px;
+      }
+      /* 模型 chip:胶囊按钮显示当前模型短名,点击开底部弹层 */
+      header.mobile .mbtn {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: 1px solid var(--goder-border);
+        border-radius: 99px;
+        background: transparent;
+        color: var(--goder-text-dim);
+        font-size: var(--goder-font-size-xs);
+        font-family: var(--goder-font);
+        padding: 8px 10px;
+        max-width: 38vw;
+        min-width: 0;
+        cursor: pointer;
+      }
+      header.mobile .mbtn .cur {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      header.mobile .mbtn svg {
+        width: 1em;
+        height: 1em;
+        flex: none;
+      }
+      /* 消息区:去 860px 上限收紧留白,纵向滚动优先(压制 WebView 嵌套滚动手感问题) */
+      .msgs-wrap.mob .msgs {
+        padding: 12px 12px 8px;
+        touch-action: pan-y;
+      }
+      .msgs-wrap.mob .inner {
+        max-width: none;
+        gap: 12px;
+      }
+      .composer-area.mob {
+        padding: 8px 10px calc(10px + var(--safe-inset-bottom, 0px));
+      }
+      .composer-area.mob .inner {
+        max-width: none;
+      }
+      /* 头像:双方消息各带 28px 圆角方头像(assistant 强调色底/user 中性底) */
+      .ava {
+        flex: none;
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        border: 1px solid var(--goder-border-soft);
+        background: var(--goder-bg-raise);
+        color: var(--goder-text-dim);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .ava svg {
+        width: 16px;
+        height: 16px;
+      }
+      .msg-assistant .ava {
+        background: var(--goder-accent-soft);
+        border-color: transparent;
+        color: var(--goder-accent-text);
+      }
+      /* 用户消息:右侧头像 + 右气泡(微信式,一侧小角) */
+      .msg-user.mob {
+        flex-direction: row;
+        align-items: flex-start;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .msg-user .side {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        max-width: 100%;
+        min-width: 0;
+      }
+      .msg-user.mob .side {
+        max-width: calc(100% - 36px);
+      }
+      .msg-user.mob .body {
+        border-radius: 12px 4px 4px 12px;
+        max-width: 100%;
+      }
+      /* 助手消息:左侧头像 + 左气泡;桌面态 .bub display:contents 不参与布局 */
+      .msg-assistant.mob {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .msg-assistant .col {
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .msg-assistant.mob .col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        max-width: calc(100% - 36px);
+      }
+      .msg-assistant .bub {
+        display: contents;
+      }
+      .msg-assistant.mob .bub {
+        display: block;
+        background: var(--goder-bg-raise);
+        border: 1px solid var(--goder-border-soft);
+        border-radius: 4px 12px 12px 12px;
+        padding: 9px 12px;
+        min-width: 0;
+        max-width: 100%;
+        overflow-x: auto;
       }
       /* 触屏(无 hover):用户消息复制/编辑常显,回到底部加大命中区 */
       @media (hover: none) {
@@ -668,6 +840,14 @@ export class GoderChat extends GoderPanel {
     this.regUnsub = registry.subscribe(() => this.requestUpdate());
     // 状态浮窗配置变更即时反映(configure({ statusPop: false }) 裁剪)
     this.statusPopOff = onStatusPopChange(() => this.requestUpdate());
+    // 语音输出:朗读状态订阅(tts 引擎单例广播,多面板实例同屏同步
+    // 「正在朗读哪条」);回合完成事件 = 自动朗读触发点(ok 且开启时)
+    this.speakUnsub = onSpeakStateChange((st, err) => {
+      this.speakingId = st.key ?? undefined;
+      if (err) this.flashSpeakMsg(err);
+      this.requestUpdate();
+    });
+    window.addEventListener('goder:round-completed', this.onRoundCompleted);
     // 聊天列宽度观察:窄于阈值自动把状态浮窗收成单行(不遮对话内容)
     this.colRo = new ResizeObserver((es) => {
       const w = es[0]?.contentRect.width ?? 0;
@@ -717,6 +897,10 @@ export class GoderChat extends GoderPanel {
     this.regUnsub = undefined;
     this.statusPopOff?.();
     this.statusPopOff = undefined;
+    this.speakUnsub?.();
+    this.speakUnsub = undefined;
+    // 朗读不因面板卸载而停(用户切面板,音频继续;组件重连重新订阅状态)
+    window.removeEventListener('goder:round-completed', this.onRoundCompleted);
     super.disconnectedCallback();
   }
 
@@ -744,6 +928,35 @@ export class GoderChat extends GoderPanel {
   /** 头部修饰类:macOS 红绿灯悬浮位(左栏收起时)/ 无边框桌面平台窗口控制让位 */
   private get headerClass(): string {
     return [this.leftLights && !this.leftOn ? 'lights' : '', this.winControls ? 'win' : ''].filter(Boolean).join(' ');
+  }
+
+  /** 移动头部:[返回 | 标题 | 等待 chip | 模型 chip | 新会话]。返回/新会话
+   *  fire 事件由宿主接线(goder-back / goder-new-session,embed 哲学:
+   *  导航动作宿主编排);模型 chip 开底部弹层(选择即时生效)。
+   *  curFull 为「下一回合将使用的模型」全名(与 composer 桌面按钮同一数据)。 */
+  private renderMobileHeader(title: string, waiting: boolean, curFull: string) {
+    return html`
+      <header class="mobile">
+        <button class="ghost mact back" title=${this.t('返回')} aria-label=${this.t('返回')} @click=${() => this.fire('goder-back')}>
+          ${unsafeHTML(icon.arrowLeft)}
+        </button>
+        <span class="title" title=${title}>${title || this.t('未选择会话')}</span>
+        ${waiting ? html`<span class="chip waiting"><span class="dot"></span>${this.t('等待输入')}</span>` : nothing}
+        <button
+          class="mbtn"
+          title=${curFull || this.t('选择模型')}
+          @click=${() => this.openModelPicker()}
+        >
+          <span class="cur">${shortModel(curFull) || this.t('模型')}</span>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button class="ghost mact" title=${this.t('新会话')} aria-label=${this.t('新会话')} @click=${() => this.fire('goder-new-session')}>
+          ${unsafeHTML(icon.plus)}
+        </button>
+      </header>
+    `;
   }
 
   render() {
@@ -792,7 +1005,9 @@ export class GoderChat extends GoderPanel {
     return html`
       ${this.noHeader
         ? nothing
-        : html`
+        : this.mobile
+          ? this.renderMobileHeader(title, waiting, curFull)
+          : html`
             <header
               class=${this.headerClass}
               @mousedown=${(e: MouseEvent) => this.tdrag?.onDown(e)}
@@ -821,7 +1036,21 @@ export class GoderChat extends GoderPanel {
               </span>
             </header>
           `}
-      <div class="msgs-wrap">
+      ${this.modelSheet
+        ? html`<goder-model-sheet
+            scope=${this.scope}
+            .providers=${providers}
+            .model=${curFull}
+            .activeModel=${activeFull}
+            .effort=${s!.reasoningEffort ?? ''}
+            @select=${(e: CustomEvent<string>) => this.onModelChange(e)}
+            @effort-change=${(e: CustomEvent<string>) => s!.setReasoningEffort(e.detail)}
+            @manage=${() => this.goModelSettings()}
+            @close=${() => (this.modelSheet = false)}
+          ></goder-model-sheet>`
+        : nothing}
+      <div class="msgs-wrap ${this.mobile ? 'mob' : ''}">
+            ${this.speakMsg ? html`<div class="speak-msg">${this.speakMsg}</div>` : nothing}
             ${getStatusPop(this.scope)
               ? html`<goder-status-pop scope=${this.scope} .narrow=${this.colNarrow}></goder-status-pop>`
               : nothing}
@@ -833,7 +1062,7 @@ export class GoderChat extends GoderPanel {
                 ${running ? html`<div class="run-ring" title="会话运行中"></div>` : nothing}
               </div>
             </div>
-            ${renderChatNav(rt?.items ?? [], cnavWave, cnavReset, (id) => this.scrollToMsg(id))}
+            ${this.mobile ? nothing : renderChatNav(rt?.items ?? [], cnavWave, cnavReset, (id) => this.scrollToMsg(id))}
             ${!this.stickBottom
               ? html`<button class="to-bottom" title=${this.t('回到底部')} @click=${this.toBottom}>
                   ${unsafeHTML(icon.arrowDown)}
@@ -843,10 +1072,11 @@ export class GoderChat extends GoderPanel {
           ${this.noComposer
             ? nothing
             : html`
-                <div class="composer-area">
+                <div class="composer-area ${this.mobile ? 'mob' : ''}">
                   <div class="inner">
                     <goder-composer
                       scope=${this.scope}
+                      .mobile=${this.mobile}
                       .running=${running}
                       .inputRequired=${waiting}
                       .asks=${pendingAsks}
@@ -888,16 +1118,24 @@ export class GoderChat extends GoderPanel {
       scope: this.scope,
       store: this.store,
       sessionId: this.sid,
+      mobile: this.mobile,
       t: (key: string) => this.t(key),
       editingId: this.editingId,
       editDraft: this.editDraft,
       copiedId: this.copiedId,
+      ttsReady: this.ttsReady,
+      speakingId: this.speakingId,
       reasoningOpen: this.reasoningOpen,
       onEditDraft: (v) => (this.editDraft = v),
       onCommitEdit: () => this.commitEdit(),
       onCancelEdit: () => this.cancelEdit(),
       onStartEdit: (it) => this.startEdit(it),
       onCopy: (id, text) => void this.copyText(id, text),
+      onSpeak: (id, text) => {
+        // 播放中再点同条 = 停止(朗读按钮的第二态)
+        if (isSpeaking(id)) stopSpeak();
+        else void this.speakMessage(id, text);
+      },
       onToggleReasoning: (id) => {
         if (this.reasoningOpen.has(id)) this.reasoningOpen.delete(id);
         else this.reasoningOpen.add(id);
@@ -1009,10 +1247,21 @@ export class GoderChat extends GoderPanel {
       this.goModelSettings();
       return false;
     }
-    s?.log('warn', '尚未选择模型:请在输入框下方「模型」中选择后再发送');
+    s?.log('warn', '尚未选择模型:请在「模型」菜单中选择后再发送');
+    this.openModelPicker();
+    return false;
+  }
+
+  /** 模型选择入口:移动模式开头部模型弹层,桌面开 composer 浮层。
+   *  打开即强刷模型配置(嵌入平台的套餐模型热下发,见 composer 同款)。 */
+  private openModelPicker(): void {
+    if (this.mobile) {
+      this.modelSheet = true;
+      void settingsStore.loadModelCfg(true);
+      return;
+    }
     const c = this.renderRoot.querySelector('goder-composer') as { openModelPicker?(): void } | null;
     c?.openModelPicker?.();
-    return false;
   }
 
   /** 把守卫草稿回填 composer(文本/图片),焦点回输入框。 */
@@ -1093,6 +1342,58 @@ export class GoderChat extends GoderPanel {
     window.clearTimeout(this.copiedTimer);
     this.copiedTimer = window.setTimeout(() => (this.copiedId = undefined), 1500);
   }
+
+  // ---------- 语音输出(朗读助手回复) ----------
+
+  /** 语音输出就绪:设置启用且接口地址可用(合成地址留空 = 复用转写地址)。 */
+  private get ttsReady(): boolean {
+    const sp = settingsStore.speech;
+    return sp.tts.enabled && !!(sp.tts.apiBaseUrl.trim() || sp.apiBaseUrl.trim());
+  }
+
+  /** 朗读一条助手消息(tts.ts 单例:新朗读打断旧的;地址/Key 合成侧
+   *  留空时回落转写侧配置 —— 常见同一网关同时提供两接口)。 */
+  private async speakMessage(id: string, text: string): Promise<void> {
+    const sp = settingsStore.speech;
+    const tts = sp.tts;
+    try {
+      await speak(id, text, {
+        apiBaseUrl: tts.apiBaseUrl.trim() || sp.apiBaseUrl.trim(),
+        apiKey: tts.apiKey.trim() || sp.apiKey.trim(),
+        apiModel: tts.apiModel,
+        voice: tts.voice,
+        speed: tts.speed,
+        relayBase: speechRelayBase(),
+      });
+    } catch (e) {
+      this.flashSpeakMsg(e instanceof Error ? e.message : '朗读失败');
+    }
+  }
+
+  /** 朗读提示(失败/自动播放被拦):消息区顶部一行,5 秒自动清除。 */
+  private flashSpeakMsg(msg: string): void {
+    this.speakMsg = msg;
+    if (this.speakMsgTimer) clearTimeout(this.speakMsgTimer);
+    this.speakMsgTimer = window.setTimeout(() => (this.speakMsg = ''), 5000);
+  }
+
+  /** 回合完成事件:设置开启自动朗读时,朗读本回合最后一条非空助手文本
+   *  (通常是最终答复;工具调用回合的过渡性中间文本不读)。多面板实例
+   *  各自命中 —— speak 以消息 id 幂等,重复触发只发一次请求。 */
+  private onRoundCompleted = (ev: Event) => {
+    const detail = (ev as CustomEvent<{ sessionId: string; ok: boolean }>).detail;
+    if (!detail?.ok || !this.ttsReady || !this.sid || detail.sessionId !== this.sid) return;
+    const sp = settingsStore.speech;
+    if (!sp.tts.autoSpeak) return;
+    const rt = this.store?.runtimes.get(detail.sessionId);
+    if (!rt) return;
+    const assistants = rt.items.filter((i): i is AssistantItem => i.kind === 'assistant' && !!i.text.trim());
+    // 本回合助手条目 id 前缀 = response id(无 lastResponseId 时退全量取末条)
+    const rid = rt.lastResponseId ?? '';
+    const scoped = rid ? assistants.filter((i) => i.id.startsWith(`${rid}\u0000`)) : assistants;
+    const last = scoped[scoped.length - 1];
+    if (last) void this.speakMessage(last.id, last.text);
+  };
 
   private onAskAnswer(e: CustomEvent<{ callId: string; answers: Record<string, unknown> }>): void {
     void this.store!.answerAsk(e.detail.callId, e.detail.answers);

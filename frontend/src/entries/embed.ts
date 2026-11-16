@@ -213,11 +213,13 @@ export function configure(
     /** false = 隐藏聊天列右上的状态浮窗(goder 特有的自动化任务/git/
      * goal 卡;不用自动化能力的嵌入方裁掉,聊天区完全干净)。 */
     statusPop?: boolean;
-    /** 语音输入转写中继基址(嵌入宿主实现了同款 /speech 中继时声明,
-     * 如 '/goder-api';桌面形态自带无需配置)。转写请求直连优先,
-     * 直连被 CORS/网络层拦截时回落该同源中继 —— 局域网自建转写接口
-     * 普遍不带 CORS 头,嵌入 WebView 里直连必被拦,提供中继的宿主
-     * 声明后语音输入才能用(参考 internal/desktop/speechrelay.go)。 */
+    /** 语音中继基址(输入转写 + 输出朗读共用;嵌入宿主实现了同款
+     * /speech 中继时声明,如 '/goder-api';桌面形态自带无需配置)。
+     * 语音请求直连优先,直连被 CORS/网络层拦截时回落该同源中继 ——
+     * 局域网自建语音接口普遍不带 CORS 头,嵌入 WebView 里直连必被拦,
+     * 提供中继的宿主声明后语音输入/朗读才能用(参考 internal/desktop/
+     * speechrelay.go,/speech/models、/speech/transcribe 与
+     * /speech/tts 三个端点)。 */
     speechRelay?: string;
   },
 ): void {

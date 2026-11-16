@@ -103,7 +103,7 @@ export function registerBuiltinCommon(): void {
     render: builtinSettingsRender('goder-settings-appearance'),
   });
   registry.settings.add({
-    id: 'speech', label: '语音输入', icon: icon.mic, group: '基础设置', order: 15,
+    id: 'speech', label: '语音', icon: icon.speaker, group: '基础设置', order: 15,
     render: builtinSettingsRender('goder-settings-speech'),
   });
   registry.settings.add({

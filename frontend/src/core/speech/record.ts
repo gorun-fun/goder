@@ -115,8 +115,9 @@ function relayUrl(relayBase: string, base: string): string {
 
 /** 逐个尝试请求通道:第一个成功(拿到 Response,含 4xx/5xx)即返回;
  *  网络层失败(跨域被拦/混合内容/不可达/超时)且还有后续通道(桌面
- *  中继)时自动回落。全失败抛最后一个错误 —— 通道顺序:直连优先。 */
-async function tryChannels(channels: Array<() => Promise<Response>>): Promise<Response> {
+ *  中继)时自动回落。全失败抛最后一个错误 —— 通道顺序:直连优先。
+ *  (导出供同族 tts.ts 合成通道复用同一回落语义。) */
+export async function tryChannels(channels: Array<() => Promise<Response>>): Promise<Response> {
   let lastErr: unknown;
   for (const attempt of channels) {
     try {
@@ -129,7 +130,7 @@ async function tryChannels(channels: Array<() => Promise<Response>>): Promise<Re
 }
 
 /** 鉴权头:Key 为空不发(内网自建网关常无鉴权)。 */
-function authHeaders(apiKey: string): Record<string, string> {
+export function authHeaders(apiKey: string): Record<string, string> {
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 }
 
@@ -217,7 +218,7 @@ export function encodeWav(samples: Float32Array, rate: number): Blob {
 }
 
 /** 200 但回了 HTML(管理面板 SPA 兜底路由)→ 地址指错,给出可读错误。 */
-function assertNotHtml(res: Response): void {
+export function assertNotHtml(res: Response): void {
   const ct = res.headers.get('content-type') ?? '';
   if (ct.includes('text/html')) {
     throw new Error('接口返回了 HTML:地址可能指向管理页面而非 API(检查 /v1 或网关前缀)');
@@ -364,7 +365,7 @@ export class VoiceRecorder {
   /** 开始录音;权限被拒/无设备时 reject(中文文案)。首块音频到达才落定。 */
   async start(): Promise<void> {
     if (this.node || this.bridge) return; // 已在录音(幂等)
-    if (!this.params.apiBaseUrl.trim()) throw new Error('未配置转写接口地址(设置 → 语音输入)');
+    if (!this.params.apiBaseUrl.trim()) throw new Error('未配置转写接口地址(设置 → 语音)');
 
     // 宿主桥优先:原生采集不受 WebView 渲染进程限制(部分 ROM 拦
     // getUserMedia),16k Int16 PCM 直供,无 AudioContext/getUserMedia 依赖。
@@ -601,12 +602,13 @@ function mapMicError(e: unknown): string {
 const DETECT_TIMEOUT_MS = 20_000;
 
 /**
- * 拉取转写接口的模型列表(设置「语音输入」的「检测」按钮):浏览器直连
- * GET /models,与转写上传同一通道(接口需允许跨域)。兼容 OpenAI 的
- * `{data:[{id}]}` 信封与裸数组两种形态,返回去重排序后的全量 id;
- * 是否像转写模型由调用方经 filterTranscribeModels 再筛。
+ * 拉取语音接口的模型列表(设置页「检测」按钮的通用数据源:转写与合成
+ * 共用):浏览器直连 GET /models,与转写上传同一通道(接口需允许跨域)。
+ * 兼容 OpenAI 的 `{data:[{id}]}` 信封与裸数组两种形态,返回去重排序后的
+ * 全量 id;是否像转写/合成模型由调用方经 filterTranscribeModels /
+ * filterTtsModels(tts.ts)再筛。
  */
-export async function detectTranscribeModels(
+export async function fetchModelIds(
   params: Pick<TranscribeParams, 'apiBaseUrl' | 'apiKey' | 'relayBase'>,
 ): Promise<string[]> {
   const timeout =

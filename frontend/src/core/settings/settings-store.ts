@@ -73,18 +73,20 @@ export { ACCENTS, FONT_MIN, FONT_MAX } from './appearance';
 export type { Appearance, ThemeMode, AccentValue, ResolvedTheme } from './appearance';
 import { DEFAULT_APPEARANCE, LS_KEY, loadAppearanceLocal, appearanceCssVars, resolveTheme, type Appearance, type ResolvedTheme } from './appearance';
 
-// 语音输入(话筒转文字)配置:OpenAI 兼容转写接口的地址/Key/模型/语言/
-// 快捷键,纯 KV 镜像(双形态通用),模型与读写纯函数在 speech.ts。
+// 语音(输入转写 + 输出朗读)配置:OpenAI 兼容接口的地址/Key/模型/
+// 语言/快捷键/朗读参数,纯 KV 镜像(双形态通用),模型与读写纯函数在
+// speech.ts。
 export {
   DEFAULT_SPEECH,
+  DEFAULT_TTS,
   SPEECH_LS_KEY,
   speechHotkeyMatches,
   speechHotkeyCodeOf,
   parseSpeechHotkey,
   formatSpeechHotkey,
 } from './speech';
-export type { SpeechConfig, SpeechHotkey, SpeechHotkeyCombo } from './speech';
-import { loadSpeechLocal, saveSpeechLocal, type SpeechConfig } from './speech';
+export type { SpeechConfig, SpeechHotkey, SpeechHotkeyCombo, TtsConfig } from './speech';
+import { loadSpeechLocal, saveSpeechLocal, type SpeechConfig, type TtsConfig } from './speech';
 
 // ---------- 供应商模型上下文窗口(探测缓存) ----------
 // OpenAI 兼容网关(token-hub / OpenRouter / SiliconFlow / vLLM 等)会在
@@ -160,7 +162,7 @@ class SettingsStore {
   /** 集群状态快照(节点面板轮询数据源);null = 未拉取 */
   clusterStatus: ClusterStatusDTO | null = null;
   appearance: Appearance = { ...DEFAULT_APPEARANCE };
-  /** 语音输入配置(转写接口;KV 镜像,与 ctxLens 同款惰性加载) */
+  /** 语音配置(输入转写 + 输出朗读;KV 镜像,与 ctxLens 同款惰性加载) */
   speech: SpeechConfig = loadSpeechLocal();
   /** 系统(或宿主)深浅的当前落定值:「跟随系统」模式的取值来源,
    * 探测与监听装订见 ensureSystemWatch/readSystemTheme。 */
@@ -225,9 +227,15 @@ class SettingsStore {
     this.bump();
   }
 
-  /** 更新语音输入配置(改即存,KV 镜像 + bump 驱动 composer 话筒显隐)。 */
-  setSpeech(patch: Partial<SpeechConfig>): void {
-    this.speech = { ...this.speech, ...patch };
+  /** 更新语音配置(改即存,KV 镜像 + bump 驱动话筒/朗读按钮显隐)。
+   *  tts 为嵌套对象、入参允许部分字段:内部深合并 —— 浅合并会让分区
+   *  单字段保存互相抹掉。 */
+  setSpeech(patch: Partial<Omit<SpeechConfig, 'tts'>> & { tts?: Partial<TtsConfig> }): void {
+    // tts 单独深合并(条件 spread 的 TS 推断会放宽回 Partial,故走赋值)
+    const { tts, ...rest } = patch;
+    const merged: SpeechConfig = { ...this.speech, ...rest };
+    if (tts) merged.tts = { ...merged.tts, ...tts };
+    this.speech = merged;
     saveSpeechLocal(this.speech);
     this.bump();
   }
