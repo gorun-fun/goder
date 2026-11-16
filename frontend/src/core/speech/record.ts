@@ -1,20 +1,65 @@
 // record.ts — 语音输入(话筒转文字)的录音与转写引擎。
 //
 // 双形态评估结论(AGENTS.md 硬性约束):识别通道为 OpenAI 兼容转写接口
-// (/v1/audio/transcriptions),浏览器本地录音。采集用共享 AudioContext +
-// AudioWorklet(回落 ScriptProcessor)直采 PCM —— 不采用 MediaRecorder:
-// WKWebView 直启丢最初一两百毫秒且容器需二次解码;PCM 从管线流动的第
-// 一块起全量收,天然零丢头,共享上下文把冷启动压到 getUserMedia。上传
-// 通道直连优先:接口允许跨域时浏览器
-// 直接发 multipart 一步到位;桌面形态另注入中继回落(relayBase → 本地
-// 同源 /goder-api/speech/*,internal/desktop/speechrelay.go)——局域网
-// 接口常无 CORS 头,且 WKWebView 对纯 http 目标可能按混合内容拦截,
-// 直连被拦时透明回落中继。本模块不依赖 host/bridge。(不采用 Web
-// Speech API:macOS 桌面 WKWebView 不支持;gh server 无音频端点,不经
-// 其反代。)全部请求经 apiFetch 发出(core/api/fetch.ts 的统一传输层,
-// scripted-api 可编程假后端同理接管)。
+// (/v1/audio/transcriptions),浏览器本地录音。采集双通道,宿主桥优先:
+//   1. 宿主录音桥(window.goderHostVoice,嵌入宿主原生实现,如
+//      goder-mobile 的 Kotlin AudioRecord)——部分国产 ROM 的 SELinux 拦
+//      WebView 渲染进程的音频 ioctl,getUserMedia 恒 NotReadableError,
+//      原生 AudioRecord 不受限;桥直供 16k Int16 PCM,16k 直通打 WAV 头,
+//      零 AudioContext 依赖;
+//   2. getUserMedia + 共享 AudioContext + AudioWorklet(回落
+//      ScriptProcessor)直采 PCM —— 不采用 MediaRecorder:WKWebView 直启
+//      丢最初一两百毫秒且容器需二次解码;PCM 从管线流动的第一块起全量
+//      收,天然零丢头,共享上下文把冷启动压到 getUserMedia。
+// 上传通道直连优先:接口允许跨域时浏览器直接发 multipart 一步到位;
+// 桌面/声明了中继的嵌入宿主回落同源 /speech 端点(relayBase → 如
+// internal/desktop/speechrelay.go)——局域网接口常无 CORS 头,且
+// WKWebView 对纯 http 目标可能按混合内容拦截,直连被拦时透明回落中继。
+// (不采用 Web Speech API:macOS 桌面 WKWebView 不支持;gh server 无音频
+// 端点,不经其反代。)全部请求经 apiFetch 发出(core/api/fetch.ts 的统一
+// 传输层,scripted-api 可编程假后端同理接管)。
 import { apiFetch } from '../api/fetch';
 import type { SpeechConfig } from '../settings/speech';
+
+/** 宿主录音桥协议:嵌入宿主注入 window.goderHostVoice 提供的原生录音
+ *  通道(WebView 的 JavascriptInterface 只暴露方法,故全为方法形态,
+ *  调用全部同步;实现参考 goder-mobile 的 VoiceBridge.kt):
+ *   - sampleRate(): 采集率(建议 16000 = ASR 通用输入);
+ *   - start(): "ok" 开录成功;"PERMISSION" 已发起系统权限申请(用户
+ *     授权后重试);其余字符串 = 失败文案(直接抛给用户);
+ *   - poll(): 拉自上次以来的增量 PCM(base64 Int16LE 小端),无新数据
+ *     null;前端约 250ms 轮询,宿主单块几十 KB 为宜;
+ *   - stop(): 停录并返回最后一批(可 null),此后 poll 不再有数据;
+ *   - cancel(): 停录并丢弃已采数据。
+ *  生命周期由前端驱动:start → 轮询 poll → stop/cancel;宿主幂等容错。 */
+export interface HostVoiceBridge {
+  sampleRate(): number;
+  start(): string;
+  poll(): string | null;
+  stop(): string | null;
+  cancel(): void;
+}
+
+/** 探测宿主录音桥(缺任一方法视为未提供)。 */
+export function hostVoiceBridge(): HostVoiceBridge | undefined {
+  const b = (globalThis as { goderHostVoice?: Partial<HostVoiceBridge> }).goderHostVoice;
+  return b && typeof b.start === 'function' && typeof b.poll === 'function' &&
+    typeof b.stop === 'function' && typeof b.sampleRate === 'function'
+    ? (b as HostVoiceBridge)
+    : undefined;
+}
+
+/** 宿主桥增量块 base64(Int16LE)→ Float32Array(÷32768 归一,符号扩展)。 */
+function bridgeChunkToFloat32(b64: string): Float32Array<ArrayBuffer> {
+  const bin = atob(b64);
+  const n = bin.length >> 1;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = (bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8)) << 16 >> 16;
+    out[i] = v / 32768;
+  }
+  return out;
+}
 
 /** 转写接口地址:基址(如 https://api.openai.com/v1)去尾斜杠拼端点路径。 */
 export function transcribeUrl(base: string): string {
@@ -35,8 +80,10 @@ export function filterTranscribeModels(ids: string[]): string[] {
   );
 }
 
-/** 录音能力探测:getUserMedia + AudioContext 缺一不可(如 http 非同源页两者皆无)。 */
+/** 录音能力探测:宿主桥可用即支持(原生采集,不依赖 getUserMedia);
+ *  否则 getUserMedia + AudioContext 缺一不可(如 http 非同源页两者皆无)。 */
 export function recorderSupported(): boolean {
+  if (hostVoiceBridge()) return true;
   return (
     typeof navigator !== 'undefined' &&
     !!navigator.mediaDevices?.getUserMedia &&
@@ -110,6 +157,17 @@ const ASR_SAMPLE_RATE = 16_000;
 async function pcmToWav16k(chunks: Float32Array<ArrayBuffer>[], srcRate: number): Promise<Blob> {
   const total = chunks.reduce((n, c) => n + c.length, 0);
   if (total === 0) throw new Error('录音时长过短,未采集到音频');
+  if (srcRate === ASR_SAMPLE_RATE) {
+    // 宿主桥按 ASR 率直供:拼接直打 WAV 头,零 AudioContext 依赖
+    // (桥形态正是为绕开受限环境,别引入受限依赖)。
+    const all = new Float32Array(total);
+    let o = 0;
+    for (const c of chunks) {
+      all.set(c, o);
+      o += c.length;
+    }
+    return encodeWav(all, ASR_SAMPLE_RATE);
+  }
   try {
     const off = new OfflineAudioContext(1, Math.max(1, Math.ceil((total / srcRate) * ASR_SAMPLE_RATE)), ASR_SAMPLE_RATE);
     // 块拼回源采样率的 AudioBuffer,离线渲染一并完成重采样
@@ -280,6 +338,10 @@ export class VoiceRecorder {
   private timer = 0;
   private stopped = false;
   private aborted = false;
+  /** 宿主录音桥会话(桥模式录音期间非空;采集生命周期见 start 桥分支) */
+  private bridge: HostVoiceBridge | null = null;
+  /** 桥增量轮询定时器(桥模式录音期间非 0;globalThis 兼容 node 单测) */
+  private bridgeTimer: ReturnType<typeof setInterval> | 0 = 0;
   private result: Promise<string> | null = null;
   private settle?: (text: string) => void;
   private fail?: (err: Error) => void;
@@ -301,10 +363,45 @@ export class VoiceRecorder {
 
   /** 开始录音;权限被拒/无设备时 reject(中文文案)。首块音频到达才落定。 */
   async start(): Promise<void> {
-    if (this.node) return; // 已在录音(幂等)
-    if (!recorderSupported()) throw new Error('当前环境不支持录音(需要 HTTPS 页面与麦克风)');
+    if (this.node || this.bridge) return; // 已在录音(幂等)
     if (!this.params.apiBaseUrl.trim()) throw new Error('未配置转写接口地址(设置 → 语音输入)');
 
+    // 宿主桥优先:原生采集不受 WebView 渲染进程限制(部分 ROM 拦
+    // getUserMedia),16k Int16 PCM 直供,无 AudioContext/getUserMedia 依赖。
+    const bridge = hostVoiceBridge();
+    if (bridge) {
+      const ok = bridge.start();
+      if (ok !== 'ok') {
+        throw new Error(
+          ok === 'PERMISSION'
+            ? '已弹出麦克风权限申请,授权后请再按一次话筒'
+            : typeof ok === 'string' && ok
+              ? ok
+              : '宿主录音启动失败',
+        );
+      }
+      this.bridge = bridge;
+      this.srcRate = bridge.sampleRate() || 16_000;
+      this.chunks = [];
+      this.total = 0;
+      this.bridgeTimer = globalThis.setInterval(() => {
+        const b64 = bridge.poll();
+        if (b64) this.feed(bridgeChunkToFloat32(b64));
+      }, 250);
+      // 首块到达(2s 超时兜底,与音频管线同语义)才算真正开录
+      await Promise.race([
+        new Promise<void>((r) => (this.firstBlock = r)),
+        new Promise((r) => setTimeout(r, 2000)),
+      ]);
+      this.result = new Promise<string>((resolve, reject) => {
+        this.settle = resolve;
+        this.fail = reject;
+      });
+      this.timer = globalThis.setTimeout(() => void this.finish(), MAX_RECORD_MS);
+      return;
+    }
+
+    if (!recorderSupported()) throw new Error('当前环境不支持录音(需要 HTTPS 页面与麦克风)');
     const stream = await acquireStream(); // 保温复用/新开(getUserMedia)
     this.stream = stream;
     const ctx = await ensureCtx();
@@ -352,6 +449,7 @@ export class VoiceRecorder {
     if (this.stopped) return;
     this.aborted = true;
     this.stopped = true;
+    this.teardownBridge(true);
     this.teardown();
     this.settle?.('');
   }
@@ -376,9 +474,27 @@ export class VoiceRecorder {
     }
   }
 
+  /** 桥会话收尾:停轮询;discard=true 丢弃(abort),否则停录拉尾块入列。 */
+  private teardownBridge(discard: boolean): void {
+    const bridge = this.bridge;
+    if (!bridge) return;
+    this.bridge = null;
+    if (this.bridgeTimer) {
+      clearInterval(this.bridgeTimer);
+      this.bridgeTimer = 0;
+    }
+    if (discard) bridge.cancel();
+    else {
+      const tail = bridge.stop();
+      if (tail) this.feed(bridgeChunkToFloat32(tail));
+    }
+  }
+
   /** 停录落点:收尾音频图 → PCM 转 WAV 上传 → settle。 */
   private async finish(): Promise<void> {
     if (this.stopped) return;
+    // 桥模式先收尾块再置 stopped(feed 守卫依赖它;丢弃路径在 abort)
+    this.teardownBridge(false);
     this.stopped = true;
     this.teardown();
     if (this.aborted) {

@@ -140,6 +140,34 @@ Declarative attributes:
 Users can also configure manually in the connection area at the bottom of
 `<goder-session-list>` (stored in localStorage).
 
+**Host voice bridge (optional)**: voice-input capture defaults to
+`getUserMedia`; on some vendor ROMs SELinux blocks the WebView renderer's
+audio ioctls so `getUserMedia` always fails with `NotReadableError`
+(observed on vivo/Android 16). An embedding host can inject
+`window.goderHostVoice` to provide native capture (goder prefers the bridge
+when present and falls back to `getUserMedia` otherwise — web/desktop are
+unaffected). All members are synchronous methods (JavascriptInterface can
+only expose methods):
+
+```js
+window.goderHostVoice = {
+  sampleRate: () => 16000,          // capture rate; 16000 recommended
+  start: () => 'ok',                // "ok" | "PERMISSION" (system permission
+                                    // dialog shown; user retries after
+                                    // granting) | error message
+  poll: () => '…base64 Int16LE…',  // incremental PCM; base64 little-endian
+                                    // Int16; null when nothing new; the UI
+                                    // polls roughly every 250ms
+  stop: () => null,                 // stop capture, return final chunk (or null)
+  cancel: () => {},                 // stop capture and discard
+};
+```
+
+The frontend drives the lifecycle: `start → poll loop → stop/cancel`; see
+goder-mobile's `VoiceBridge.kt` for a reference implementation
+(AudioRecord, VOICE_RECOGNITION source, 16k mono PCM16, chunk queue +
+Base64.NO_WRAP).
+
 **Auth model (important)**: in same-origin gateway mode the browser only
 needs the gateway's login session (cookies ride along automatically); each
 user's gh token is injected by the gateway when forwarding and **never sent
