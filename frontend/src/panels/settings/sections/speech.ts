@@ -1,14 +1,15 @@
-// speech.ts — 「语音输入」分区:话筒转文字的转写接口配置。
-// 通道为 OpenAI 兼容 /audio/transcriptions(composer 话筒录音从浏览器直传
-// 该接口,不经 gh server/网关;双形态同一套)。配置纯 KV 镜像(与外观
-// 同款,改即存),enabled 开关控制输入框话筒按钮的显隐(默认关闭,
-// 嵌入三方界面零变化)。
+// speech.ts — 「语音」分区:输入转写(话筒转文字)+ 输出朗读(回复转
+// 语音)的接口配置。通道均为 OpenAI 兼容(/audio/transcriptions 与
+// /audio/speech,浏览器直连优先、桌面形态经本地服务中继回落,双形态
+// 同一套)。配置纯 KV 镜像(与外观同款,改即存):输入 enabled 控制
+// composer 话筒按钮显隐,输出 enabled 控制助手消息朗读按钮与自动朗读
+// (均默认关闭,嵌入三方界面零变化)。
 import { css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { sectionSharedCss, SettingsSectionPanel } from './shared';
 import { settingsStore, formatSpeechHotkey } from '../../../core/settings/settings-store';
-import type { SpeechConfig } from '../../../core/settings/settings-store';
-import { detectTranscribeModels, filterTranscribeModels, recorderSupported } from '../../../core/speech/record';
+import { fetchModelIds, filterTranscribeModels, recorderSupported } from '../../../core/speech/record';
+import { filterTtsModels } from '../../../core/speech/tts';
 import { speechRelayBase } from '../../../host/bridge';
 
 @customElement('goder-settings-speech')
@@ -39,10 +40,21 @@ export class GoderSettingsSpeech extends SettingsSectionPanel {
   /** 「检测」拉到的模型候选(优先转写类;无命中回落全量),供 datalist */
   @state() private modelOptions: string[] = [];
 
+  /** TTS 侧的模型候选(优先合成类;无命中回落全量) */
+  @state() private ttsModelOptions: string[] = [];
+
+  /** TTS 侧「检测」的忙碌态与结果文案(与基类 busyAgent/agentMsg 同款,
+   *  但独立 —— 两个「检测」按钮各自互不干扰) */
+  @state() private busyTts = false;
+  @state() private ttsMsg = '';
+
   render() {
     const sp = settingsStore.speech;
+    const tts = sp.tts;
     // 就绪只看接口地址:内网自建网关常无鉴权,API Key 允许留空
     const ready = !!sp.apiBaseUrl.trim();
+    // 合成侧就绪:自身地址或复用的转写地址任一非空
+    const ttsReady = !!(tts.apiBaseUrl.trim() || sp.apiBaseUrl.trim());
     return html`
       <div class="sec">
         <h4>语音输入</h4>
@@ -136,6 +148,99 @@ export class GoderSettingsSpeech extends SettingsSectionPanel {
         </div>
         ${this.agentMsg ? html`<div class="hint">${this.agentMsg}</div>` : nothing}
       </div>
+      <div class="sec">
+        <h4>语音输出</h4>
+        <div class="seg">
+          <button class=${tts.enabled ? '' : 'on'} @click=${() => this.save({ tts: { enabled: false } })}>关闭</button>
+          <button class=${tts.enabled ? 'on' : ''} @click=${() => this.save({ tts: { enabled: true } })}>启用</button>
+        </div>
+        <div class="hint">
+          启用后每条助手消息出现朗读按钮(hover 可见,点击播放/再点停止);配合下方「自动朗读」可在每条回复完成后自动播放。
+        </div>
+        <label>
+          自动朗读(每条助手回复完成后自动播放;触屏/无手势环境可能被浏览器拦截,届时点消息上的朗读按钮即可)
+          <div class="seg">
+            <button class=${tts.autoSpeak ? '' : 'on'} @click=${() => this.save({ tts: { autoSpeak: false } })}>关闭</button>
+            <button class=${tts.autoSpeak ? 'on' : ''} @click=${() => this.save({ tts: { autoSpeak: true } })}>开启</button>
+          </div>
+        </label>
+        ${tts.enabled && !ttsReady
+          ? html`<div class="hint warn">已启用但接口地址未填(下方合成接口地址留空时复用上方转写接口地址)。</div>`
+          : nothing}
+      </div>
+      <div class="sec">
+        <h4>合成接口(OpenAI 兼容)</h4>
+        <label>
+          接口地址(留空 = 复用上方转写接口地址;同一网关同时提供两接口时只需填一处)
+          <input
+            type="text"
+            placeholder="https://api.openai.com/v1"
+            .value=${tts.apiBaseUrl}
+            @change=${(e: InputEvent) => this.save({ tts: { apiBaseUrl: (e.target as HTMLInputElement).value.trim() } })}
+          />
+        </label>
+        <label>
+          API Key(留空 = 复用上方转写接口 Key)
+          <input
+            type="password"
+            .value=${tts.apiKey}
+            @change=${(e: InputEvent) => this.save({ tts: { apiKey: (e.target as HTMLInputElement).value.trim() } })}
+          />
+        </label>
+        <label>
+          模型
+          <div class="model-row">
+            <input
+              type="text"
+              placeholder="tts-1"
+              list="goder-tts-models-${this.scope}"
+              .value=${tts.apiModel}
+              @change=${(e: InputEvent) => {
+                const v = (e.target as HTMLInputElement).value.trim();
+                this.save({ tts: { apiModel: v || 'tts-1' } }); // 清空回默认
+              }}
+            />
+            <button ?disabled=${this.busyTts} @click=${() => void this.detectTtsModels()}>
+              ${this.busyTts ? '检测中…' : '检测'}
+            </button>
+          </div>
+          <datalist id="goder-tts-models-${this.scope}">
+            ${this.ttsModelOptions.map((m) => html`<option value=${m}></option>`)}
+          </datalist>
+        </label>
+        <label>
+          音色(依接口而定,如 alloy / onyx;自建网关见其文档,如 grf-voice 为 daji)
+          <input
+            type="text"
+            placeholder="alloy"
+            .value=${tts.voice}
+            @change=${(e: InputEvent) => {
+              const v = (e.target as HTMLInputElement).value.trim();
+              this.save({ tts: { voice: v || 'alloy' } }); // 清空回默认
+            }}
+          />
+        </label>
+        <label>
+          语速(0.25~4,1 = 常速;部分接口不支持该参数)
+          <input
+            type="number"
+            min="0.25"
+            max="4"
+            step="0.25"
+            .value=${String(tts.speed)}
+            @change=${(e: InputEvent) => {
+              const v = Number((e.target as HTMLInputElement).value);
+              // 非法/越界钳回默认 1(= 不发送该参数)
+              this.save({ tts: { speed: Number.isFinite(v) ? Math.min(4, Math.max(0.25, v)) : 1 } });
+            }}
+          />
+        </label>
+        <div class="hint">
+          地址填到 API 前缀为止(自动拼接 /audio/speech);「检测」拉取接口的模型列表并筛出合成类候选。朗读会跳过代码块、只读正文文字。浏览器直连优先(接口需允许跨域
+          CORS);桌面形态直连被拦时自动经本地服务中继转发。Key 仅保存在本机浏览器存储。
+        </div>
+        ${this.ttsMsg ? html`<div class="hint">${this.ttsMsg}</div>` : nothing}
+      </div>
     `;
   }
 
@@ -150,7 +255,7 @@ export class GoderSettingsSpeech extends SettingsSectionPanel {
     this.busyAgent = true;
     this.agentMsg = '';
     try {
-      const all = await detectTranscribeModels({
+      const all = await fetchModelIds({
         apiBaseUrl: sp.apiBaseUrl.trim(),
         apiKey: sp.apiKey.trim(),
         // 桌面态/声明了中继的嵌入宿主走同源回落(接口普遍无 CORS 头,
@@ -173,8 +278,42 @@ export class GoderSettingsSpeech extends SettingsSectionPanel {
     }
   }
 
-  /** 改即存 + 头部闪「已保存」(与 commit 同反馈,落点为 speech 镜像)。 */
-  private save(patch: Partial<SpeechConfig>): void {
+  /** TTS 侧「检测」:同一模型列表通道,筛合成类候选。 */
+  private async detectTtsModels(): Promise<void> {
+    const sp = settingsStore.speech;
+    const tts = sp.tts;
+    const base = tts.apiBaseUrl.trim() || sp.apiBaseUrl.trim();
+    if (!base) {
+      this.setTtsMsg(false, '请先填写接口地址(合成或转写任一)');
+      return;
+    }
+    this.busyTts = true;
+    this.ttsMsg = '';
+    try {
+      const all = await fetchModelIds({
+        apiBaseUrl: base,
+        apiKey: tts.apiKey.trim() || sp.apiKey.trim(),
+        relayBase: speechRelayBase(),
+      });
+      const synth = filterTtsModels(all);
+      if (synth.length === 1) settingsStore.setSpeech({ tts: { apiModel: synth[0] } });
+      this.ttsModelOptions = synth.length ? synth : all;
+      this.setTtsMsg(
+        true,
+        synth.length
+          ? `检测到 ${synth.length} 个合成模型${synth.length === 1 ? `,已填入「${synth[0]}」` : ',点击「模型」输入框选择'}。`
+          : `未识别出明确的合成模型,已列出全部 ${all.length} 个模型供手选。`,
+      );
+    } catch (e) {
+      this.setTtsMsg(false, e instanceof Error ? e.message : '检测失败');
+    } finally {
+      this.busyTts = false;
+    }
+  }
+
+  /** 改即存 + 头部闪「已保存」(与 commit 同反馈,落点为 speech 镜像;
+   *  tts 嵌套字段允许部分更新,setSpeech 内部深合并)。 */
+  private save(patch: Parameters<typeof settingsStore.setSpeech>[0]): void {
     settingsStore.setSpeech(patch);
     this.fire('goder-saved');
   }
@@ -193,5 +332,12 @@ export class GoderSettingsSpeech extends SettingsSectionPanel {
     if (e.key.length !== 1 || e.key === ' ') return;
     const combo = `${e.metaKey || e.ctrlKey ? 'mod+' : ''}${e.shiftKey ? 'shift+' : ''}${e.altKey ? 'alt+' : ''}${e.key.toLowerCase()}`;
     this.save({ hotkey: combo });
+  }
+
+  /** TTS 检测结果提示(成功时与 setAgentMsg 同款上抛 goder-saved)。 */
+  private setTtsMsg(ok: boolean, msg: string): void {
+    if (ok) this.fire('goder-saved');
+    this.ttsMsg = msg;
+    this.requestUpdate();
   }
 }

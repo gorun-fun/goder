@@ -77,11 +77,13 @@ variables — see [docs/deploy.en.md](docs/deploy.en.md).
 - `ask_user_question` expands right inside the composer (click to confirm,
   checkboxes for multi-select); tool-approval cards (approve/reject + feedback),
   chained continuation after answering
-- Voice input: enable it in the Settings "Voice input" section with an
-  OpenAI-compatible transcription endpoint, and a mic button appears in the
-  composer (speech-to-text drops into the draft, Esc cancels; the toggle
-  hotkey is captured from whatever keys you press — single keys such as
-  `` ` `` work too, Ctrl/Cmd+Shift+M by default; off by default)
+- Speech: configure OpenAI-compatible speech endpoints in the Settings
+  "Speech" section. Input: a mic button appears in the composer
+  (speech-to-text drops into the draft, Esc cancels; the toggle hotkey is
+  captured from whatever keys you press — single keys such as `` ` `` work
+  too, Ctrl/Cmd+Shift+M by default). Output: a speaker button on each
+  assistant message reads it aloud, with an optional auto-speak-on-completion
+  toggle. Both off by default
 - Project-scoped session list (server truth + local project index grouping);
   restore across restarts, paused sessions resume with their pending cards;
   unread blue dots and running spinners

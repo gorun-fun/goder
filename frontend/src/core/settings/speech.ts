@@ -1,9 +1,11 @@
-// speech.ts — 语音输入(话筒转文字)的纯配置模型。
+// speech.ts — 语音(输入转写 + 输出朗读)的纯配置模型。
 //
-// 识别通道为 OpenAI 兼容转写接口(/v1/audio/transcriptions):浏览器本地
-// 录音(MediaRecorder)直传所配置的第三方接口,不经 gh server/网关
+// 输入识别通道为 OpenAI 兼容转写接口(/v1/audio/transcriptions):浏览器
+// 本地录音(MediaRecorder)直传所配置的第三方接口,不经 gh server/网关
 // (gh 无音频端点;走 Web Speech API 的浏览器内置识别在 macOS 桌面
 // WKWebView 不可用,故统一只做转写接口一种,三形态行为一致)。
+// 输出朗读为 OpenAI 兼容合成接口(/v1/audio/speech),助手回复文本换
+// 音频播放,与输入同一套双通道(直连优先/中继兜底)。
 // 配置经可注入 KV 存储(settings-store 镜像读写),无 DOM 依赖,可单测。
 import { kvGet, kvSet } from '../store/storage';
 
@@ -21,6 +23,27 @@ export interface SpeechConfig {
   /** 录音快捷键组合('' = 关闭;支持单键如 ` 或组合如 mod+shift+m,
    *  仅输入框聚焦时生效,点击等效 —— 单键会拦截该字符的正常输入) */
   hotkey: SpeechHotkey;
+  /** 语音输出(朗读)配置;与输入共置「语音」分区 */
+  tts: TtsConfig;
+}
+
+/** 语音输出(TTS 朗读)配置:OpenAI 兼容合成接口(/audio/speech)。 */
+export interface TtsConfig {
+  /** 总开关:关闭时助手消息不显示朗读按钮、不自动朗读 */
+  enabled: boolean;
+  /** OpenAI 兼容接口基址;空 = 复用语音输入的 apiBaseUrl(常见:同一
+   *  网关同时提供转写与合成,如 grf-voice 的 /gw/voice/v1) */
+  apiBaseUrl: string;
+  /** 接口 Key;空 = 复用语音输入的 apiKey */
+  apiKey: string;
+  /** 合成模型名(OpenAI 标准值 tts-1;grf-voice 为 qwen3-tts-… 可「检测」) */
+  apiModel: string;
+  /** 音色(依接口而定:OpenAI 如 alloy/onyx,grf-voice 当前仅 daji) */
+  voice: string;
+  /** 语速 0.25~4(OpenAI 口径);1 = 常速不发送该参数(部分网关不识别) */
+  speed: number;
+  /** 自动朗读:每条助手回复完成后自动播放(手动按钮不受此影响) */
+  autoSpeak: boolean;
 }
 
 /**
@@ -106,6 +129,16 @@ export function formatSpeechHotkey(hotkey: string): string {
   return [...(c.mod ? ['Ctrl/⌘'] : []), ...(c.shift ? ['Shift'] : []), ...(c.alt ? ['Alt'] : []), key].join('+');
 }
 
+export const DEFAULT_TTS: TtsConfig = {
+  enabled: false,
+  apiBaseUrl: '',
+  apiKey: '',
+  apiModel: 'tts-1',
+  voice: 'alloy',
+  speed: 1,
+  autoSpeak: false,
+};
+
 export const DEFAULT_SPEECH: SpeechConfig = {
   enabled: false,
   // ISO-639-1:OpenAI 官方文档口径(zh/en/ja…);部分网关(如 grf-voice)
@@ -115,11 +148,27 @@ export const DEFAULT_SPEECH: SpeechConfig = {
   apiKey: '',
   apiModel: 'whisper-1',
   hotkey: 'mod+shift+m',
+  tts: DEFAULT_TTS,
 };
 
 export const SPEECH_LS_KEY = 'goder-speech-v1';
 
-/** 从键值存储读回语音输入配置(损坏/缺省字段回退默认)。 */
+/** 语音输出配置读回(tts 嵌套对象逐字段回退;旧数据无 tts = 全默认)。 */
+function loadTts(p: unknown): TtsConfig {
+  const t = (p ?? {}) as Partial<TtsConfig>;
+  return {
+    enabled: t.enabled === true,
+    apiBaseUrl: typeof t.apiBaseUrl === 'string' ? t.apiBaseUrl : '',
+    apiKey: typeof t.apiKey === 'string' ? t.apiKey : '',
+    apiModel: typeof t.apiModel === 'string' && t.apiModel ? t.apiModel : DEFAULT_TTS.apiModel,
+    voice: typeof t.voice === 'string' && t.voice ? t.voice : DEFAULT_TTS.voice,
+    // 语速:越界/非法回默认 1(= 不发送)
+    speed: typeof t.speed === 'number' && t.speed >= 0.25 && t.speed <= 4 ? t.speed : DEFAULT_TTS.speed,
+    autoSpeak: t.autoSpeak === true,
+  };
+}
+
+/** 从键值存储读回语音配置(损坏/缺省字段回退默认)。 */
 export function loadSpeechLocal(): SpeechConfig {
   const p = kvGet<Partial<SpeechConfig>>(SPEECH_LS_KEY);
   if (!p) return { ...DEFAULT_SPEECH };
@@ -136,6 +185,7 @@ export function loadSpeechLocal(): SpeechConfig {
       typeof p.hotkey === 'string' && (p.hotkey === '' || parseSpeechHotkey(p.hotkey))
         ? p.hotkey
         : DEFAULT_SPEECH.hotkey,
+    tts: loadTts(p.tts),
   };
 }
 

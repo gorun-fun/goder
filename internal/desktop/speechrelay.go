@@ -1,16 +1,17 @@
-// speechrelay.go — 语音输入转写接口的本地同源中继(桌面态)。
+// speechrelay.go — 语音接口的本地同源中继(桌面态;输入转写 + 输出合成)。
 //
-// 背景:OpenAI 兼容转写接口(尤其局域网自建网关)普遍不带 CORS 头,
+// 背景:OpenAI 兼容语音接口(尤其局域网自建网关)普遍不带 CORS 头,
 // 浏览器直连跨域即被拦;桌面 webview 无法绕过。这里在本地服务上提供
-// /goder-api/speech/* 两个同源端点,由 Go 侧服务端转发到用户配置的
+// /goder-api/speech/* 三个同源端点,由 Go 侧服务端转发到用户配置的
 // 接口基址(浏览器不再直连),与 /goder-api/token 同一装配模式:
 // guardLocalHost 挡 DNS rebinding,LoopbackHostGuard 在最外层兜底。
 //
 // 安全边界:仅桌面本机可达(回环监听 + Host 白名单);上游基址由
-// 请求头 X-Goder-STT-Base 携带(用户自配的转写接口,仅允许 http/https),
-// 固定拼接 /models 与 /audio/transcriptions 两个后缀,不透传任意路径;
-// API Key 经 Authorization 头透传上游,不落盘、不进日志。网页/嵌入形态
-// 无此中继,仍要求接口自身允许跨域(设置页 hint 注明)。
+// ?base= 查询参数携带(用户自配的语音接口,仅允许 http/https),
+// 固定拼接 /models、/audio/transcriptions 与 /audio/speech 三个后缀,
+// 不透传任意路径;API Key 经 Authorization 头透传上游,不落盘、不进
+// 日志。网页/嵌入形态无此中继,仍要求接口自身允许跨域(设置页 hint
+// 注明);嵌入宿主可自建同款中继经 configure({speechRelay}) 声明。
 package desktop
 
 import (
@@ -18,27 +19,32 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// sttBaseHeader 携转写接口基址(如 http://192.168.3.100:9000/gw/voice/v1)。
+// sttBaseHeader 携语音接口基址(如 http://192.168.3.100:9000/gw/voice/v1)。
 // 主通道是 ?base= 查询参数:URL 路由在整条 /goder-api 链路上必然存活,
 // 自定义请求头经 wails 资产管道/WKWebView scheme handler 存在不确定性
 // (实测 webview 侧丢失,见前端 record.ts);头形式保留兼容。
 const sttBaseHeader = "X-Goder-STT-Base"
 
-// 中继上限与超时:转写音频(≤60s 录音)与模型列表都很小,宽放即可。
+// 中继上限与超时:转写音频(≤60s 录音)与模型列表都很小,宽放即可;
+// 合成响应是音频二进制(WAV 未压缩,长文本可达数 MB),单独放大上限。
 const (
-	speechBodyLimit  = 32 << 20 // 请求体上限(录音 multipart)
-	speechRespLimit  = 4 << 20  // 上游响应回读上限(JSON 很小)
-	speechModelsWait = 25 * time.Second
-	speechSttWait    = 70 * time.Second // 录音上限 60s + 转写余量
+	speechBodyLimit    = 32 << 20 // 请求体上限(录音 multipart)
+	speechRespLimit    = 4 << 20  // 上游响应回读上限(JSON 很小)
+	speechTtsRespLimit = 16 << 20 // 合成音频回读上限(未压缩 WAV)
+	speechModelsWait   = 25 * time.Second
+	speechSttWait      = 70 * time.Second  // 录音上限 60s + 转写余量
+	speechTtsWait      = 120 * time.Second // 合成模型首次加载约 30s,宽放
 )
 
 // serveSpeechModels GET/POST /goder-api/speech/models?base=<基址>:
@@ -55,7 +61,7 @@ func serveSpeechModels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing or invalid base", http.StatusBadRequest)
 		return
 	}
-	relayUpstream(w, r, http.MethodGet, base+"/models", nil, "", speechModelsWait)
+	relayUpstream(w, r, http.MethodGet, base+"/models", nil, "", speechModelsWait, speechRespLimit)
 }
 
 // serveSpeechTranscribe POST /goder-api/speech/transcribe?base=<基址>:
@@ -87,7 +93,7 @@ func serveSpeechTranscribe(w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	q := r.URL.Query()
 	if strings.HasPrefix(ct, "multipart/form-data") {
-		relayUpstream(w, r, http.MethodPost, base+"/audio/transcriptions", bytes.NewReader(body), ct, speechSttWait)
+		relayUpstream(w, r, http.MethodPost, base+"/audio/transcriptions", bytes.NewReader(body), ct, speechSttWait, speechRespLimit)
 		return
 	}
 	if q.Get("enc") == "b64" {
@@ -127,7 +133,57 @@ func serveSpeechTranscribe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "build multipart failed", http.StatusInternalServerError)
 		return
 	}
-	relayUpstream(w, r, http.MethodPost, base+"/audio/transcriptions", &form, mw.FormDataContentType(), speechSttWait)
+	relayUpstream(w, r, http.MethodPost, base+"/audio/transcriptions", &form, mw.FormDataContentType(), speechSttWait, speechRespLimit)
+}
+
+// serveSpeechTts POST /goder-api/speech/tts?base=&model=&voice=&speed=:
+// 语音合成中继。请求体为待合成文本(text/plain 纯文本 —— WKWebView 自定义
+// scheme 只给 scheme handler 暴露字符串体,与转写的 base64 通道同一结论,
+// 见前端 tts.ts),model/voice/speed 走查询参数(URL 路由全链路存活,
+// 自定义头会丢),Go 侧重建 OpenAI 兼容 JSON 转发 POST {base}/audio/speech:
+//
+//	{"model":…, "input":…, "voice":…, "speed":…}
+//
+// speed 仅在前端显式配非 1 时出现(部分网关不识别);response_format
+// 一律不带(OpenAI 默认 mp3、grf-voice 回 WAV,浏览器两种都能播)。
+// 响应为音频二进制,经 relayUpstream 透传(上限 speechTtsRespLimit)。
+func serveSpeechTts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	base := speechBase(r)
+	if base == "" {
+		log.Printf("speechrelay: tts 缺少/非法基址(header=%q query=%q)", r.Header.Get(sttBaseHeader), r.URL.Query().Get("base"))
+		http.Error(w, "missing or invalid base", http.StatusBadRequest)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20)) // 朗读文本上限 1MB
+	if err != nil {
+		http.Error(w, "request body too large or unreadable", http.StatusRequestEntityTooLarge)
+		return
+	}
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		http.Error(w, "empty input text", http.StatusBadRequest)
+		return
+	}
+	q := r.URL.Query()
+	payload := map[string]any{"model": q.Get("model"), "input": text}
+	if v := q.Get("voice"); v != "" {
+		payload["voice"] = v
+	}
+	if s := q.Get("speed"); s != "" {
+		if f, perr := strconv.ParseFloat(s, 64); perr == nil {
+			payload["speed"] = f
+		}
+	}
+	buf, merr := json.Marshal(payload)
+	if merr != nil {
+		http.Error(w, "build payload failed", http.StatusInternalServerError)
+		return
+	}
+	relayUpstream(w, r, http.MethodPost, base+"/audio/speech", bytes.NewReader(buf), "application/json", speechTtsWait, speechTtsRespLimit)
 }
 
 // audioExt 按音频 Content-Type 推文件名后缀(上游常按扩展名识别格式)。
@@ -186,10 +242,11 @@ func speechBase(r *http.Request) string {
 }
 
 // relayUpstream 服务端转发:Authorization 头透传,Content-Type 以
-// contentType 参数为准(空 = 沿用入站头;重建 multipart 的场景必须用
-// 新边界的 Content-Type),转发上游状态码、Content-Type 与响应体
-// (限幅回读)。上游错误原样回传,前端按既有错误文案解读 HTTP 状态。
-func relayUpstream(w http.ResponseWriter, r *http.Request, method, target string, body io.Reader, contentType string, wait time.Duration) {
+// contentType 参数为准(空 = 沿用入站头;重建 multipart/JSON 的场景必须
+// 用新的 Content-Type),转发上游状态码、Content-Type 与响应体(respLimit
+// 限幅回读;合成音频是二进制,取 speechTtsRespLimit,其余 JSON 很小)。
+// 上游错误原样回传,前端按既有错误文案解读 HTTP 状态。
+func relayUpstream(w http.ResponseWriter, r *http.Request, method, target string, body io.Reader, contentType string, wait time.Duration, respLimit int64) {
 	ctx, cancel := context.WithTimeout(r.Context(), wait)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, target, body)
@@ -219,5 +276,5 @@ func relayUpstream(w http.ResponseWriter, r *http.Request, method, target string
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, io.LimitReader(resp.Body, speechRespLimit))
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, respLimit))
 }

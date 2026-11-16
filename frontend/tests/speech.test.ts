@@ -1,10 +1,11 @@
-// speech.test.ts — 语音输入的纯函数回归:配置读取(默认值合并、部分
-// 字段/类型异常回退、损坏 JSON 回退)、写读 roundtrip;转写/模型地址
-// 拼接、录音编码挑选与转写模型筛选。模块无 DOM 依赖,node 环境直接
-// 单测(存储经可注入 KV)。
+// speech.test.ts — 语音(输入转写 + 输出朗读)的纯函数回归:配置读取
+// (默认值合并、部分字段/类型异常回退、损坏 JSON 回退)、写读 roundtrip;
+// 转写/合成/模型地址拼接、录音编码、模型筛选与朗读文本清洗。模块无
+// DOM 依赖,node 环境直接单测(存储经可注入 KV)。
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_SPEECH,
+  DEFAULT_TTS,
   SPEECH_LS_KEY,
   formatSpeechHotkey,
   loadSpeechLocal,
@@ -13,7 +14,8 @@ import {
   speechHotkeyMatches,
 } from '../src/core/settings/speech';
 import { MemoryStorage, setKeyValueStorage, kvSet } from '../src/core/store/storage';
-import { detectTranscribeModels, encodeWav, filterTranscribeModels, modelsUrl, transcribeUrl } from '../src/core/speech/record';
+import { encodeWav, fetchModelIds, filterTranscribeModels, modelsUrl, transcribeUrl } from '../src/core/speech/record';
+import { filterTtsModels, speechSynthUrl, speechTextFromMarkdown, speak } from '../src/core/speech/tts';
 import { setApiFetch } from '../src/core/api/fetch';
 
 beforeEach(() => setKeyValueStorage(new MemoryStorage()));
@@ -61,6 +63,22 @@ describe('loadSpeechLocal', () => {
     expect(loadSpeechLocal().hotkey).toBe(''); // 显式关闭保留
     kvSet(SPEECH_LS_KEY, { hotkey: '`' });
     expect(loadSpeechLocal().hotkey).toBe('`'); // 单键合法
+  });
+
+  it('tts:旧数据无 tts 字段补全默认(向后兼容)', () => {
+    kvSet(SPEECH_LS_KEY, { enabled: true, apiBaseUrl: 'http://x/v1' });
+    expect(loadSpeechLocal().tts).toEqual(DEFAULT_TTS);
+  });
+
+  it('tts:部分字段缺失/类型异常逐字段回退,合法字段保留', () => {
+    kvSet(SPEECH_LS_KEY, { tts: { enabled: true, apiModel: '', voice: 'daji', speed: 9, junk: 1 } });
+    const tts = loadSpeechLocal().tts;
+    expect(tts.enabled).toBe(true); // 合法保留
+    expect(tts.apiModel).toBe('tts-1'); // 空串回默认
+    expect(tts.voice).toBe('daji'); // 合法保留
+    expect(tts.speed).toBe(1); // 越界回默认(= 不发送)
+    expect(tts.autoSpeak).toBe(false); // 缺省即关
+    expect('junk' in tts).toBe(false);
   });
 });
 
@@ -144,6 +162,60 @@ describe('filterTranscribeModels', () => {
   });
 });
 
+describe('speechSynthUrl / filterTtsModels(语音输出)', () => {
+  it('基址去尾斜杠拼 /audio/speech', () => {
+    expect(speechSynthUrl('https://api.openai.com/v1')).toBe('https://api.openai.com/v1/audio/speech');
+    expect(speechSynthUrl('https://x.example/gw/voice/v1//')).toBe('https://x.example/gw/voice/v1/audio/speech');
+  });
+
+  it('按命名惯例筛合成类模型(tts/cosyvoice/voice-clone…),剔除识别类', () => {
+    expect(
+      filterTtsModels(['gpt-4o', 'tts-1', 'tts-1-hd', 'qwen3-tts-12hz-0.6b-base', 'qwen3-asr-0.6b', 'whisper-1', 'voice-clone-x']),
+    ).toEqual(['tts-1', 'tts-1-hd', 'qwen3-tts-12hz-0.6b-base', 'voice-clone-x']);
+  });
+
+  it('无命中返回空数组(调用方回落全量列表)', () => {
+    expect(filterTtsModels(['gpt-4o', 'claude-3'])).toEqual([]);
+  });
+});
+
+describe('speechTextFromMarkdown(朗读文本清洗)', () => {
+  it('跳过代码块与图片,链接只留文字,去结构标记', () => {
+    const md = [
+      '# 标题行',
+      '',
+      '这是**加粗**与*斜体*和`code`的正文。',
+      '',
+      '```ts',
+      'const x = 1; // 代码块整体跳过',
+      '```',
+      '',
+      '- 列表项一',
+      '- 列表项二',
+      '',
+      '1. 有序项',
+      '',
+      '> 引用文字',
+      '',
+      '看[这个链接](https://x.example)和![图片](https://y.example/a.png)。',
+      '',
+      '---',
+    ].join('\n');
+    expect(speechTextFromMarkdown(md)).toBe(
+      ['标题行', '', '这是加粗与斜体和code的正文。', '', '列表项一', '列表项二', '', '有序项', '', '引用文字', '', '看这个链接和。'].join('\n'),
+    );
+  });
+
+  it('纯代码回复清洗后为空(调用方据此不朗读)', () => {
+    expect(speechTextFromMarkdown('```python\nprint(1)\n```')).toBe('');
+    expect(speechTextFromMarkdown('![图](https://x/a.png)')).toBe('');
+  });
+
+  it('未闭合的代码块(截断场景)也整体跳过', () => {
+    expect(speechTextFromMarkdown('前文\n```js\nrest…')).toBe('前文');
+  });
+});
+
 describe('encodeWav(16k 单声道 16-bit PCM)', () => {
   it('44 字节标准头 + 小端样本', async () => {
     const blob = encodeWav(new Float32Array([0, 1, -1, 0.5]), 16_000);
@@ -187,7 +259,7 @@ describe('通道回落(直连优先,桌面中继兜底)', () => {
         return okModels();
       }) as typeof fetch,
     );
-    const ids = await detectTranscribeModels({ apiBaseUrl: 'http://x.example/v1', apiKey: '', relayBase: '/goder-api' });
+    const ids = await fetchModelIds({ apiBaseUrl: 'http://x.example/v1', apiKey: '', relayBase: '/goder-api' });
     expect(ids).toEqual(['whisper-1']);
     expect(urls).toEqual(['http://x.example/v1/models', '/goder-api/speech/models?base=http%3A%2F%2Fx.example%2Fv1']);
   });
@@ -200,7 +272,7 @@ describe('通道回落(直连优先,桌面中继兜底)', () => {
         return okModels();
       }) as typeof fetch,
     );
-    const ids = await detectTranscribeModels({ apiBaseUrl: 'http://x.example/v1', apiKey: '', relayBase: '/goder-api' });
+    const ids = await fetchModelIds({ apiBaseUrl: 'http://x.example/v1', apiKey: '', relayBase: '/goder-api' });
     expect(ids).toEqual(['whisper-1']);
     expect(url).toBe('http://x.example/v1/models');
   });
@@ -214,8 +286,106 @@ describe('通道回落(直连优先,桌面中继兜底)', () => {
       }) as typeof fetch,
     );
     await expect(
-      detectTranscribeModels({ apiBaseUrl: 'http://x.example/v1', apiKey: '' }),
+      fetchModelIds({ apiBaseUrl: 'http://x.example/v1', apiKey: '' }),
     ).rejects.toThrow('接口不可达');
     expect(calls).toBe(1);
+  });
+});
+
+describe('speak(合成通道:直连 JSON 优先,桌面中继兜底)', () => {
+  // node 环境无 Audio/URL.createObjectURL:stub 播放侧,用例结束恢复,
+  // 不污染后续套件
+  const g = globalThis as Record<string, unknown>;
+  const orig = { Audio: g.Audio, URL: g.URL };
+  afterEach(() => {
+    setApiFetch(undefined);
+    g.Audio = orig.Audio;
+    g.URL = orig.URL;
+  });
+
+  /** node 环境 stub 播放侧(Audio/URL),speak 全流程只验证请求通道。 */
+  const stubPlayback = () => {
+    g.Audio = class {
+      play = async () => {};
+      onended: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      pause() {}
+      removeAttribute() {}
+      load() {}
+    };
+    g.URL = Object.assign(class {}, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} });
+  };
+
+  const okAudio = () =>
+    new Response('fake-audio-bytes', { status: 200, headers: { 'Content-Type': 'audio/wav' } });
+
+  it('直连:POST {base}/audio/speech JSON 体;speed=1 不发送该参数', async () => {
+    stubPlayback();
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    setApiFetch(
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ url: String(input), init: init ?? {} });
+        return okAudio();
+      }) as typeof fetch,
+    );
+    await speak('m1', '你好,世界', { apiBaseUrl: 'http://x.example/v1', apiKey: 'sk-1', apiModel: 'tts-1', voice: 'alloy', speed: 1 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('http://x.example/v1/audio/speech');
+    expect(calls[0].init.method).toBe('POST');
+    expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer sk-1');
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ model: 'tts-1', input: '你好,世界', voice: 'alloy' });
+  });
+
+  it('直连被拦回落中继:text/plain 纯文本体 + 查询参数(WKWebView 字符串体才存活)', async () => {
+    stubPlayback();
+    const calls: Array<{ url: string; body: unknown; ct: string }> = [];
+    setApiFetch(
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        if (url.startsWith('http://x.example')) throw new TypeError('Failed to fetch'); // 直连被拦
+        calls.push({ url, body: init?.body, ct: headers['Content-Type'] });
+        return okAudio();
+      }) as typeof fetch,
+    );
+    await speak('m2', '你好', {
+      apiBaseUrl: 'http://x.example/v1',
+      apiKey: '',
+      apiModel: 'qwen3-tts-12hz-0.6b-base',
+      voice: 'daji',
+      speed: 1.5,
+      relayBase: '/goder-api',
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(
+      '/goder-api/speech/tts?base=http%3A%2F%2Fx.example%2Fv1&model=qwen3-tts-12hz-0.6b-base&voice=daji&speed=1.5',
+    );
+    expect(calls[0].body).toBe('你好'); // 纯文本体,非 JSON
+    expect(calls[0].ct).toBe('text/plain; charset=utf-8');
+  });
+
+  it('200 但回了非音频(JSON)报可读错误', async () => {
+    stubPlayback();
+    setApiFetch(
+      (async () => new Response('{"error":"bad voice"}', { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch,
+    );
+    await expect(
+      speak('m3', '你好', { apiBaseUrl: 'http://x.example/v1', apiKey: '', apiModel: 'tts-1', voice: 'x' }),
+    ).rejects.toThrow('接口返回了非音频内容');
+  });
+
+  it('纯代码文本直接拒绝(不发起请求)', async () => {
+    stubPlayback();
+    let calls = 0;
+    setApiFetch(
+      (async () => {
+        calls++;
+        return okAudio();
+      }) as typeof fetch,
+    );
+    await expect(
+      speak('m4', '```js\ncode\n```', { apiBaseUrl: 'http://x.example/v1', apiKey: '', apiModel: 'tts-1', voice: 'alloy' }),
+    ).rejects.toThrow('没有可朗读的文本');
+    expect(calls).toBe(0);
   });
 });

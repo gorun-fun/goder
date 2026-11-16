@@ -1,11 +1,13 @@
-// speechrelay_test.go — 语音输入本地中继的转发回归:models/transcribe
-// 两端点的上游转发(Authorization/Content-Type 透传、状态与响应体回传)、
+// speechrelay_test.go — 语音本地中继的转发回归:models/transcribe/tts
+// 三端点的上游转发(Authorization/Content-Type 透传、状态与响应体回传)、
 // 基址校验(缺头/非 http/https 拒 400)与方法限制。
 package desktop
 
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -14,14 +16,18 @@ import (
 	"testing"
 )
 
-// speechUpstream 模拟 OpenAI 兼容转写接口,记录收到的请求要素。
+// speechUpstream 模拟 OpenAI 兼容语音接口,记录收到的请求要素。
 type speechUpstream struct {
 	models      *httptest.Server
 	stt         *httptest.Server
+	tts         *httptest.Server
 	sttAuth     string
 	sttCT       string
 	sttBodyLen  int
 	sttFormFile bool
+	ttsAuth     string
+	ttsCT       string
+	ttsPayload  map[string]any
 }
 
 func newSpeechUpstream(t *testing.T) *speechUpstream {
@@ -47,9 +53,22 @@ func newSpeechUpstream(t *testing.T) *speechUpstream {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"text":"你好世界"}`))
 	}))
+	u.tts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/speech" || r.Method != http.MethodPost {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		u.ttsAuth = r.Header.Get("Authorization")
+		u.ttsCT = r.Header.Get("Content-Type")
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &u.ttsPayload)
+		w.Header().Set("Content-Type", "audio/wav")
+		_, _ = w.Write([]byte("RIFFfake-wav-bytes"))
+	}))
 	t.Cleanup(func() {
 		u.models.Close()
 		u.stt.Close()
+		u.tts.Close()
 	})
 	return u
 }
@@ -169,6 +188,83 @@ func TestSpeechRelayTranscribeBase64(t *testing.T) {
 	}
 	if u.sttBodyLen <= 0 {
 		t.Fatalf("上游应收到带长度的请求体, got %d", u.sttBodyLen)
+	}
+}
+
+// TTS 中继:text/plain 文本体 + 查询参数(WKWebView 字符串体才存活)→
+// 重建 OpenAI 兼容 JSON 转发上游,音频响应透传。
+func TestSpeechRelayTts(t *testing.T) {
+	u := newSpeechUpstream(t)
+	q := url.Values{"base": {u.tts.URL}, "model": {"qwen3-tts-12hz-0.6b-base"}, "voice": {"daji"}, "speed": {"1.5"}}
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/goder-api/speech/tts?"+q.Encode(), strings.NewReader("  你好,世界 "))
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+	RootHandler(http.NotFoundHandler()).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tts 中继状态 = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "RIFFfake-wav-bytes") {
+		t.Fatalf("tts 中继应回传上游音频, got %s", w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "audio/") {
+		t.Fatalf("应透传上游音频 Content-Type, got %q", ct)
+	}
+	if u.ttsAuth != "Bearer test-key" {
+		t.Fatalf("Authorization 应透传上游, got %q", u.ttsAuth)
+	}
+	if !strings.Contains(u.ttsCT, "application/json") {
+		t.Fatalf("上游应收 JSON 体, got %q", u.ttsCT)
+	}
+	if u.ttsPayload["model"] != "qwen3-tts-12hz-0.6b-base" || u.ttsPayload["voice"] != "daji" {
+		t.Fatalf("上游应收到 model/voice, got %v", u.ttsPayload)
+	}
+	if u.ttsPayload["input"] != "你好,世界" {
+		t.Fatalf("文本应去首尾空白后进 input, got %q", u.ttsPayload["input"])
+	}
+	if sp, ok := u.ttsPayload["speed"].(float64); !ok || sp != 1.5 {
+		t.Fatalf("speed 应转数值透传, got %v (%T)", u.ttsPayload["speed"], u.ttsPayload["speed"])
+	}
+}
+
+// TTS:speed 缺省不带(部分网关不识别)、JSON 转义安全(文本含引号/换行)。
+func TestSpeechRelayTtsEscaping(t *testing.T) {
+	u := newSpeechUpstream(t)
+	q := url.Values{"base": {u.tts.URL}, "model": {"tts-1"}, "voice": {"alloy"}}
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/goder-api/speech/tts?"+q.Encode(), strings.NewReader(`含"引号"与\n换行`))
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	w := httptest.NewRecorder()
+	RootHandler(http.NotFoundHandler()).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tts 中继状态 = %d, body = %s", w.Code, w.Body.String())
+	}
+	if _, has := u.ttsPayload["speed"]; has {
+		t.Fatalf("speed 未配置时不应下发, got %v", u.ttsPayload)
+	}
+	if in, _ := u.ttsPayload["input"].(string); !strings.Contains(in, `"引号"`) {
+		t.Fatalf("特殊字符应经 JSON 编码安全送达, got %q", in)
+	}
+}
+
+// TTS 校验:缺 base / 空文本 400,非 POST 405。
+func TestSpeechRelayTtsValidation(t *testing.T) {
+	u := newSpeechUpstream(t)
+	q := url.Values{"base": {u.tts.URL}, "model": {"tts-1"}}
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/goder-api/speech/tts?"+q.Encode(), strings.NewReader("   "))
+	w := httptest.NewRecorder()
+	RootHandler(http.NotFoundHandler()).ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("空白文本应拒 400, got %d", w.Code)
+	}
+	w = relayReq(t, http.MethodPost, "/goder-api/speech/tts", "", bytes.NewBufferString("hi"), "text/plain")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("缺 base 应拒 400, got %d", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodPut, "http://127.0.0.1/goder-api/speech/tts?base=http://x&model=tts-1", nil)
+	w = httptest.NewRecorder()
+	RootHandler(http.NotFoundHandler()).ServeHTTP(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("PUT 应拒 405, got %d", w.Code)
 	}
 }
 

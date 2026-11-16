@@ -1687,6 +1687,7 @@ export class GoderScope extends Emitter {
     if (!sid || sid.startsWith('draft:')) return;
     const rt = this.ensureRuntime(sid);
     if (this.isInflight(sid) || rt.running) return;
+    let roundOk = false;
     markRequestAnswered(rt, callId, payload);
     rt.running = true;
     this.notify();
@@ -1707,6 +1708,7 @@ export class GoderScope extends Emitter {
         },
       });
       rt.lastResponseId = final.id;
+      roundOk = final.status === 'completed' || final.status === 'incomplete';
       const rec = this.index.sessions[sid];
       if (rec) {
         rec.lastResponseId = final.id;
@@ -1739,6 +1741,9 @@ export class GoderScope extends Emitter {
       rt.running = false;
       this.finalizeRound(sid, rt, { flushAutoDecisions: true });
       this.notify();
+      // 回合终态对外事件(与 send() 的 finally 同款;此前续答不派发,
+      // 宿主等待点与自动朗读都漏掉应答回合,补齐)。
+      this.emitDom('goder:round-completed', { sessionId: sid, ok: roundOk });
     }
   }
 

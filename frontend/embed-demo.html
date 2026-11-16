@@ -65,6 +65,21 @@
         flex: 1;
         min-width: 0;
       }
+      /* 演示 3:移动形态(?panels=mobile,手机壳内 <goder-chat mobile>) */
+      body.mobile-demo .embed-row {
+        justify-content: center;
+        background: #06070a;
+      }
+      .phone {
+        width: min(100%, 420px);
+        height: 100%;
+        max-height: 920px;
+        border: 1px solid #2a2d36;
+        border-radius: 22px;
+        overflow: hidden;
+        display: flex;
+        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+      }
     </style>
   </head>
   <body>
@@ -81,7 +96,7 @@
     <script type="module">
       // 引入嵌入库(全量副作用:注册全部通用面板 + 内置条目)
       import '/src/entries/embed.ts';
-      import { configure, registry } from '/src/entries/embed.ts';
+      import { configure, registry, getScope, setKeyValueStorage, MemoryStorage, setApiFetch, createScriptedApi } from '/src/entries/embed.ts';
       import { html } from 'lit';
 
       const qs = new URLSearchParams(location.search);
@@ -182,6 +197,56 @@
             <goder-chat scope="demo"></goder-chat>
             <goder-console scope="demo"></goder-console>
           </div>`;
+        }
+      }
+
+      // ?panels=mobile:移动形态演示(手机壳内 <goder-chat mobile>)。
+      // 微信式头部(返回/标题/模型/新会话)+ 双方头像气泡 + 单行输入条
+      //(长按输入区按住说话,松开转写、上滑取消;需在设置-语音启用)。
+      if (qs.get('panels') === 'mobile') {
+        document.body.classList.add('mobile-demo');
+        const note = document.querySelector('.host-nav .note');
+        if (note) note.textContent = '本页演示:移动形态 —— <goder-chat mobile> 微信式头部/双方头像气泡/单行输入条(长按输入区按住说话)';
+        const host = document.getElementById('host-shell');
+        if (host) {
+          host.innerHTML = `<div class="phone"><goder-chat id="demo-chat" scope="demo" mobile flat></goder-chat></div>`;
+        }
+        // 头部返回/新会话事件由宿主接线(移动端宿主如 goder-mobile 的
+        // history.back()/scope.newDraft();这里演示最小处理)
+        document.addEventListener('goder-back', () => console.log('[demo] goder-back(宿主接 history.back())'));
+        document.addEventListener('goder-new-session', () => {
+          console.log('[demo] goder-new-session(宿主接 scope.newDraft())');
+          getScope('demo').newDraft();
+        });
+        // ?fake=1:scripted-api 假后端 + MemoryStorage(零网络,刷新即净),
+        // 种子会话自动打开 —— 供无后端环境验证双方头像气泡/长按语音等交互
+        if (qs.get('fake') === '1') {
+          setKeyValueStorage(new MemoryStorage());
+          const api = createScriptedApi({
+            conversations: [
+              {
+                id: 'fc_mobile_seed',
+                lastResponseId: 'resp_m1',
+                history: [
+                  { role: 'user', content: '用手机端聊两句试试' },
+                  {
+                    role: 'assistant',
+                    content:
+                      '好的,这是移动形态的种子会话(假后端):用户消息右侧头像气泡,助手消息左侧头像气泡。\n\n- markdown 列表照常渲染\n- **加粗** 与 `code`\n\n```go\nfmt.Println("hello mobile")\n```',
+                  },
+                ],
+              },
+              { id: 'fc_mobile_empty' },
+            ],
+          });
+          setApiFetch(api.asFetch());
+          configure('demo', { baseUrl: '/goder-api', model: 'fake/chat' });
+          const sc = getScope('demo');
+          const trySelect = () => {
+            if (sc.index?.sessions?.['fc_mobile_seed']) sc.selectSession('fc_mobile_seed');
+            else setTimeout(trySelect, 200);
+          };
+          trySelect();
         }
       }
     </script>
