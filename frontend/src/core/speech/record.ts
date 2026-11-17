@@ -61,14 +61,21 @@ function bridgeChunkToFloat32(b64: string): Float32Array<ArrayBuffer> {
   return out;
 }
 
-/** 转写接口地址:基址(如 https://api.openai.com/v1)去尾斜杠拼端点路径。 */
+/** 归一语音接口基址:去首尾空白与尾斜杠;用户常把完整模型端点
+ *  (…/v1/models)整条粘进地址栏,末尾 /models 段剥掉再拼端点,避免
+ *  拼出 /models/models 404(转写/检测/合成三个端点共用同一基址)。 */
+export function normalizeSpeechBase(base: string): string {
+  return base.trim().replace(/\/+$/, '').replace(/\/models$/i, '').replace(/\/+$/, '');
+}
+
+/** 转写接口地址:基址(如 https://api.openai.com/v1)归一后拼端点路径。 */
 export function transcribeUrl(base: string): string {
-  return `${base.replace(/\/+$/, '')}/audio/transcriptions`;
+  return `${normalizeSpeechBase(base)}/audio/transcriptions`;
 }
 
 /** 模型列表地址(OpenAI 兼容 GET /models,「检测」按钮的数据源)。 */
 export function modelsUrl(base: string): string {
-  return `${base.replace(/\/+$/, '')}/models`;
+  return `${normalizeSpeechBase(base)}/models`;
 }
 
 /** 从 /models 全量 id 里筛「像转写模型」的候选:OpenAI 兼容列表不带
@@ -110,7 +117,7 @@ export type TranscribeParams = Pick<SpeechConfig, 'apiBaseUrl' | 'apiKey' | 'api
  *  请求头经 wails 资产管道/WKWebView scheme handler 实测会丢,不可依赖),
  *  Key 走 Authorization 头(远程模式同款、已验证)。 */
 function relayUrl(relayBase: string, base: string): string {
-  return `${relayBase.replace(/\/+$/, '')}/speech/models?base=${encodeURIComponent(base.trim())}`;
+  return `${relayBase.replace(/\/+$/, '')}/speech/models?base=${encodeURIComponent(normalizeSpeechBase(base))}`;
 }
 
 /** 逐个尝试请求通道:第一个成功(拿到 Response,含 4xx/5xx)即返回;
@@ -542,7 +549,7 @@ export class VoiceRecorder {
     if (relay) {
       channels.push(async () => {
         const q = new URLSearchParams();
-        q.set('base', this.params.apiBaseUrl.trim());
+        q.set('base', normalizeSpeechBase(this.params.apiBaseUrl));
         q.set('model', this.params.apiModel);
         if (this.params.language) q.set('language', this.params.language);
         q.set('enc', 'b64');
@@ -634,6 +641,7 @@ export async function fetchModelIds(
   assertNotHtml(res);
   if (!res.ok) {
     if (res.status === 502) throw new Error('无法连接接口:请检查地址与网络可达性');
+    if (res.status === 404) throw new Error('获取模型列表失败(HTTP 404):地址可能有误,应填到 API 前缀(如 /v1)为止');
     throw new Error(`获取模型列表失败(HTTP ${res.status})`);
   }
   let data: unknown;
