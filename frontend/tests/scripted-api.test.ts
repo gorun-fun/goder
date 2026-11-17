@@ -208,28 +208,28 @@ describe('scripted-api 协议面(真实 client 全链路)', () => {
     const base = c.config.baseUrl;
     const env = await fetchClusterCfg(base, 't-test');
     expect(env.writable).toBe(true);
-    expect(env.cluster).toMatchObject({ enabled: true, role: 'commander', name: 'fake-commander' });
-    expect(env.cluster?.nodes?.[0]).toMatchObject({ name: 'fake-node', labels: ['browser'] });
+    expect(env.cluster).toMatchObject({ enabled: true, name: 'fake-peer' });
+    expect(env.cluster?.peers?.[0]).toMatchObject({ name: 'fake-node', labels: ['browser'] });
     // PUT 整体替换后回读(响应即信封)
     await putClusterCfg(base, 't-test', {
       ...(env.cluster ?? {}),
       enabled: false,
-      role: 'node',
       name: 'renamed',
       invite_code: 'invite-x',
     });
     const reread = await fetchClusterCfg(base, 't-test');
-    expect(reread.cluster).toMatchObject({ enabled: false, role: 'node', name: 'renamed' });
-    // status 随内存联动:PUT 后的配置派生面板字段
+    expect(reread.cluster).toMatchObject({ enabled: false, name: 'renamed' });
+    // status 随内存联动:PUT 后的配置派生面板字段(对等网 role 恒 peer)
     const st = await fetchClusterStatus(base, 't-test');
     expect(st.enabled).toBe(false);
-    expect(st.role).toBe('node');
+    expect(st.role).toBe('peer');
     expect(st.self.name).toBe('renamed');
     expect(st.invite_required).toBe(true);
     expect(st.members?.map((m) => m.status)).toEqual(['online', 'offline']);
     expect(st.members?.[0].capabilities?.models).toEqual(['fake/chat', 'fake/pro']);
     expect(st.inbox_connected).toEqual(['fake-node']);
     expect(st.remote_handles?.[0]).toMatchObject({ node: 'fake-node', status: 'running' });
+    expect(st.shared_memory?.[0]).toMatchObject({ key: 'deploy-checklist', origin: 'fake-node' });
   });
 
   it('归档与 404 语义', async () => {

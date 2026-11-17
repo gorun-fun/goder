@@ -1,9 +1,12 @@
-// cluster.ts — 「集群」分区:gh 集群模式配置(指挥官/节点/节点表/
-// 同步档/邀请码)+ 节点状态面板(成员表/收件箱在线/远端句柄,挂载期
-// 5s 轮询 /v1/agent/cluster/status)。双形态统一走 gh server API(桌面经
+// cluster.ts — 「集群」分区:gh 集群模式配置(对等网形态:无指挥官/
+// 节点角色,谁提问谁派发;对等节点表/同步档/邀请码)+ 对等状态面板
+// (成员表/收件箱在线/远端句柄/共享记忆,挂载期 5s 轮询
+// /v1/agent/cluster/status)。双形态统一走 gh server API(桌面经
 // /goder-api 同源反代);配置即时保存(整体替换 PUT),桌面托管态保存后
 // 防抖重启生效(settings-store 的 scheduleClusterRestart),web 态提示需
-// 服务端重启。枚举校验权威在 gh 服务端,本组件不复制第二套校验语义。
+// 服务端重启。枚举校验权威在 gh 服务端,本组件不复制第二套校验语义;
+// 旧配置的废弃键(role/commander_url/nodes)已在加载侧迁移并入 peers,
+// 本组件只读写 peers。
 import { css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { sectionSharedCss, SettingsSectionPanel } from './shared';
@@ -17,6 +20,8 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
   private statusTimer?: ReturnType<typeof setInterval>;
   /** 展开能力明细的成员名(点成员行切换) */
   @state() private openMember: string | null = null;
+  /** 展开正文的共享记忆 key(点条目行切换) */
+  @state() private openMemory: string | null = null;
 
   static styles = [
     ...sectionSharedCss,
@@ -26,11 +31,11 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
         grid-template-columns: 1fr 1fr;
         gap: 10px;
       }
-      /* 节点表条目:头部名称地址 + 常开字段体 */
-      .node .prov-body {
+      /* 对等节点条目:头部名称地址 + 常开字段体 */
+      .peer .prov-body {
         grid-template-columns: none;
       }
-      .node .fields {
+      .peer .fields {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 10px;
@@ -97,6 +102,11 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
         border-radius: 999px;
         padding: 1px 7px;
       }
+      /* 共享记忆条目正文(展开态) */
+      .mem-body .mcontent {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
       .err {
         border: 1px solid var(--goder-warn);
         background: var(--goder-warn-soft);
@@ -107,7 +117,7 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
       }
       @media (max-width: 560px) {
         .row2,
-        .node .fields {
+        .peer .fields {
           grid-template-columns: 1fr;
         }
       }
@@ -155,7 +165,6 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
     }
     const ro = !env.writable;
     const c = this.cfg;
-    const isCommander = (c.role ?? 'node') === 'commander';
     return html`
       ${settingsStore.clusterErr
         ? html`<div class="err">保存失败:${settingsStore.clusterErr}(未生效,修正后再次修改即重试)</div>`
@@ -170,17 +179,9 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
             停用
           </button>
         </div>
-        <div class="seg">
-          <button class=${isCommander ? 'on' : ''} ?disabled=${ro} @click=${() => this.patch((s) => ({ ...s, role: 'commander' }))}>
-            指挥官
-          </button>
-          <button class=${!isCommander ? 'on' : ''} ?disabled=${ro} @click=${() => this.patch((s) => ({ ...s, role: 'node' }))}>
-            节点
-          </button>
-        </div>
         <div class="row2">
           <label>
-            节点名(空 = 主机名)
+            实例名(空 = 主机名)
             <input
               type="text"
               .value=${c.name ?? ''}
@@ -202,78 +203,61 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
             </select>
           </label>
         </div>
-        ${isCommander
-          ? html`
-              <div class="row2">
-                <label>
-                  局域网发现(discover)
-                  <select
-                    .value=${c.discover ?? 'off'}
-                    ?disabled=${ro}
-                    @change=${(e: Event) => this.patch((s) => ({ ...s, discover: (e.target as HTMLSelectElement).value }))}
-                  >
-                    <option value="off">关</option>
-                    <option value="lan">开(mDNS)</option>
-                  </select>
-                </label>
-                <label>
-                  派发默认策略(policy)
-                  <select
-                    .value=${c.policy ?? ''}
-                    ?disabled=${ro}
-                    @change=${(e: Event) => this.patch((s) => ({ ...s, policy: (e.target as HTMLSelectElement).value }))}
-                  >
-                    <option value="">未设置(节点默认)</option>
-                    <option value="write-workspace">工作区(仅工作区内可写)</option>
-                    <option value="off">完全控制(不限制)</option>
-                  </select>
-                </label>
-              </div>
-              <div class="row2">
-                <label>
-                  无匹配节点回退本地
-                  <select
-                    .value=${c.route?.allow_local === false ? 'no' : 'yes'}
-                    ?disabled=${ro}
-                    @change=${(e: Event) =>
-                      this.patchRoute((e.target as HTMLSelectElement).value === 'yes', c.route?.max_inflight_per_node ?? 0)}
-                  >
-                    <option value="yes">回退本地执行</option>
-                    <option value="no">报错(强制显式路由)</option>
-                  </select>
-                </label>
-                <label>
-                  单节点在跑上限(0 = 默认 4)
-                  <input
-                    type="number"
-                    min="0"
-                    .value=${String(c.route?.max_inflight_per_node ?? 0)}
-                    ?disabled=${ro}
-                    @change=${(e: InputEvent) =>
-                      this.patchRoute(c.route?.allow_local !== false, Number((e.target as HTMLInputElement).value) || 0)}
-                  />
-                </label>
-              </div>
-            `
-          : nothing}
-        ${!isCommander
-          ? html`
-              <label>
-                指挥官地址(commander_url)
-                <input
-                  type="text"
-                  placeholder="http://host:port"
-                  .value=${c.commander_url ?? ''}
-                  ?disabled=${ro}
-                  @change=${(e: InputEvent) => this.patch((s) => ({ ...s, commander_url: (e.target as HTMLInputElement).value }))}
-                />
-              </label>
-            `
-          : nothing}
+        <div class="row2">
+          <label>
+            局域网发现(discover)
+            <select
+              .value=${c.discover ?? 'off'}
+              ?disabled=${ro}
+              @change=${(e: Event) => this.patch((s) => ({ ...s, discover: (e.target as HTMLSelectElement).value }))}
+            >
+              <option value="off">关</option>
+              <option value="lan">开(mDNS 通告 + 浏览)</option>
+            </select>
+          </label>
+          <label>
+            派发默认策略(policy)
+            <select
+              .value=${c.policy ?? ''}
+              ?disabled=${ro}
+              @change=${(e: Event) => this.patch((s) => ({ ...s, policy: (e.target as HTMLSelectElement).value }))}
+            >
+              <option value="">未设置(对端默认)</option>
+              <option value="write-workspace">工作区(仅工作区内可写)</option>
+              <option value="off">完全控制(不限制)</option>
+            </select>
+          </label>
+        </div>
+        <div class="row2">
+          <label>
+            无匹配对端回退本地
+            <select
+              .value=${c.route?.allow_local === false ? 'no' : 'yes'}
+              ?disabled=${ro}
+              @change=${(e: Event) =>
+                this.patchRoute((e.target as HTMLSelectElement).value === 'yes', c.route?.max_inflight_per_node ?? 0)}
+            >
+              <option value="yes">回退本地执行</option>
+              <option value="no">报错(强制显式路由)</option>
+            </select>
+          </label>
+          <label>
+            单对端在跑上限(0 = 默认 4)
+            <input
+              type="number"
+              min="0"
+              .value=${String(c.route?.max_inflight_per_node ?? 0)}
+              ?disabled=${ro}
+              @change=${(e: InputEvent) =>
+                this.patchRoute(c.route?.allow_local !== false, Number((e.target as HTMLInputElement).value) || 0)}
+            />
+          </label>
+        </div>
         <div class="hint">
           写入 <code class="tok">${env.path}</code> 的 cluster 段。${inWails()
             ? '保存后自动重启托管 gh server 生效(连续修改合并为一次重启)。'
-            : '配置需重启 gh server 后生效。'}多台设备共用同一集群密钥:指挥官可把任务派发给节点(subagent 描述命中 @节点名 或标签即路由)。
+            : '配置需重启 gh server 后生效。'}对等网无角色之分:多台设备共用同一集群密钥互配对等地址,谁提问谁派发(subagent 描述命中
+          @实例名 或标签即路由到对端)。
         </div>
       </div>
       <div class="sec">
@@ -299,25 +283,27 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
           </label>
         </div>
         <div class="hint">
-          集群密钥等同集群级全权,与 server 访问令牌同级保密。邀请码在指挥官侧配置后,新节点注册/心跳必须携带才能准入;节点侧作为注册凭据上送。
+          集群密钥是全互信凭据(集群端点与派发任务面都接受),等同集群级全权,与
+          server 访问令牌同级保密。邀请码非空时,新实例注册/心跳必须携带匹配值才能准入;加入侧把它作为注册凭据上送。
         </div>
       </div>
-      ${isCommander ? this.renderNodes(ro) : nothing} ${this.renderStatus()}
+      ${this.renderPeers(ro)} ${this.renderStatus()}
     `;
   }
 
-  /** 手动节点表(指挥官侧静态种子;@name/labels 命中即派往该节点) */
-  private renderNodes(ro: boolean) {
-    const nodes = this.cfg.nodes ?? [];
+  /** 对等节点表(每个实例都可配:call-home 对象清单,兼直连派发候选;
+   * @name/labels 命中即派往该对端) */
+  private renderPeers(ro: boolean) {
+    const peers = this.cfg.peers ?? [];
     return html`
       <div class="sec">
-        <h4>节点表</h4>
-        ${nodes.map((n, i) => {
-          const upd = (patch: Partial<(typeof nodes)[number]>) =>
-            this.patch((s) => ({ ...s, nodes: (s.nodes ?? []).map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
+        <h4>对等节点</h4>
+        ${peers.map((n, i) => {
+          const upd = (patch: Partial<(typeof peers)[number]>) =>
+            this.patch((s) => ({ ...s, peers: (s.peers ?? []).map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
           const name = n.name || n.addr;
           return html`
-            <div class="prov node">
+            <div class="prov peer">
               <div class="prov-head">
                 <span class="pname">${name || '(未填写地址)'}</span>
                 <span class="meta">${(n.labels ?? []).join(' ')}</span>
@@ -326,7 +312,7 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
                   ?disabled=${ro}
                   @click=${() => {
                     if (!this.armDelete(name)) return;
-                    this.patch((s) => ({ ...s, nodes: (s.nodes ?? []).filter((_, j) => j !== i) }));
+                    this.patch((s) => ({ ...s, peers: (s.peers ?? []).filter((_, j) => j !== i) }));
                     this.pendingDelete = null;
                   }}
                 >
@@ -345,7 +331,7 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
                     />
                   </label>
                   <label>
-                    节点名(@name 路由名,空取地址主机名)
+                    实例名(@name 路由名,空取地址主机名)
                     <input
                       type="text"
                       .value=${n.name ?? ''}
@@ -354,7 +340,7 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
                     />
                   </label>
                   <label>
-                    令牌(该节点 server token)
+                    令牌(该对端任务面令牌,空 = 用集群密钥)
                     <input
                       type="password"
                       .value=${n.token ?? ''}
@@ -395,27 +381,31 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
           <button
             class="ghost"
             ?disabled=${ro}
-            @click=${() => this.patch((s) => ({ ...s, nodes: [...(s.nodes ?? []), { addr: '' }] }))}
+            @click=${() => this.patch((s) => ({ ...s, peers: [...(s.peers ?? []), { addr: '' }] }))}
           >
-            添加节点
+            添加对等节点
           </button>
         </div>
-        <div class="hint">派发直达该节点的 ORS 端点(需该节点的 server 访问令牌);https 自签部署时填证书指纹 pin 即免私有 CA。</div>
+        <div class="hint">
+          互配即全互联:本机向这些地址注册/心跳/挂收件箱,它们也是直连派发的候选(https
+          自签部署时填证书指纹 pin 即免私有 CA)。
+        </div>
       </div>
     `;
   }
 
-  /** 节点状态面板(/v1/agent/cluster/status 快照) */
+  /** 对等状态面板(/v1/agent/cluster/status 快照) */
   private renderStatus() {
     const st = settingsStore.clusterStatus;
     if (!st?.enabled) return nothing;
     const members = st.members ?? [];
     const handles = st.remote_handles ?? [];
     const inbox = st.inbox_connected ?? [];
-    const selfName = st.self?.name || '本节点';
+    const memory = st.shared_memory ?? [];
+    const selfName = st.self?.name || '本实例';
     return html`
       <div class="sec">
-        <h4>节点状态</h4>
+        <h4>对等状态</h4>
         <div class="hint">
           ${selfName} · ${st.self?.version ?? ''} · ${st.self?.platform ?? ''} · 在跑回合 ${st.running_turns}${st.invite_required
             ? ' · 邀请码门已启用'
@@ -423,7 +413,7 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
         </div>
         ${members.length
           ? members.map((m) => this.renderMember(m))
-          : html`<div class="hint">成员表为空:${st.role === 'commander' ? '尚无节点接入(检查节点侧指挥官地址与密钥)。' : '本节点为 node 角色,权威成员表在指挥官侧——请在指挥官的此面板查看。'}</div>`}
+          : html`<div class="hint">成员表为空:尚无对等实例接入(检查两侧对等地址与集群密钥,或确认对端已启用集群)。</div>`}
         ${inbox.length
           ? html`
               <div>
@@ -435,7 +425,7 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
         ${handles.length
           ? html`
               <div>
-                <div class="hint" style="margin-bottom:4px">远端句柄(本方派发到节点的在跑任务):</div>
+                <div class="hint" style="margin-bottom:4px">远端句柄(本方派发到对端的在跑任务):</div>
                 ${handles.map(
                   (h) => html`
                     <div class="mem">
@@ -448,6 +438,39 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
                     </div>
                   `,
                 )}
+              </div>
+            `
+          : nothing}
+        ${memory.length
+          ? html`
+              <div>
+                <div class="hint" style="margin-bottom:4px">
+                  共享记忆(${memory.length} 条,对等复制收敛;点条目看正文):
+                </div>
+                ${memory.map((m) => {
+                  const open = this.openMemory === m.key;
+                  return html`
+                    <div class="mem">
+                      <div
+                        class="mem-head"
+                        @click=${() => {
+                          this.openMemory = open ? null : m.key;
+                        }}
+                      >
+                        <span class="mname">${m.key}</span>
+                        ${m.origin ? html`<span class="chip">${m.origin}</span>` : html`<span class="chip">本机</span>`}
+                        <span class="meta">${m.updated ?? ''}</span>
+                      </div>
+                      ${open
+                        ? html`
+                            <div class="mem-body">
+                              <div class="mcontent">${m.content}</div>
+                            </div>
+                          `
+                        : nothing}
+                    </div>
+                  `;
+                })}
               </div>
             `
           : nothing}
@@ -485,7 +508,7 @@ export class GoderSettingsCluster extends SettingsSectionPanel {
                         ? html`<div>插件:${caps.plugins.map((p) => `${p.name}(${p.tools})`).join('、')}</div>`
                         : nothing}
                     `
-                  : html`<div>能力清单未上报(离线节点只保留最近一次快照)。</div>`}
+                  : html`<div>能力清单未上报(离线实例只保留最近一次快照)。</div>`}
                 ${m.last_seen ? html`<div>最近心跳:${new Date(m.last_seen * 1000).toLocaleString()}</div>` : nothing}
               </div>
             `

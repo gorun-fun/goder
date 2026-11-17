@@ -87,12 +87,13 @@ export interface SkillsDTO {
 // ---------- 集群模式(gh settings.json 的 cluster 段 + 状态快照;与 gh
 // config.Cluster / server.clusterStatus 对齐。双形态统一走 /v1/agent/cluster,
 // 无桌面桥副本——校验归一权威在 gh 服务端 normalizeClusterCfg) ----------
+// 对等网形态:无指挥官/节点角色,谁提问谁派发;peers 互配多点 call-home。
 
-/** 手动节点表条目(指挥官侧静态种子;goder 设置页编辑对象) */
+/** 对等节点表条目(既是 call-home 对象,也是直连派发候选;goder 设置页编辑对象) */
 export interface ClusterNodeDTO {
-  /** gh server 地址 host:port */
+  /** gh server 地址 host:port(可带 scheme) */
   addr: string;
-  /** 该节点的 server 访问令牌(明文往返,UI 掩码显示) */
+  /** 该节点任务面的访问令牌;空 = 用集群共享 cluster.token(全互信模型) */
   token?: string;
   /** 路由名(@name 引用;空取 addr 主机名) */
   name?: string;
@@ -110,26 +111,32 @@ export interface ClusterRouteDTO {
   max_inflight_per_node?: number;
 }
 
-/** 集群段(settings.json 的 cluster 键原样;PUT 整体替换) */
+/** 集群段(settings.json 的 cluster 键;PUT 整体替换)。废弃键
+ * (role/commander_url/nodes)仅为兼容旧配置的读入形态——前端加载即
+ * 迁移并入 peers 后清除(语义对齐 gh config.MergeClusterPeers),UI 与
+ * PUT 均不再写它们。 */
 export interface ClusterCfgDTO {
   enabled?: boolean;
-  /** commander(指挥官) | node(节点);缺省 node */
+  /** @deprecated 对等网无角色,服务端恒 "peer";仅为兼容旧 settings.json 读取 */
   role?: string;
   /** 节点显示名/路由名;空 = hostname */
   name?: string;
-  /** 集群共享密钥(指挥官 /cluster/* 鉴权、节点注册凭据;等同集群级全权) */
+  /** 集群共享密钥(全互信凭据):/cluster/* 端点与集群派发任务面都接受;
+   * 持有它 = 可在集群内任意实例派发任务 */
   token?: string;
-  /** 邀请码(指挥官侧准入门;节点侧注册时上送) */
+  /** 邀请码:非空时新实例注册/心跳须携带匹配值才准入;加入侧上送 */
   invite_code?: string;
-  /** 节点侧 call-home 指挥官地址 http://host:port */
+  /** @deprecated 对等网经 peers 互注册;兼容读,迁移为一条 peers 条目 */
   commander_url?: string;
-  /** 局域网自动发现:off | lan(mDNS);缺省 off */
+  /** 局域网自动发现:off | lan(mDNS 双向通告+浏览);缺省 off */
   discover?: string;
-  /** 手动节点表(指挥官侧) */
+  /** 对等节点表(call-home 注册/心跳/收件箱的对象清单,兼直连派发候选) */
+  peers?: ClusterNodeDTO[];
+  /** @deprecated 原指挥官静态节点表;兼容读,按 addr 去重并入 peers */
   nodes?: ClusterNodeDTO[];
   /** 派发任务默认策略;空 = off */
   policy?: string;
-  /** 工作区同步档位:none | seed | git | full */
+  /** 工作区同步档位:none | seed | git | full;空/none = 关(任务自包含) */
   sync?: string;
   route?: ClusterRouteDTO;
 }
@@ -158,7 +165,8 @@ export interface ClusterCapsDTO {
   ts: number;
 }
 
-/** 成员表条目(指挥官权威;static 手动 | registered call-home 注册 | mdns 发现) */
+/** 成员表条目(本机视角的对等成员表;static 手动 | registered call-home
+ * 注册 | mdns 发现) */
 export interface ClusterMemberDTO {
   /** call-home 节点有;静态节点空 */
   node_id?: string;
@@ -174,15 +182,25 @@ export interface ClusterMemberDTO {
   capabilities?: ClusterCapsDTO;
 }
 
-/** 远端句柄(本方派发到远端节点的子代理/工作流在跑状态) */
+/** 远端句柄(本方派发到远端对等实例的子代理/工作流在跑状态) */
 export interface ClusterHandleDTO {
   id: string;
   node: string;
   /** running | idle */
   status: string;
-  /** true = 经指挥官中继(NAT 节点) */
+  /** true = 经对端中继(回投走指令来源 peer 的收件箱) */
   relay?: boolean;
   label: string;
+}
+
+/** 集群共享记忆条目(对等多主复制;origin 记来源节点名) */
+export interface ClusterMemoryEntryDTO {
+  key: string;
+  content: string;
+  /** 来源对等实例名(本机写入的条目为空) */
+  origin?: string;
+  /** 最后写入日期 */
+  updated?: string;
 }
 
 /** GET /v1/agent/cluster/status 的自身段 */
@@ -193,18 +211,22 @@ export interface ClusterSelfDTO {
   platform: string;
 }
 
-/** GET /v1/agent/cluster/status 响应(设置页节点面板数据源) */
+/** GET /v1/agent/cluster/status 响应(设置页对等状态面板数据源) */
 export interface ClusterStatusDTO {
   enabled: boolean;
+  /** 对等网恒 "peer"(字段为兼容面板保留) */
   role: string;
   self: ClusterSelfDTO;
-  commander_url?: string;
+  /** 配置的对等节点表回显 */
+  peers?: ClusterNodeDTO[];
   sync?: string;
   discover?: string;
   invite_required?: boolean;
   members?: ClusterMemberDTO[];
-  /** 收件箱 SSE 在线的节点名(中继派发可达) */
+  /** 收件箱 SSE 在线的对等实例名(中继派发可达) */
   inbox_connected?: string[];
   remote_handles?: ClusterHandleDTO[];
+  /** 集群共享记忆(对等多主复制的收敛结果) */
+  shared_memory?: ClusterMemoryEntryDTO[];
   running_turns: number;
 }

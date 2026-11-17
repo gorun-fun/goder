@@ -176,11 +176,11 @@ The fake provides sensible defaults (a `fake` provider with two models,
 plugin auto-discovery, two skills), `models/detect` returns rich results
 (ctxLen); PUTs land in memory and read back — the settings page's
 models/plugins/skills CRUD and the detect button are all testable. The
-cluster section has two more endpoints: `cluster` (a commander-shaped
+cluster section has two more endpoints: `cluster` (a peer-mesh-shaped
 default section; PUT replaces it wholesale and reads back) and
 `cluster/status` (a snapshot derived from the post-PUT config, with members,
-inbox-connected nodes and remote handles) — "edit config → node panel
-changes" can be verified end-to-end.
+inbox-connected peers, remote handles and shared memory) — "edit config →
+peer panel changes" can be verified end-to-end.
 
 ## 4. Observation: Events & Assertions
 

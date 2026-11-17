@@ -806,7 +806,8 @@ class SettingsStore {
   // ---------- 集群模式(双形态统一走 /v1/agent/cluster;无桌面桥) ----------
 
   /** 进入集群分区时拉取配置段;force 用于保存后强制刷新。桌面托管态的
-   * server token 随 srv 状态到达,未就绪先刷一次(gh 由桌面壳保活)。 */
+   * server token 随 srv 状态到达,未就绪先刷一次(gh 由桌面壳保活)。
+   * 旧配置的废弃键(role/commander_url/nodes)读入即迁移并入 peers。 */
   async loadClusterCfg(force = false): Promise<void> {
     if (this.clusterCfg && !force) return;
     if (inWails() && this.cfg.serverMode === 'managed' && !this.srv) {
@@ -814,7 +815,9 @@ class SettingsStore {
     }
     try {
       const c = this.clusterConn;
-      this.clusterCfg = await fetchClusterCfg(c.baseUrl, c.token);
+      const env = await fetchClusterCfg(c.baseUrl, c.token);
+      if (env.cluster) env.cluster = migrateClusterPeers(env.cluster);
+      this.clusterCfg = env;
       this.clusterApi = 'ok';
     } catch (e) {
       if (e instanceof AgentApiUnsupportedError) this.clusterApi = 'unsupported';
@@ -841,7 +844,11 @@ class SettingsStore {
     const draft = this.clusterCfg.cluster;
     const c = this.clusterConn;
     try {
-      this.clusterCfg = await putClusterCfg(c.baseUrl, c.token, draft);
+      const saved = await putClusterCfg(c.baseUrl, c.token, draft);
+      // PUT 响应经 gh normalizeClusterCfg 已只含 peers;仍过一遍迁移,
+      // 对旧版 gh(原样回读)保持同一内存形态
+      if (saved.cluster) saved.cluster = migrateClusterPeers(saved.cluster);
+      this.clusterCfg = saved;
       this.clusterApi = 'ok';
       this.clusterErr = '';
     } catch (e) {
@@ -944,6 +951,30 @@ function bareModelFull(bare: string): string | undefined {
 
 // 裸模型名补全器(供 scope 继承旧记录用):见 bareModelFull。
 setModelNameResolver((bare) => bareModelFull(bare));
+
+/** 集群段废弃键迁移(语义对齐 gh config.MergeClusterPeers):对等网改造
+ * 后 role/commander_url/nodes 已废弃——GET 原样返回旧配置,加载侧把
+ * nodes 与 commander_url 按归一地址去重并入 peers、role 清除,此后 UI
+ * 展示与 PUT 整体替换都只走 peers(undefined 键序列化即省略)。 */
+export function migrateClusterPeers(c: ClusterCfgDTO): ClusterCfgDTO {
+  const key = (addr: string): string =>
+    addr.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  const peers = [...(c.peers ?? [])];
+  const seen = new Set(peers.map((p) => key(p.addr)));
+  for (const n of c.nodes ?? []) {
+    const k = key(n.addr);
+    if (!seen.has(k)) {
+      seen.add(k);
+      peers.push(n);
+    }
+  }
+  const cu = (c.commander_url ?? '').trim();
+  if (cu && !seen.has(key(cu))) {
+    seen.add(key(cu));
+    peers.push({ addr: cu }); // 无 token:call-home 用集群共享 cluster.token
+  }
+  return { ...c, peers, role: undefined, commander_url: undefined, nodes: undefined };
+}
 
 /** 展示用模型名补全:已是合法全名原样;裸名(含九天式自带 / 的裸名,
  * 如 qwen/qwen3.8-27b)按 bareModelFull 同语义补 "provider/" 前缀;表

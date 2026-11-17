@@ -705,18 +705,17 @@ export class ScriptedApi {
       ],
       writable: true,
     });
-    // 集群段:指挥官形态默认(一个手动节点表条目);PUT 后 status 端点
+    // 集群段:对等网形态默认(peers 一个条目);PUT 后 status 端点
     // 随内存联动,供 E2E 验证「改配置 → 面板变化」。
     const seedClusterCfg = (): Record<string, unknown> => ({
       enabled: true,
-      role: 'commander',
-      name: 'fake-commander',
+      name: 'fake-peer',
       token: 'fake-cluster-token',
       invite_code: '',
       discover: 'off',
       sync: '',
       policy: '',
-      nodes: [{ addr: '127.0.0.1:7500', token: 'fake-node-token', name: 'fake-node', labels: ['browser'] }],
+      peers: [{ addr: '127.0.0.1:7500', name: 'fake-node', labels: ['browser'] }],
       route: { allow_local: true, max_inflight_per_node: 4 },
     });
     const clusterEnvelope = (): { path: string; writable: boolean; cluster: unknown } => {
@@ -746,9 +745,9 @@ export class ScriptedApi {
       const cfg = clusterEnvelope().cluster as Record<string, unknown>;
       return jsonResponse({
         enabled: Boolean(cfg.enabled),
-        role: cfg.role ?? 'node',
-        self: { id: 'node-fake-self', name: cfg.name || 'fake-commander', version: '0.0.1-alpha.test', platform: 'darwin/arm64' },
-        commander_url: typeof cfg.commander_url === 'string' ? cfg.commander_url : '',
+        role: 'peer',
+        self: { id: 'node-fake-self', name: cfg.name || 'fake-peer', version: '0.0.1-alpha.test', platform: 'darwin/arm64' },
+        peers: cfg.peers ?? [],
         sync: typeof cfg.sync === 'string' ? cfg.sync : '',
         discover: typeof cfg.discover === 'string' ? cfg.discover : 'off',
         invite_required: Boolean(cfg.invite_code),
@@ -761,10 +760,13 @@ export class ScriptedApi {
               tools: ['bash', 'read'], plugins: [{ name: 'grf-browser', tools: 5 }], models: ['fake/chat', 'fake/pro'], ts: 1700000000,
             },
           },
-          { name: 'offline-node', addr: '192.168.1.50:7400', source: 'static', status: 'offline' },
+          { name: 'offline-peer', addr: '192.168.1.50:7400', source: 'static', status: 'offline' },
         ],
         inbox_connected: ['fake-node'],
         remote_handles: [{ id: 'sub-fake-1', node: 'fake-node', status: 'running', relay: false, label: '浏览器自动化' }],
+        shared_memory: [
+          { key: 'deploy-checklist', content: '发布前跑 sh scripts/version.sh 推算版本。', origin: 'fake-node', updated: '2026-11-17' },
+        ],
         running_turns: 1,
       });
     }
