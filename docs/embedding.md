@@ -191,7 +191,8 @@ GODER_UI_VERSION; // '0.1.0' —— 产物同源版本常量,升级前可做特�
   (微信同款):按住约 350ms 开始录音,松开自动停录并转写落回光标处,
   手指上滑松开取消;语音未启用时长按给一次性开启指引。录音与转写
   复用桌面语音输入链路(设置-语音配置,宿主可声明
-  `configure({ speechRelay })` 中继)。
+  `configure({ speechRelay })` 中继);Android WebView 宿主注入
+  `window.goderHostVoice` 时采集自动走原生录音桥(见上文「宿主录音桥」)。
 - **安全区**:composer 底部与模型弹层会按宿主注入的
   `--safe-inset-bottom` CSS 变量让位(未注入视为 0);消息区滚动容器
   `touch-action: pan-y` 已内建(内层小块如思考全文/工具输出的同类
