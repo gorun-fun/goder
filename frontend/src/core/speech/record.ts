@@ -310,6 +310,7 @@ function keepWarmStream(s: MediaStream): void {
  *  输入框即是「要输入」的意图信号,首次录音也能零冷启动;保温期内
  *  调用为空操作)。失败静默,真正开录时才报错。 */
 export async function prewarmMic(): Promise<void> {
+  if (hostVoiceBridge()) return; // 桥环境采集不走 getUserMedia,保温只会静默失败
   try {
     keepWarmStream(await acquireStream());
   } catch {

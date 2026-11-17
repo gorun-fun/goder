@@ -230,7 +230,9 @@ single-project mode and `<goder-session-list flat>`:
   into the input at the caret, sliding up then releasing cancels; when voice
   input is disabled, a one-shot hint explains how to enable it. Recording and
   transcription reuse the desktop voice pipeline (Settings → Speech; hosts
-  can declare a relay via `configure({ speechRelay })`).
+  can declare a relay via `configure({ speechRelay })`); when an Android
+  WebView host injects `window.goderHostVoice`, capture automatically goes
+  through the native bridge (see "Host voice bridge" above).
 - **Safe area**: the composer bottom and the model sheet respect the
   host-injected `--safe-inset-bottom` CSS variable (0 when absent);
   `touch-action: pan-y` on the message scroll container is built in (the
